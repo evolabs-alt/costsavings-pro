@@ -1,41 +1,17 @@
 <?php
 session_start();
 
-// Load configuration
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../db_config.php';
-
-function normalizeUserEmail($email) {
-    return strtolower(trim($email));
+if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
+    require_once __DIR__ . '/../vendor/autoload.php';
 }
+require_once __DIR__ . '/../includes/mail.php';
+require_once __DIR__ . '/../includes/actions.php';
 
 if (isset($_SESSION['user_email'])) {
     $_SESSION['user_email'] = normalizeUserEmail($_SESSION['user_email']);
 }
-
-// Try to load PHPMailer - handle different possible paths
-$phpmailer_paths = [
-    __DIR__ . '/phpmailer/phpmailer/src/PHPMailer.php',
-    __DIR__ . '/vendor/phpmailer/phpmailer/src/PHPMailer.php',
-    __DIR__ . '/../vendor/phpmailer/phpmailer/src/PHPMailer.php'
-];
-
-$phpmailer_loaded = false;
-foreach ($phpmailer_paths as $path) {
-    if (file_exists($path)) {
-        require_once $path;
-        require_once dirname($path) . '/SMTP.php';
-        require_once dirname($path) . '/Exception.php';
-        $phpmailer_loaded = true;
-        break;
-    }
-}
-
-// Only use PHPMailer classes if they were successfully loaded
-if ($phpmailer_loaded) {
-    // PHPMailer classes are available
-}
-
 
 $user_role_options = [
     'Business owner',
@@ -70,18 +46,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['action'])) {
         error_log("Action: " . $_POST['action']);
         switch ($_POST['action']) {
-            case 'send_otp':
-                error_log("Calling handleSendOTP()");
-                handleSendOTP();
-                break;
-            case 'verify_otp':
-                handleVerifyOTP();
+            case 'login':
+                handleLogin();
                 break;
             case 'save_user_role':
                 handleSaveUserRole();
-                break;
-            case 'change_email':
-                handleChangeEmail();
                 break;
             case 'logout':
                 handleLogout();
@@ -92,237 +61,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'load_cost_calculator':
                 handleLoadCostCalculator();
                 break;
+            case 'invite_member':
+                handleInviteMember();
+                break;
+            case 'import_vendor_csv':
+                handleImportVendorCsv();
+                break;
+            case 'ai_ask':
+                handleAiAsk();
+                break;
+            case 'load_team_members':
+                handleLoadTeamMembers();
+                break;
+            case 'save_org_reminders':
+                handleSaveOrgReminders();
+                break;
+            case 'save_user_reminder_pref':
+                handleSaveUserReminderPref();
+                break;
         }
     }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'export_vendors') {
+    handleExportVendors();
 }
 
 // Functions
-function sendEmail($to, $subject, $body) {
-    global $phpmailer_loaded;
-    
-    error_log("sendEmail called for: " . $to);
-    error_log("PHPMailer loaded: " . ($phpmailer_loaded ? 'Yes' : 'No'));
-    error_log("PHPMailer class exists: " . (class_exists('PHPMailer\PHPMailer\PHPMailer') ? 'Yes' : 'No'));
-    
-    // Check if PHPMailer is available
-    if (!$phpmailer_loaded || !class_exists('PHPMailer\PHPMailer\PHPMailer')) {
-        error_log("PHPMailer not available, using PHP mail() function");
-        
-        // Fallback to PHP's built-in mail function
-        $headers = array(
-            'MIME-Version: 1.0',
-            'Content-type: text/html; charset=UTF-8',
-            'From: ' . SMTP_FROM_NAME . ' <' . SMTP_FROM_EMAIL . '>',
-            'Reply-To: ' . SMTP_FROM_EMAIL,
-            'X-Mailer: PHP/' . phpversion()
-        );
-        
-        $result = mail($to, $subject, $body, implode("\r\n", $headers));
-        error_log("PHP mail() result: " . ($result ? 'Success' : 'Failed'));
-        
-        if ($result) {
-            return true;
-        } else {
-            return [
-                'success' => false,
-                'error_message' => 'PHP mail() function failed',
-                'error_info' => 'Server mail configuration may be incorrect or mail service unavailable'
-            ];
-        }
-    }
-
-    error_log("Using PHPMailer for email sending");
-    $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
-
-    try {
-        // Enable verbose debug output (0 = off, 1 = client messages, 2 = client and server messages)
-        $mail->SMTPDebug = 2;
-        $mail->Debugoutput = function($str, $level) {
-            error_log("PHPMailer Debug (Level $level): $str");
-        };
-        
-        // Server settings
-        $mail->isSMTP();
-        $mail->Host       = SMTP_HOST;
-        $mail->SMTPAuth   = true;
-        $mail->Username   = SMTP_USERNAME;
-        $mail->Password   = SMTP_PASSWORD;
-        $mail->SMTPSecure = SMTP_SECURE;
-        $mail->Port       = SMTP_PORT;
-        
-        // Additional SMTP options
-        $mail->SMTPOptions = array(
-            'ssl' => array(
-                'verify_peer' => false,
-                'verify_peer_name' => false,
-                'allow_self_signed' => true
-            )
-        );
-
-        // Recipients
-        $mail->setFrom(SMTP_FROM_EMAIL, SMTP_FROM_NAME);
-        $mail->addAddress($to);
-
-        // Content
-        $mail->isHTML(true);
-        $mail->Subject = $subject;
-        $mail->Body    = $body;
-
-        error_log("PHPMailer: Attempting to send email to $to");
-        $mail->send();
-        error_log("PHPMailer: Email sent successfully to $to");
-        return true;
-    } catch (\PHPMailer\PHPMailer\Exception $e) {
-        error_log("PHPMailer sending failed: " . $e->getMessage());
-        error_log("PHPMailer ErrorInfo: " . $mail->ErrorInfo);
-        // Return error details for display
-        return [
-            'success' => false,
-            'error_message' => $e->getMessage(),
-            'error_info' => $mail->ErrorInfo
-        ];
-    }
-}
-
-function handleSendOTP() {
-    error_log("handleSendOTP() called");
-    $email = normalizeUserEmail($_POST['email'] ?? '');
-    error_log("Email from POST: " . $email);
-    
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $_SESSION['error'] = 'Invalid email address.';
-        error_log("Invalid email address: " . $email);
-        header('Location: ' . $_SERVER['PHP_SELF']);
-        exit;
-    }
-
-    $agreeTerms = isset($_POST['agree_terms']) && $_POST['agree_terms'] === 'on';
-    if (!$agreeTerms) {
-        $_SESSION['error'] = 'You must agree to the terms of use to continue.';
-        error_log('Terms of use not agreed for email: ' . $email);
-        header('Location: ' . $_SERVER['PHP_SELF']);
-        exit;
-    }
-    
-    $otp = rand(100000, 999999);
-    
-    // Ensure cache directory exists
-    if (!is_dir(CACHE_DIR)) {
-        if (!mkdir(CACHE_DIR, 0755, true)) {
-            $_SESSION['error'] = 'Unable to create cache directory. Please check file permissions.';
-            error_log("Failed to create cache directory: " . CACHE_DIR);
-            header('Location: ' . $_SERVER['PHP_SELF']);
-            exit;
-        }
-        error_log("Created cache directory: " . CACHE_DIR);
-    }
-    
-    $otp_file = CACHE_DIR . md5($email) . '_otp.txt';
-    $file_write_result = file_put_contents($otp_file, $otp);
-    error_log("OTP generated: " . $otp . " for email: " . $email);
-    error_log("OTP file path: " . $otp_file);
-    error_log("File write result: " . ($file_write_result !== false ? 'Success' : 'Failed'));
-    
-    if ($file_write_result === false) {
-        $_SESSION['error'] = 'Failed to save OTP. Please check file permissions.';
-        error_log("Failed to write OTP file: " . $otp_file);
-        header('Location: ' . $_SERVER['PHP_SELF']);
-        exit;
-    }
-    
-    $_SESSION['otp_email'] = $email;
-    
-    // Send OTP via email
-    $subject = 'Your Savvy CFO Cost Savings Tool OTP Code';
-    $body = '
-    <html>
-    <head>
-        <title>Your OTP Code</title>
-    </head>
-    <body>
-        <h2>Savvy CFO Cost Savings Tool Access</h2>
-        <p>Your One-Time Password (OTP) code is: <strong>' . $otp . '</strong></p>
-        <p>This code will expire in 10 minutes.</p>
-        <p>If you did not request this code, please ignore this email.</p>
-        <br>
-        <p>Best regards,<br>Savvy CFO Portal Team</p>
-    </body>
-    </html>';
-    
-    $email_result = sendEmail($email, $subject, $body);
-    error_log("Email result: " . print_r($email_result, true));
-    
-    if ($email_result === true) {
-        $_SESSION['message'] = 'OTP sent to your email address successfully! Please check your inbox.';
-        error_log("Setting success message");
-    } elseif (is_array($email_result) && isset($email_result['error_message'])) {
-        // Email failed but OTP was saved, so allow user to proceed with manual entry
-        // Log OTP to error log for debugging
-        error_log("OTP Email sending failed for: " . $email . ", Error: " . $email_result['error_message'] . ", Info: " . $email_result['error_info']);
-        error_log("OTP CODE FOR MANUAL ENTRY: " . $otp);
-        
-        // For development/testing: show OTP in error message if email fails
-        // Remove this in production and just show generic error
-        $_SESSION['error'] = 'Email sending failed, but OTP has been generated. Please contact support or check server logs. (Debug: OTP logged to server)';
-        // In production, use this instead:
-        // $_SESSION['error'] = 'Failed to send email. Please try again or contact support.';
-    } else {
-        error_log("OTP Email sending failed for: " . $email . " - Unknown error");
-        error_log("OTP CODE FOR MANUAL ENTRY: " . $otp);
-        $_SESSION['error'] = 'Failed to send OTP email. Please try again.';
-    }
-    
-    $_SESSION['show_otp'] = true;
-    error_log("Set show_otp to true, redirecting...");
-    
-    // Redirect to prevent form resubmission
-    header('Location: ' . $_SERVER['PHP_SELF']);
-    exit;
-}
-
-function handleVerifyOTP() {
-    $email = normalizeUserEmail($_POST['email'] ?? '');
-    $otp = $_POST['otp'] ?? '';
-    
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $_SESSION['error'] = 'Invalid email address.';
-        return;
-    }
-    
-    $stored_otp_file = CACHE_DIR . md5($email) . '_otp.txt';
-    if (!file_exists($stored_otp_file)) {
-        $_SESSION['error'] = 'OTP not found.';
-        return;
-    }
-    
-    $stored_otp = trim(file_get_contents($stored_otp_file));
-    if ($stored_otp === $otp) {
-        unlink($stored_otp_file);
-        $_SESSION['user_email'] = $email;
-
-        loadUserResponses($email);
-
-        try {
-            $existing_role = getUserRoleFromDB($email);
-        } catch (Exception $e) {
-            error_log('handleVerifyOTP getUserRoleFromDB: ' . $e->getMessage());
-            $existing_role = null;
-        }
-        if ($existing_role !== null) {
-            $_SESSION['user_role'] = $existing_role;
-            unset($_SESSION['awaiting_role'], $_SESSION['pending_next_chapter']);
-        } else {
-            $_SESSION['awaiting_role'] = true;
-        }
-
-        unset($_SESSION['error'], $_SESSION['message'], $_SESSION['show_otp'], $_SESSION['otp_email']);
-    } else {
-        $_SESSION['error'] = 'Incorrect OTP.';
-    }
-}
-
 function handleSaveUserRole() {
-    if (!isset($_SESSION['user_email'])) {
+    if (empty($_SESSION['user_email'])) {
         $_SESSION['error'] = 'Please log in first.';
         return;
     }
@@ -354,40 +121,19 @@ function handleSaveUserRole() {
     $_SESSION['user_role'] = $role;
     unset($_SESSION['awaiting_role'], $_SESSION['pending_next_chapter']);
 
-    // Sync contact to GoHighLevel
     syncContactToGHL($email, $role);
 }
 
-function handleChangeEmail() {
-    // Clear OTP related session variables to go back to email entry
-    unset(
-        $_SESSION['show_otp'],
-        $_SESSION['otp_email'],
-        $_SESSION['error'],
-        $_SESSION['message'],
-        $_SESSION['awaiting_role'],
-        $_SESSION['pending_next_chapter'],
-        $_SESSION['user_email'],
-        $_SESSION['user_role']
-    );
-}
-
-
-
-
-
 function handleLogout() {
+    $_SESSION = [];
+    if (ini_get('session.use_cookies')) {
+        $p = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000, $p['path'], $p['domain'], $p['secure'], $p['httponly']);
+    }
     session_destroy();
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;
 }
-
-
-
-
-
-
-
 
 
 
@@ -430,352 +176,6 @@ function loadUserResponses($email) {
     } else {
         unset($_SESSION['user_role']);
     }
-}
-
-
-
-// Database Functions (mysqli — cost savings tool data; user roles use PDO in db_config.php)
-function getMysqliConnection() {
-    static $conn = null;
-    
-    if ($conn === null) {
-        try {
-            $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
-            
-            if ($conn->connect_error) {
-                error_log("Database connection failed: " . $conn->connect_error);
-                return null;
-            }
-            
-            $conn->set_charset(DB_CHARSET);
-        } catch (Exception $e) {
-            error_log("Database connection exception: " . $e->getMessage());
-            return null;
-        }
-    }
-    
-    return $conn;
-}
-
-function createCostCalculatorTable() {
-    $conn = getMysqliConnection();
-    if (!$conn) {
-        error_log("Cannot create table: Database connection failed");
-        return false;
-    }
-    
-    $sql = "CREATE TABLE IF NOT EXISTS cost_calculator_items (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_email VARCHAR(255) NOT NULL,
-        vendor_name VARCHAR(255) DEFAULT NULL,
-        cost_per_period DECIMAL(10, 2) DEFAULT 0.00,
-        frequency VARCHAR(20) DEFAULT NULL,
-        annual_cost DECIMAL(10, 2) DEFAULT 0.00,
-        cancel_keep VARCHAR(10) DEFAULT 'Keep',
-        cancelled_status TINYINT(1) DEFAULT 0,
-        notes TEXT DEFAULT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_user_email (user_email),
-        INDEX idx_created_at (created_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
-    
-    if ($conn->query($sql) === TRUE) {
-        error_log("Cost savings tool table created or already exists");
-        
-        // Check and fix cancel_keep column type if needed (for existing tables)
-        $checkCancelKeep = $conn->query("SHOW COLUMNS FROM cost_calculator_items WHERE Field = 'cancel_keep'");
-        if (!$checkCancelKeep) {
-            error_log("ERROR: Failed to check cancel_keep column: " . $conn->error);
-        } elseif ($checkCancelKeep->num_rows > 0) {
-            $columnInfo = $checkCancelKeep->fetch_assoc();
-            $columnType = $columnInfo['Type'];
-            error_log("Migration check: cancel_keep column type is: " . $columnType);
-            
-            // Check if column is not VARCHAR or CHAR (string type)
-            if (stripos($columnType, 'varchar') === false && stripos($columnType, 'char') === false) {
-                error_log("Migration needed: cancel_keep column is not VARCHAR/CHAR! Current type: " . $columnType);
-                error_log("Executing ALTER TABLE to fix column type...");
-                
-                // Attempt to fix the column type
-                $alterResult = $conn->query("ALTER TABLE cost_calculator_items MODIFY COLUMN cancel_keep VARCHAR(10) DEFAULT 'Keep'");
-                if ($alterResult) {
-                    error_log("SUCCESS: Migrated cancel_keep column type from " . $columnType . " to VARCHAR(10)");
-                    
-                    // Verify the change
-                    $verifyCheck = $conn->query("SHOW COLUMNS FROM cost_calculator_items WHERE Field = 'cancel_keep'");
-                    if ($verifyCheck && $verifyCheck->num_rows > 0) {
-                        $verifyInfo = $verifyCheck->fetch_assoc();
-                        error_log("Verification: cancel_keep column type is now: " . $verifyInfo['Type']);
-                    }
-                } else {
-                    error_log("ERROR: Failed to migrate cancel_keep column: " . $conn->error);
-                    error_log("SQL Error Code: " . $conn->errno);
-                    // This is critical - we should not continue if the column is wrong type
-                    return false;
-                }
-            } else {
-                error_log("Column type is correct (VARCHAR/CHAR), no migration needed");
-            }
-        } else {
-            error_log("WARNING: cancel_keep column not found in table - table may need to be recreated");
-        }
-        
-        // Add cancelled_status column if it doesn't exist (for existing tables)
-        $checkColumn = $conn->query("SHOW COLUMNS FROM cost_calculator_items LIKE 'cancelled_status'");
-        if ($checkColumn && $checkColumn->num_rows == 0) {
-            $conn->query("ALTER TABLE cost_calculator_items ADD COLUMN cancelled_status TINYINT(1) DEFAULT 0");
-            error_log("Added cancelled_status column to cost_calculator_items table");
-        }
-        
-        return true;
-    } else {
-        error_log("Error creating table: " . $conn->error);
-        return false;
-    }
-}
-
-/**
- * Normalize cancel_keep from DB or JSON to exactly "Keep" or "Cancel" for UI and storage.
- */
-function normalizeCancelKeepValue($value) {
-    if ($value === null || $value === '') {
-        return 'Keep';
-    }
-    $s = trim((string) $value);
-    if (strcasecmp($s, 'Cancel') === 0 || $s === '0') {
-        return 'Cancel';
-    }
-    if (strcasecmp($s, 'Keep') === 0 || $s === '1') {
-        return 'Keep';
-    }
-    return 'Keep';
-}
-
-/** Resolve cancel_keep from client payload (underscore, camelCase, or rare key mangling). */
-function extractCancelKeepFromItem(array $item) {
-    if (array_key_exists('cancel_keep', $item)) {
-        return normalizeCancelKeepValue($item['cancel_keep']);
-    }
-    if (array_key_exists('cancelKeep', $item)) {
-        return normalizeCancelKeepValue($item['cancelKeep']);
-    }
-    if (array_key_exists('cancel-keep', $item)) {
-        return normalizeCancelKeepValue($item['cancel-keep']);
-    }
-    return 'Keep';
-}
-
-function saveCostCalculatorData($email, $items) {
-    $conn = getMysqliConnection();
-    if (!$conn) {
-        return ['success' => false, 'error' => 'Database connection failed'];
-    }
-    
-    // Ensure table exists
-    createCostCalculatorTable();
-    
-    // Start transaction
-    $conn->begin_transaction();
-    
-    try {
-        // Delete existing items for this user
-        $deleteStmt = $conn->prepare("DELETE FROM cost_calculator_items WHERE user_email = ?");
-        $deleteStmt->bind_param("s", $email);
-        $deleteStmt->execute();
-        $deleteStmt->close();
-        
-        // Insert new items
-        // One prepared statement per row avoids mysqli bind_param reference quirks with reused statements in a loop.
-        $insertSql = "INSERT INTO cost_calculator_items 
-            (user_email, vendor_name, cost_per_period, frequency, annual_cost, cancel_keep, cancelled_status, notes) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-        
-
-        $cc = "";
-        foreach ($items as $item) {
-            if (!is_array($item)) {
-                continue;
-            }
-            $vendorName = $item['vendor_name'] ?? '';
-            $costPerPeriod = floatval($item['cost_per_period'] ?? 0);
-            $frequency = $item['frequency'] ?? '';
-            $annualCost = floatval($item['annual_cost'] ?? 0);
-            $cancelKeep = extractCancelKeepFromItem($item);
-
-            $cc = $cc . "-" . $cancelKeep;
-
-            $cancelledStatus = isset($item['cancelled_status']) ? (int)$item['cancelled_status'] : 0;
-            $notes = $item['notes'] ?? '';
-            
-            $insertStmt = $conn->prepare($insertSql);
-            if (!$insertStmt) 
-            {
-                throw new Exception("Prepare failed: " . $conn->error);
-            }
-            
-            $ck = 0;
-            if ($cancelKeep == "Keep")
-            {
-                $ck = 1;
-            }
-
-
-            $result = $insertStmt->bind_param("ssdsdiss", 
-                $email,
-                $vendorName,
-                $costPerPeriod,
-                $frequency,
-                $annualCost,
-                $ck,
-                $cancelledStatus,
-                $notes
-            );
-            
-            if (!$result) {
-                $insertStmt->close();
-                throw new Exception("Failed to bind parameters: " . $insertStmt->error);
-            }
-            
-            $executeResult = $insertStmt->execute();
-            if (!$executeResult) {
-                $err = $insertStmt->error;
-                $insertStmt->close();
-                throw new Exception("Failed to insert item: " . $err);
-            }
-            $insertStmt->close();
-        }
-        
-        $conn->commit();
-        
-        return ['success' => true, 'message' => 'Data saved successfully', 'cancelKeep' => $cc];
-        
-    } catch (Exception $e) {
-        $conn->rollback();
-        error_log("Error saving cost savings tool data: " . $e->getMessage());
-        return ['success' => false, 'error' => $e->getMessage()];
-    }
-}
-
-function loadCostCalculatorData($email) {
-    $conn = getMysqliConnection();
-    if (!$conn) {
-        return [];
-    }
-    
-    // Ensure table exists
-    createCostCalculatorTable();
-    
-    $stmt = $conn->prepare("SELECT vendor_name, cost_per_period, frequency, annual_cost, cancel_keep, cancelled_status, notes 
-                           FROM cost_calculator_items 
-                           WHERE user_email = ? 
-                           ORDER BY id ASC");
-    $stmt->bind_param("s", $email);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    
-    $items = [];
-    while ($row = $result->fetch_assoc()) {
-        $items[] = [
-            'vendor_name' => $row['vendor_name'],
-            'cost_per_period' => $row['cost_per_period'],
-            'frequency' => $row['frequency'],
-            'annual_cost' => $row['annual_cost'],
-            'cancel_keep' => normalizeCancelKeepValue($row['cancel_keep']),
-            'cancelled_status' => isset($row['cancelled_status']) ? (int)$row['cancelled_status'] : 0,
-            'notes' => $row['notes']
-        ];
-    }
-    
-    $stmt->close();
-    return $items;
-}
-
-function handleSaveCostCalculator() {
-    header('Content-Type: application/json');
-    
-    if (!isset($_SESSION['user_email'])) {
-        echo json_encode(['success' => false, 'error' => 'User not logged in']);
-        exit;
-    }
-    
-    $email = $_SESSION['user_email'];
-    $itemsRaw = $_POST['items'] ?? '[]';
-    error_log("=== SAVE COST SAVINGS TOOL START ===");
-    if (is_array($itemsRaw)) {
-        $items = $itemsRaw;
-        error_log("Received items as PHP array, count: " . count($items));
-    } else {
-        $itemsJson = (string)$itemsRaw;
-        error_log("Received items JSON: " . substr($itemsJson, 0, 1000));
-        $items = json_decode($itemsJson, true);
-    }
-    
-    if (!is_array($items)) {
-        error_log("Failed to decode items JSON. Error: " . json_last_error_msg());
-        echo json_encode(['success' => false, 'error' => 'Invalid items data']);
-        exit;
-    }
-    
-    error_log("Decoded items count: " . count($items));
-    foreach ($items as $idx => $item) {
-        if (!is_array($item)) {
-            continue;
-        }
-        $ck = extractCancelKeepFromItem($item);
-        error_log("Item $idx cancel_keep (resolved): " . var_export($ck, true));
-    }
-    
-    // Verify and fix column type before save
-    $conn = getMysqliConnection();
-    if ($conn) {
-        // Ensure table exists first
-        createCostCalculatorTable();
-        
-        // Explicitly check and fix cancel_keep column type
-        $checkCancelKeep = $conn->query("SHOW COLUMNS FROM cost_calculator_items WHERE Field = 'cancel_keep'");
-        if ($checkCancelKeep && $checkCancelKeep->num_rows > 0) {
-            $columnInfo = $checkCancelKeep->fetch_assoc();
-            $columnType = $columnInfo['Type'];
-            error_log("Pre-save check: cancel_keep column type is: " . $columnType);
-            
-            // Check if column is not VARCHAR
-            if (stripos($columnType, 'varchar') === false && stripos($columnType, 'char') === false) {
-                error_log("WARNING: cancel_keep column is not VARCHAR! Current type: " . $columnType);
-                error_log("Attempting to fix column type to VARCHAR(10)...");
-                
-                $alterResult = $conn->query("ALTER TABLE cost_calculator_items MODIFY COLUMN cancel_keep VARCHAR(10) DEFAULT 'Keep'");
-                if ($alterResult) {
-                    error_log("SUCCESS: Fixed cancel_keep column type from " . $columnType . " to VARCHAR(10)");
-                } else {
-                    error_log("ERROR: Failed to alter cancel_keep column: " . $conn->error);
-                    // Still continue with save, but log the error
-                }
-            } else {
-                error_log("Column type is correct (VARCHAR/CHAR)");
-            }
-        }
-    }
-    
-    $result = saveCostCalculatorData($email, $items);
-    error_log("=== SAVE COST SAVINGS TOOL END ===");
-    echo json_encode($result);
-    exit;
-}
-
-function handleLoadCostCalculator() {
-    header('Content-Type: application/json');
-    
-    if (!isset($_SESSION['user_email'])) {
-        echo json_encode(['success' => false, 'error' => 'User not logged in', 'items' => []]);
-        exit;
-    }
-    
-    $email = $_SESSION['user_email'];
-    $items = loadCostCalculatorData($email);
-    
-    echo json_encode(['success' => true, 'items' => $items]);
-    exit;
 }
 
 // GoHighLevel (GHL) API Functions
@@ -971,12 +371,20 @@ function getUserRoleFromFile($email) {
 
 
 
-// Determine current view
+try {
+    getDBConnection();
+} catch (Exception $e) {
+    // Schema migration runs on successful connection
+}
+
 $current_view = 'login';
-if (isset($_SESSION['user_email'])) {
+$is_logged_in = !empty($_SESSION['user_id']) || !empty($_SESSION['user_email']);
+if ($is_logged_in) {
     if (empty($_SESSION['user_role'])) {
-        $email = $_SESSION['user_email'];
-        loadUserResponses($email);
+        $email = $_SESSION['user_email'] ?? '';
+        if ($email !== '') {
+            loadUserResponses($email);
+        }
         if (empty($_SESSION['user_role'])) {
             $_SESSION['awaiting_role'] = true;
         }
@@ -986,6 +394,44 @@ if (isset($_SESSION['user_email'])) {
         $current_view = 'login';
     } else {
         $current_view = 'placeholder';
+    }
+}
+
+$is_admin = ($is_logged_in && ($_SESSION['role'] ?? '') === 'admin');
+
+$deadline_reminders_org = true;
+$deadline_reminders_user = true;
+if ($is_logged_in && !empty($_SESSION['org_id'])) {
+    try {
+        $pdoView = getDBConnection();
+        $st = $pdoView->prepare('SELECT deadline_reminders_enabled FROM organizations WHERE id = ?');
+        $st->execute([(int) $_SESSION['org_id']]);
+        $or = $st->fetch(PDO::FETCH_ASSOC);
+        if ($or && isset($or['deadline_reminders_enabled'])) {
+            $deadline_reminders_org = (bool) $or['deadline_reminders_enabled'];
+        }
+        if (!empty($_SESSION['user_id'])) {
+            $st2 = $pdoView->prepare('SELECT deadline_reminders_enabled FROM users WHERE id = ?');
+            $st2->execute([(int) $_SESSION['user_id']]);
+            $ur = $st2->fetch(PDO::FETCH_ASSOC);
+            if ($ur && isset($ur['deadline_reminders_enabled'])) {
+                $deadline_reminders_user = (bool) $ur['deadline_reminders_enabled'];
+            }
+        }
+    } catch (Exception $e) {
+        // ignore
+    }
+}
+
+$team_members_json = '[]';
+if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id'])) {
+    try {
+        $pdoTeam = getDBConnection();
+        $stTeam = $pdoTeam->prepare('SELECT id, username, display_name, email FROM users WHERE org_id = ? ORDER BY username, email');
+        $stTeam->execute([(int) $_SESSION['org_id']]);
+        $team_members_json = json_encode($stTeam->fetchAll(PDO::FETCH_ASSOC), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+    } catch (Exception $e) {
+        $team_members_json = '[]';
     }
 }
 ?>
@@ -1209,7 +655,7 @@ if (isset($_SESSION['user_email'])) {
 
         .cost-calculator-grid {
             width: 100%;
-            min-width: 900px;
+            min-width: 1400px;
             border-collapse: collapse;
             margin: 0;
             background: white;
@@ -2743,7 +2189,7 @@ if (isset($_SESSION['user_email'])) {
     </script>    
 </head>
 <body>
-    <?php if (isset($_SESSION['user_email']) && empty($_SESSION['awaiting_role'])): ?>
+    <?php if ($is_logged_in && empty($_SESSION['awaiting_role'])): ?>
         <form method="POST" class="logout-form">
             <input type="hidden" name="action" value="logout">
             <button type="submit" class="logout-button" title="Logout">
@@ -2760,38 +2206,6 @@ if (isset($_SESSION['user_email'])) {
     </div>
 
     <script>
-    // Global OTP Functions - Available on all pages
-    function changeEmail() {
-        // Create a form to clear the OTP session and go back to email entry
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.innerHTML = '<input type="hidden" name="action" value="change_email">';
-        document.body.appendChild(form);
-        form.submit();
-    }
-
-    function resendOTP() {
-        // Get the email from the hidden input in the form
-        const emailInput = document.querySelector('input[name="email"]');
-        const email = emailInput ? emailInput.value : '';
-        
-        if (!email) {
-            alert('Email not found. Please refresh the page and try again.');
-            return;
-        }
-        
-        // Create a form to resend the OTP to the same email
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.innerHTML = `
-            <input type="hidden" name="action" value="send_otp">
-            <input type="hidden" name="email" value="${email}">
-            <input type="hidden" name="agree_terms" value="on">
-        `;
-        document.body.appendChild(form);
-        form.submit();
-    }
-    
     // Snackbar Functions
     function showSnackbar(message, type = '') {
         const snackbar = document.getElementById('snackbar');
@@ -2839,7 +2253,7 @@ if (isset($_SESSION['user_email'])) {
             <?php if ($current_view === 'login'): ?>
             <div class="content-padding login-page">
                 <h1>Cost Savings Tool</h1>
-                <p class="subtitle">Provide your email below to securely access your cost savings tool.</p>
+                <p class="subtitle">Sign in with your username and password.</p>
             
             <?php if (!empty($_SESSION['awaiting_role'])): ?>
                 <form method="POST">
@@ -2847,7 +2261,7 @@ if (isset($_SESSION['user_email'])) {
                     <div class="form-group">
                         <label>Select the option that best describes you:</label>
                         <p class="subtitle" style="margin-top: 4px; font-size: 15px; color: #4b5563;">
-                            OTP verified for <?php echo htmlspecialchars($_SESSION['user_email']); ?>. Let us know who you are to tailor your experience.
+                            Signed in as <?php echo htmlspecialchars($_SESSION['user_email'] ?? $_SESSION['username'] ?? ''); ?>. Let us know who you are to tailor your experience.
                         </p>
                         <div class="role-options">
                             <?php foreach ($user_role_options as $option): ?>
@@ -2860,15 +2274,18 @@ if (isset($_SESSION['user_email'])) {
                     </div>
                     <div class="button-group">
                         <button type="submit">Continue</button>
-                        <button type="button" onclick="changeEmail()" class="btn-secondary">Use a Different Email</button>
                     </div>
                 </form>
-            <?php elseif (!isset($_SESSION['show_otp'])): ?>
+            <?php else: ?>
                 <form method="POST">
-                    <input type="hidden" name="action" value="send_otp">
+                    <input type="hidden" name="action" value="login">
                     <div class="form-group">
-                        <label for="email">Email Address:</label>
-                        <input type="email" id="email" name="email" required>
+                        <label for="username">Username or email</label>
+                        <input type="text" id="username" name="username" required autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" name="password" required autocomplete="current-password">
                     </div>
                     <div class="form-group">
                         <label class="checkbox-label">
@@ -2876,22 +2293,7 @@ if (isset($_SESSION['user_email'])) {
                             <span>By using this cost savings tool, I agree to the <a href="https://savvycfo.com/terms-conditions-privacy-policy/" target="_blank" rel="noopener noreferrer">terms of use</a>.</span>
                         </label>
                     </div>
-                    <button type="submit">Send OTP</button>
-                </form>
-            <?php else: ?>
-                <form method="POST">
-                    <input type="hidden" name="action" value="verify_otp">
-                    <input type="hidden" name="email" value="<?php echo htmlspecialchars($_SESSION['otp_email']); ?>">
-                    <div class="form-group">
-                        <label for="otp">Enter OTP:</label>
-                        <input type="text" id="otp" name="otp" required>
-                        <small>OTP sent to: <?php echo htmlspecialchars($_SESSION['otp_email']); ?></small>
-                    </div>
-                    <div class="button-group">
-                        <button type="submit">Login</button>
-                        <button type="button" onclick="changeEmail()" class="btn-secondary">Change Email</button>
-                        <button type="button" onclick="resendOTP()" class="btn-secondary">Resend OTP</button>
-                    </div>
+                    <button type="submit">Log in</button>
                 </form>
             <?php endif; ?>
             
@@ -2901,6 +2303,54 @@ if (isset($_SESSION['user_email'])) {
         <?php elseif ($current_view === 'placeholder'): ?>
             <div class="content-padding">
                 <h1>Cost Savings Tool</h1>
+                <p class="subtitle" style="margin-bottom:16px;">Signed in as <?php echo htmlspecialchars($_SESSION['username'] ?? $_SESSION['user_email'] ?? ''); ?>
+                    <?php if ($is_admin): ?> (Admin)<?php endif; ?></p>
+
+                <?php if ($is_admin): ?>
+                <div class="admin-bar" style="margin-bottom:16px;padding:12px;background:#f0f9ff;border-radius:8px;border:1px solid #bae6fd;">
+                    <form method="POST" style="display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">
+                        <input type="hidden" name="action" value="invite_member">
+                        <label>Invite member email</label>
+                        <input type="email" name="email" required placeholder="member@company.com" style="min-width:200px;">
+                        <button type="submit">Send invite</button>
+                    </form>
+                    <form method="POST" style="display:inline-flex;align-items:center;gap:8px;">
+                        <input type="hidden" name="action" value="save_org_reminders">
+                        <label><input type="checkbox" name="deadline_reminders_enabled" value="1" <?php echo $deadline_reminders_org ? 'checked' : ''; ?>> Org: deadline email assistant</label>
+                        <button type="submit">Save</button>
+                    </form>
+                </div>
+                <?php endif; ?>
+
+                <div class="tool-bar" style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
+                    <a href="?action=export_vendors&amp;format=xlsx" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;">Download Excel</a>
+                    <a href="?action=export_vendors&amp;format=pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#1a6d91;">Download PDF</a>
+                    <a href="?action=export_vendors&amp;format=summary_pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#0f766e;">Executive summary PDF</a>
+                    <label style="cursor:pointer;padding:8px 12px;background:#e0f2fe;border-radius:6px;">
+                        Import CSV
+                        <input type="file" id="csvImportInput" accept=".csv,text/csv" style="display:none;">
+                    </label>
+                    <form method="POST" style="display:inline-flex;align-items:center;gap:6px;">
+                        <input type="hidden" name="action" value="save_user_reminder_pref">
+                        <label style="font-size:14px;"><input type="checkbox" name="user_deadline_reminders" value="1" <?php echo $deadline_reminders_user ? 'checked' : ''; ?>> My deadline reminders</label>
+                        <button type="submit" style="padding:6px 10px;">Save</button>
+                    </form>
+                </div>
+
+                <div id="aiAssistant" style="margin-bottom:20px;padding:16px;background:#fafafa;border-radius:8px;border:1px solid #e5e7eb;">
+                    <h3 style="margin-bottom:8px;font-size:16px;">Ask AI (Savvy CFO)</h3>
+                    <p style="font-size:13px;color:#64748b;margin-bottom:8px;">Up to 50 questions per month per user.</p>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+                        <button type="button" class="btn-secondary ai-preset" data-preset="overlap">Overlap between vendors</button>
+                        <button type="button" class="btn-secondary ai-preset" data-preset="alternatives">Cheaper alternatives</button>
+                        <button type="button" class="btn-secondary ai-preset" data-preset="lower_tiers">Lower service tiers</button>
+                        <button type="button" class="btn-secondary ai-preset" data-preset="duplicates">Duplicate subscriptions</button>
+                        <button type="button" class="btn-secondary ai-preset" data-preset="executive">Executive summary suggestions</button>
+                    </div>
+                    <textarea id="aiQuestion" rows="2" style="width:100%;max-width:100%;box-sizing:border-box;margin-bottom:8px;" placeholder="Ask a specific question..."></textarea>
+                    <button type="button" id="aiSubmitBtn">Ask</button>
+                    <pre id="aiReply" style="margin-top:12px;white-space:pre-wrap;font-size:13px;background:#fff;padding:12px;border-radius:6px;border:1px solid #e5e7eb;max-height:240px;overflow:auto;"></pre>
+                </div>
                 
                 <div class="report-filters">
                     <label for="reportFilter">Report Filters:</label>
@@ -2921,9 +2371,13 @@ if (isset($_SESSION['user_email'])) {
                             <th class="cost-per-period">Cost per Period</th>
                             <th class="frequency">Frequency</th>
                             <th class="annual-cost">Annual Cost</th>
-                            <th class="cancel-keep" title="Stored in DB column cancel_keep (Cancel = cancel this cost)">Cancel/Keep</th>
-                            <th class="cancelled-status" title="Stored in DB column cancelled_status. Check when the vendor has confirmed cancellation (separate from Cancel/Keep intent).">Confirmed</th>
-                            <th class="notes">Notes/Comments</th>
+                            <th class="manager-col">Manager</th>
+                            <th class="visibility-col">Visibility</th>
+                            <th class="cancel-keep" title="Cancel = cancel this cost">Cancel/Keep</th>
+                            <th class="cancel-deadline">Cancel deadline</th>
+                            <th class="cancelled-status" title="Confirmed cancellation">Confirmed</th>
+                            <th class="last-pay">Last payment</th>
+                            <th class="notes">Purpose of subscription</th>
                             <th class="delete-row"></th>
                         </tr>
                     </thead>
@@ -2950,6 +2404,20 @@ if (isset($_SESSION['user_email'])) {
             
             <script>
             let rowCount = 0;
+            const TEAM_MEMBERS = <?php echo $team_members_json; ?>;
+            const IS_ADMIN = <?php echo $is_admin ? 'true' : 'false'; ?>;
+            const CURRENT_USER_ID = <?php echo (int) ($_SESSION['user_id'] ?? 0); ?>;
+
+            function managerOptionsHtml(selectedId) {
+                let o = '<option value="">—</option>';
+                (TEAM_MEMBERS || []).forEach(function(m) {
+                    const id = String(m.id);
+                    const lab = (m.username || m.email || '').replace(/</g, '');
+                    const sel = (selectedId && String(selectedId) === id) ? ' selected' : '';
+                    o += '<option value="' + id + '"' + sel + '>' + lab + '</option>';
+                });
+                return o;
+            }
             
             function addCalculatorRow() {
                 rowCount++;
@@ -2960,6 +2428,7 @@ if (isset($_SESSION['user_email'])) {
                 row.innerHTML = `
                     <td class="item-number">${rowCount}</td>
                     <td class="vendor-name">
+                        <input type="hidden" class="row-db-id" value="" />
                         <input type="text" name="vendor[]" placeholder="Enter vendor name" />
                     </td>
                     <td class="cost-per-period">
@@ -2971,11 +2440,23 @@ if (isset($_SESSION['user_email'])) {
                             <option value="weekly">Weekly</option>
                             <option value="monthly">Monthly</option>
                             <option value="quarterly">Quarterly</option>
+                            <option value="semi_annual">Semi-annual</option>
                             <option value="annually">Annually</option>
                         </select>
                     </td>
                     <td class="annual-cost">
                         <span class="annual-cost-display" data-row="${rowCount}">$0.00</span>
+                    </td>
+                    <td class="manager-col">
+                        <select class="manager-select" data-row="${rowCount}" ${IS_ADMIN ? '' : 'disabled'}>
+                            ${managerOptionsHtml(IS_ADMIN ? '' : String(CURRENT_USER_ID))}
+                        </select>
+                    </td>
+                    <td class="visibility-col">
+                        <select class="visibility-select" data-row="${rowCount}" ${IS_ADMIN ? '' : 'disabled'}>
+                            <option value="public">Public</option>
+                            <option value="confidential">Confidential</option>
+                        </select>
                     </td>
                     <td class="cancel-keep">
                         <select name="cancel_keep[]" class="cancel-keep-select" data-row="${rowCount}">
@@ -2983,11 +2464,17 @@ if (isset($_SESSION['user_email'])) {
                             <option value="Cancel">Cancel</option>
                         </select>
                     </td>
+                    <td class="cancel-deadline">
+                        <input type="date" class="cancel-deadline-input" data-row="${rowCount}" />
+                    </td>
                     <td class="cancelled-status">
                         <input type="checkbox" name="cancelled_status[]" class="cancelled-status-checkbox" data-row="${rowCount}" />
                     </td>
+                    <td class="last-pay">
+                        <input type="date" class="last-payment-input" data-row="${rowCount}" />
+                    </td>
                     <td class="notes">
-                        <textarea name="notes[]" rows="2" placeholder="Add notes..."></textarea>
+                        <textarea name="notes[]" class="purpose-textarea" rows="2" placeholder="Purpose of subscription"></textarea>
                     </td>
                     <td class="delete-row">
                         <button type="button" class="delete-btn" onclick="deleteRow(this)">Delete</button>
@@ -3034,6 +2521,7 @@ if (isset($_SESSION['user_email'])) {
                     case 'weekly': multiplier = 52; break;
                     case 'monthly': multiplier = 12; break;
                     case 'quarterly': multiplier = 4; break;
+                    case 'semi_annual': multiplier = 2; break;
                     case 'annually': multiplier = 1; break;
                 }
                 
@@ -3179,8 +2667,13 @@ if (isset($_SESSION['user_email'])) {
                     const costInput = row.querySelector('.cost-input');
                     const frequencySelect = row.querySelector('.frequency-select');
                     const cancelledCheckbox = row.querySelector('.cancelled-status-checkbox');
-                    const notesTextarea = row.querySelector('textarea[name="notes[]"]');
+                    const notesTextarea = row.querySelector('textarea.purpose-textarea') || row.querySelector('textarea[name="notes[]"]');
                     const annualCostDisplay = row.querySelector('.annual-cost-display');
+                    const rowIdEl = row.querySelector('.row-db-id');
+                    const mgrSel = row.querySelector('.manager-select');
+                    const visSel = row.querySelector('.visibility-select');
+                    const deadlineIn = row.querySelector('.cancel-deadline-input');
+                    const lastPayIn = row.querySelector('.last-payment-input');
                     
                     const vendorName = vendorInput ? vendorInput.value.trim() : '';
                     const costPerPeriod = costInput ? parseFloat(costInput.value.replace(/[^0-9.-]/g, '')) || 0 : 0;
@@ -3189,10 +2682,14 @@ if (isset($_SESSION['user_email'])) {
                     const cancelledStatus = cancelledCheckbox ? cancelledCheckbox.checked : false;
                     const notes = notesTextarea ? notesTextarea.value.trim() : '';
                     const annualCost = annualCostDisplay ? parseFloat(annualCostDisplay.textContent.replace(/[^0-9.-]/g, '')) || 0 : 0;
+                    const idVal = rowIdEl && rowIdEl.value ? parseInt(rowIdEl.value, 10) : null;
+                    const managerId = mgrSel && mgrSel.value ? parseInt(mgrSel.value, 10) : null;
+                    const visibility = visSel ? visSel.value : 'public';
+                    const cancelDl = deadlineIn && deadlineIn.value ? deadlineIn.value : '';
+                    const lastPay = lastPayIn && lastPayIn.value ? lastPayIn.value : '';
                     
-                    // Save rows with any meaningful data (vendor/cost, or cancel/keep, notes, or cancelled status)
-                    if (vendorName || costPerPeriod > 0 || cancelKeep !== 'Keep' || cancelledStatus || notes) {
-                        items.push({
+                    if (vendorName || costPerPeriod > 0 || cancelKeep !== 'Keep' || cancelledStatus || notes || idVal) {
+                        const o = {
                             vendor_name: vendorName,
                             cost_per_period: costPerPeriod,
                             frequency: frequency,
@@ -3200,8 +2697,15 @@ if (isset($_SESSION['user_email'])) {
                             cancel_keep: cancelKeep,
                             cancelKeep: cancelKeep,
                             cancelled_status: cancelledStatus ? 1 : 0,
-                            notes: notes
-                        });
+                            notes: notes,
+                            purpose_of_subscription: notes,
+                            visibility: visibility,
+                            cancellation_deadline: cancelDl,
+                            last_payment_date: lastPay
+                        };
+                        if (idVal) { o.id = idVal; }
+                        if (managerId) { o.manager_user_id = managerId; }
+                        items.push(o);
                     }
                 });
                 
@@ -3264,16 +2768,35 @@ if (isset($_SESSION['user_email'])) {
                                 addCalculatorRow();
                                 const lastRow = document.querySelector('#calculatorRows tr:last-child');
                                 if (lastRow) {
+                                    const rowIdEl = lastRow.querySelector('.row-db-id');
+                                    if (rowIdEl && item.id) rowIdEl.value = String(item.id);
                                     const vendorInput = lastRow.querySelector('input[name="vendor[]"]');
                                     const costInput = lastRow.querySelector('.cost-input');
                                     const frequencySelect = lastRow.querySelector('.frequency-select');
                                     const cancelKeepSelect = lastRow.querySelector('.cancel-keep-select');
                                     const cancelledCheckbox = lastRow.querySelector('.cancelled-status-checkbox');
-                                    const notesTextarea = lastRow.querySelector('textarea[name="notes[]"]');
+                                    const notesTextarea = lastRow.querySelector('textarea.purpose-textarea');
+                                    const mgr = lastRow.querySelector('.manager-select');
+                                    const vis = lastRow.querySelector('.visibility-select');
+                                    const dl = lastRow.querySelector('.cancel-deadline-input');
+                                    const lp = lastRow.querySelector('.last-payment-input');
                                     
                                     if (vendorInput) vendorInput.value = item.vendor_name || '';
                                     if (costInput) costInput.value = item.cost_per_period > 0 ? '$' + parseFloat(item.cost_per_period).toFixed(2) : '';
                                     if (frequencySelect) frequencySelect.value = item.frequency || '';
+                                    if (mgr) {
+                                        const mid = item.manager_user_id ? String(item.manager_user_id) : '';
+                                        mgr.innerHTML = managerOptionsHtml(mid);
+                                    }
+                                    if (vis) vis.value = (item.visibility === 'confidential') ? 'confidential' : 'public';
+                                    if (dl && item.cancellation_deadline) {
+                                        const d = String(item.cancellation_deadline).substring(0, 10);
+                                        dl.value = d;
+                                    }
+                                    if (lp && item.last_payment_date) {
+                                        const d = String(item.last_payment_date).substring(0, 10);
+                                        lp.value = d;
+                                    }
                                     
                                     if (cancelKeepSelect) {
                                         const savedValue = item.cancel_keep ? item.cancel_keep.toString().trim() : 'Keep';
@@ -3291,7 +2814,7 @@ if (isset($_SESSION['user_email'])) {
                                     
                                     syncConfirmedCheckbox(lastRow);
                                     if (cancelledCheckbox) cancelledCheckbox.checked = (item.cancelled_status == 1 || item.cancelled_status === true);
-                                    if (notesTextarea) notesTextarea.value = item.notes || '';
+                                    if (notesTextarea) notesTextarea.value = item.purpose_of_subscription || item.notes || '';
                                     
                                     if (costInput && frequencySelect) {
                                         const event = new Event('input');
@@ -3338,7 +2861,11 @@ if (isset($_SESSION['user_email'])) {
                 const cancelKeepSelect = row.querySelector('.cancel-keep-select');
                 const cancelledCheckbox = row.querySelector('.cancelled-status-checkbox');
                 const vendorInput = row.querySelector('input[name="vendor[]"]');
-                const notesTextarea = row.querySelector('textarea[name="notes[]"]');
+                const notesTextarea = row.querySelector('textarea.purpose-textarea');
+                const mgrSel = row.querySelector('.manager-select');
+                const visSel = row.querySelector('.visibility-select');
+                const dlIn = row.querySelector('.cancel-deadline-input');
+                const lpIn = row.querySelector('.last-payment-input');
                 
                 if (costInput) {
                     costInput.addEventListener('input', function(e) {
@@ -3389,6 +2916,12 @@ if (isset($_SESSION['user_email'])) {
                 if (notesTextarea) {
                     notesTextarea.addEventListener('blur', autoSave);
                 }
+                [mgrSel, visSel].forEach(function(el) {
+                    if (el) el.addEventListener('change', autoSave);
+                });
+                [dlIn, lpIn].forEach(function(el) {
+                    if (el) el.addEventListener('change', autoSave);
+                });
             }
             
             // Override attachRowListeners to use the new version with auto-save
@@ -3436,6 +2969,63 @@ if (isset($_SESSION['user_email'])) {
             // Initialize: Load data on page load; flush debounced saves before refresh/navigation
             document.addEventListener('DOMContentLoaded', function() {
                 loadCalculatorData();
+                var csvIn = document.getElementById('csvImportInput');
+                if (csvIn) {
+                    csvIn.addEventListener('change', function() {
+                        var f = this.files[0];
+                        if (!f) return;
+                        var fd = new FormData();
+                        fd.append('action', 'import_vendor_csv');
+                        fd.append('csv_file', f);
+                        fetch(window.location.href, { method: 'POST', body: fd })
+                            .then(function(r) { return r.json(); })
+                            .then(function(d) {
+                                if (d.success) {
+                                    showSnackbar('Imported ' + (d.inserted || 0) + ' vendor(s)', 'success');
+                                    loadCalculatorData();
+                                } else {
+                                    showSnackbar(d.error || 'Import failed', 'error');
+                                }
+                            })
+                            .catch(function() { showSnackbar('Import failed', 'error'); });
+                        this.value = '';
+                    });
+                }
+                var aiBtn = document.getElementById('aiSubmitBtn');
+                if (aiBtn) {
+                    aiBtn.addEventListener('click', function() {
+                        var q = document.getElementById('aiQuestion').value.trim();
+                        var fd = new FormData();
+                        fd.append('action', 'ai_ask');
+                        fd.append('question', q);
+                        fetch(window.location.href, { method: 'POST', body: fd })
+                            .then(function(r) { return r.json(); })
+                            .then(function(d) {
+                                var el = document.getElementById('aiReply');
+                                if (!el) return;
+                                if (d.success) {
+                                    el.textContent = (d.reply || '') + (d.remaining !== undefined ? '\n\n(Remaining this month: ' + d.remaining + ')' : '');
+                                } else {
+                                    el.textContent = d.error || 'Error';
+                                }
+                            });
+                    });
+                }
+                document.querySelectorAll('.ai-preset').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        var fd = new FormData();
+                        fd.append('action', 'ai_ask');
+                        fd.append('preset', btn.getAttribute('data-preset') || '');
+                        fd.append('question', '');
+                        fetch(window.location.href, { method: 'POST', body: fd })
+                            .then(function(r) { return r.json(); })
+                            .then(function(d) {
+                                var el = document.getElementById('aiReply');
+                                if (!el) return;
+                                el.textContent = d.success ? (d.reply || '') : (d.error || '');
+                            });
+                    });
+                });
             });
             window.addEventListener('pagehide', flushSaveOnLeave);
             </script>

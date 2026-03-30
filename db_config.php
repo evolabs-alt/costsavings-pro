@@ -31,6 +31,7 @@ function getDBConnection() {
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                 PDO::ATTR_EMULATE_PREPARES => false,
             ]);
+            migrateSchema($pdo);
         } catch (PDOException $e) {
             error_log('Database connection error: ' . $e->getMessage());
             throw new Exception('Database connection failed. Please check your database configuration.');
@@ -89,12 +90,245 @@ function initializeDatabase($pdo) {
 }
 
 /**
+ * Extended schema: organizations, auth, invitations, vendor columns, AI/reminder tables.
+ *
+ * @param PDO $pdo
+ */
+function migrateSchema(PDO $pdo) {
+    static $migrated = false;
+    if ($migrated) {
+        return;
+    }
+    $migrated = true;
+
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `organizations` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `name` VARCHAR(255) NOT NULL DEFAULT 'Organization',
+            `max_users` TINYINT UNSIGNED NOT NULL DEFAULT 10,
+            `deadline_reminders_enabled` TINYINT(1) NOT NULL DEFAULT 1,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $pdo->exec("INSERT INTO `organizations` (`id`, `name`, `max_users`) VALUES (1, 'Default Organization', 10)
+            ON DUPLICATE KEY UPDATE `name` = VALUES(`name`)");
+
+        $hasUserId = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'id'")->fetch();
+        if (!$hasUserId) {
+            $pdo->exec("CREATE TABLE `users_new` (
+                `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `org_id` INT UNSIGNED NULL,
+                `username` VARCHAR(64) NULL,
+                `email` VARCHAR(255) NOT NULL,
+                `password_hash` VARCHAR(255) NULL,
+                `role` ENUM('admin','member') NOT NULL DEFAULT 'member',
+                `display_name` VARCHAR(255) NULL,
+                `first_name` VARCHAR(255) NULL,
+                `last_name` VARCHAR(255) NULL,
+                `user_role` VARCHAR(255) NULL,
+                `role_set_at` DATETIME NULL,
+                `deadline_reminders_enabled` TINYINT(1) NOT NULL DEFAULT 1,
+                `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY `uk_users_email` (`email`),
+                UNIQUE KEY `uk_users_username` (`username`),
+                KEY `idx_users_org` (`org_id`),
+                CONSTRAINT `fk_users_org` FOREIGN KEY (`org_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+            $pdo->exec("INSERT INTO `users_new` (`email`, `first_name`, `last_name`, `user_role`, `role_set_at`, `created_at`, `updated_at`)
+                SELECT `email`, `first_name`, `last_name`, `user_role`, `role_set_at`, `created_at`, `updated_at` FROM `users`");
+            $pdo->exec("DROP TABLE `users`");
+            $pdo->exec("RENAME TABLE `users_new` TO `users`");
+
+            $minId = $pdo->query('SELECT MIN(id) AS m FROM users')->fetch();
+            $firstId = (int) ($minId['m'] ?? 1);
+            $stmt = $pdo->prepare('UPDATE users SET org_id = 1, role = :r WHERE id = :id');
+            $stmt->execute([':r' => 'admin', ':id' => $firstId]);
+            $stmt = $pdo->prepare('UPDATE users SET org_id = 1, role = :r WHERE id <> :id');
+            $stmt->execute([':r' => 'member', ':id' => $firstId]);
+        } else {
+            $cols = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'username'")->fetch();
+            if (!$cols) {
+                $pdo->exec('ALTER TABLE `users` ADD COLUMN `username` VARCHAR(64) NULL AFTER `org_id`');
+                $pdo->exec('ALTER TABLE `users` ADD UNIQUE KEY `uk_users_username` (`username`)');
+            }
+            $cols = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'password_hash'")->fetch();
+            if (!$cols) {
+                $pdo->exec('ALTER TABLE `users` ADD COLUMN `password_hash` VARCHAR(255) NULL AFTER `email`');
+            }
+            $cols = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'role'")->fetch();
+            if (!$cols) {
+                $pdo->exec("ALTER TABLE `users` ADD COLUMN `role` ENUM('admin','member') NOT NULL DEFAULT 'member' AFTER `password_hash`");
+            }
+            $cols = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'org_id'")->fetch();
+            if (!$cols) {
+                $pdo->exec('ALTER TABLE `users` ADD COLUMN `org_id` INT UNSIGNED NULL AFTER `id`');
+                $pdo->exec('UPDATE `users` SET `org_id` = 1 WHERE `org_id` IS NULL');
+                $pdo->exec('ALTER TABLE `users` ADD CONSTRAINT `fk_users_org` FOREIGN KEY (`org_id`) REFERENCES `organizations` (`id`)');
+            }
+            $cols = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'display_name'")->fetch();
+            if (!$cols) {
+                $pdo->exec('ALTER TABLE `users` ADD COLUMN `display_name` VARCHAR(255) NULL AFTER `role`');
+            }
+            $cols = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'deadline_reminders_enabled'")->fetch();
+            if (!$cols) {
+                $pdo->exec('ALTER TABLE `users` ADD COLUMN `deadline_reminders_enabled` TINYINT(1) NOT NULL DEFAULT 1 AFTER `role_set_at`');
+            }
+        }
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `invitations` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `org_id` INT UNSIGNED NOT NULL,
+            `email` VARCHAR(255) NOT NULL,
+            `token_hash` CHAR(64) NOT NULL,
+            `invited_by_user_id` INT UNSIGNED NOT NULL,
+            `expires_at` DATETIME NOT NULL,
+            `consumed_at` DATETIME NULL,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            KEY `idx_inv_token` (`token_hash`),
+            KEY `idx_inv_email` (`email`),
+            CONSTRAINT `fk_inv_org` FOREIGN KEY (`org_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_inv_user` FOREIGN KEY (`invited_by_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `ai_usage` (
+            `user_id` INT UNSIGNED NOT NULL,
+            `year_month` CHAR(7) NOT NULL,
+            `count` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (`user_id`, `year_month`),
+            CONSTRAINT `fk_ai_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `reminder_sent` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `vendor_item_id` INT NOT NULL,
+            `reminder_type` ENUM('t_minus_7','deadline_day','t_plus_7') NOT NULL,
+            `sent_on_date` DATE NOT NULL,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uk_reminder` (`vendor_item_id`, `reminder_type`, `sent_on_date`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `monthly_renewal_sent` (
+            `user_id` INT UNSIGNED NOT NULL,
+            `year_month` CHAR(7) NOT NULL,
+            `sent_at` DATETIME NOT NULL,
+            PRIMARY KEY (`user_id`, `year_month`),
+            CONSTRAINT `fk_mrs_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        migrateCostCalculatorSchema($pdo);
+        seedInitialAdminIfNeeded($pdo);
+    } catch (PDOException $e) {
+        error_log('migrateSchema error: ' . $e->getMessage());
+    }
+}
+
+/**
+ * @param PDO $pdo
+ */
+function migrateCostCalculatorSchema(PDO $pdo) {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `cost_calculator_items` (
+        `id` INT AUTO_INCREMENT PRIMARY KEY,
+        `org_id` INT UNSIGNED NOT NULL DEFAULT 1,
+        `user_id` INT UNSIGNED NULL,
+        `user_email` VARCHAR(255) NOT NULL,
+        `manager_user_id` INT UNSIGNED NULL,
+        `vendor_name` VARCHAR(255) DEFAULT NULL,
+        `cost_per_period` DECIMAL(12, 2) DEFAULT 0.00,
+        `frequency` VARCHAR(32) DEFAULT NULL,
+        `annual_cost` DECIMAL(12, 2) DEFAULT 0.00,
+        `cancel_keep` VARCHAR(10) DEFAULT 'Keep',
+        `cancelled_status` TINYINT(1) DEFAULT 0,
+        `visibility` ENUM('public','confidential') NOT NULL DEFAULT 'public',
+        `purpose_of_subscription` TEXT NULL,
+        `cancellation_deadline` DATE NULL,
+        `last_payment_date` DATE NULL,
+        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        KEY `idx_cc_org` (`org_id`),
+        KEY `idx_cc_user_email` (`user_email`),
+        KEY `idx_cc_manager` (`manager_user_id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $addCol = function (PDO $pdo, string $col, string $ddl) {
+        $st = $pdo->query("SHOW COLUMNS FROM `cost_calculator_items` LIKE " . $pdo->quote($col));
+        if (!$st->fetch()) {
+            $pdo->exec("ALTER TABLE `cost_calculator_items` ADD COLUMN $ddl");
+        }
+    };
+
+    try {
+        $addCol($pdo, 'org_id', '`org_id` INT UNSIGNED NOT NULL DEFAULT 1');
+        $addCol($pdo, 'user_id', '`user_id` INT UNSIGNED NULL');
+        $addCol($pdo, 'manager_user_id', '`manager_user_id` INT UNSIGNED NULL');
+        $addCol($pdo, 'visibility', "`visibility` ENUM('public','confidential') NOT NULL DEFAULT 'public'");
+        $addCol($pdo, 'cancellation_deadline', '`cancellation_deadline` DATE NULL');
+        $addCol($pdo, 'last_payment_date', '`last_payment_date` DATE NULL');
+
+        $notesCol = $pdo->query("SHOW COLUMNS FROM `cost_calculator_items` LIKE 'notes'")->fetch();
+        $purposeCol = $pdo->query("SHOW COLUMNS FROM `cost_calculator_items` LIKE 'purpose_of_subscription'")->fetch();
+        if ($notesCol && !$purposeCol) {
+            $pdo->exec('ALTER TABLE `cost_calculator_items` CHANGE COLUMN `notes` `purpose_of_subscription` TEXT NULL');
+        } elseif (!$purposeCol) {
+            $addCol($pdo, 'purpose_of_subscription', '`purpose_of_subscription` TEXT NULL');
+        }
+
+        $pdo->exec('UPDATE `cost_calculator_items` SET `org_id` = 1 WHERE `org_id` IS NULL OR `org_id` = 0');
+
+        $pdo->exec("UPDATE `cost_calculator_items` cci
+            INNER JOIN `users` u ON LOWER(TRIM(cci.user_email)) = LOWER(TRIM(u.email))
+            SET cci.user_id = u.id
+            WHERE cci.user_id IS NULL");
+
+        $pdo->exec("UPDATE `cost_calculator_items` SET `manager_user_id` = `user_id` WHERE `manager_user_id` IS NULL AND `user_id` IS NOT NULL");
+    } catch (PDOException $e) {
+        error_log('migrateCostCalculatorSchema: ' . $e->getMessage());
+    }
+}
+
+/**
+ * @param PDO $pdo
+ */
+function seedInitialAdminIfNeeded(PDO $pdo) {
+    if (!defined('SEED_ADMIN_USERNAME') || !defined('SEED_ADMIN_EMAIL')) {
+        return;
+    }
+    $count = (int) $pdo->query('SELECT COUNT(*) AS c FROM users WHERE password_hash IS NOT NULL')->fetch()['c'];
+    if ($count > 0) {
+        return;
+    }
+    $username = SEED_ADMIN_USERNAME;
+    $email = strtolower(trim(SEED_ADMIN_EMAIL));
+    $pass = defined('SEED_ADMIN_PASSWORD') ? (string) SEED_ADMIN_PASSWORD : '';
+    if ($pass === '') {
+        return;
+    }
+    $dup = $pdo->prepare('SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1');
+    $dup->execute([$username, $email]);
+    if ($dup->fetch()) {
+        return;
+    }
+    $hash = password_hash($pass, PASSWORD_DEFAULT);
+    $stmt = $pdo->prepare('INSERT INTO users (org_id, username, email, password_hash, role, display_name)
+        VALUES (1, :u, :e, :p, :admin, :dn)');
+    $stmt->execute([
+        ':u' => $username,
+        ':e' => $email,
+        ':p' => $hash,
+        ':admin' => 'admin',
+        ':dn' => 'Test Admin',
+    ]);
+}
+
+/**
  * @param string $email
  */
 function ensureUserExists($email) {
     try {
         $pdo = getDBConnection();
-        $stmt = $pdo->prepare('INSERT IGNORE INTO users (email) VALUES (:email)');
+        $stmt = $pdo->prepare('INSERT IGNORE INTO users (org_id, email, role) VALUES (1, :email, \'member\')');
         $stmt->execute([':email' => $email]);
     } catch (PDOException $e) {
         error_log('Error ensuring user exists: ' . $e->getMessage());
