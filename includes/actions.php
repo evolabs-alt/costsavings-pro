@@ -74,7 +74,7 @@ function handleInviteMember() {
     $base = defined('BASE_URL') ? BASE_URL : '/';
     $link = rtrim($base, '/') . '/register.php?token=' . urlencode($plain);
     $body = '<p>You have been invited to join the Savvy CFO Cost Savings tool.</p><p><a href="' . htmlspecialchars($link) . '">Complete registration</a></p>';
-    sendEmail($email, 'Your invitation — Cost Savings Tool', $body);
+    sendEmail($email, 'Your invitation — Cost Savings Pro Tool', $body);
     $_SESSION['message'] = 'Invitation sent.';
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;

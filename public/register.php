@@ -66,17 +66,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register — Cost Savings Tool</title>
+    <title>Register — Cost Savings Pro Tool</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <style>
-        body { font-family: system-ui, sans-serif; max-width: 420px; margin: 40px auto; padding: 20px; }
-        label { display: block; margin-top: 12px; font-weight: 600; }
-        input { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; }
-        button { margin-top: 20px; padding: 10px 20px; background: #238FBE; color: white; border: none; border-radius: 6px; cursor: pointer; }
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            max-width: 440px;
+            margin: 40px auto;
+            padding: 28px 20px;
+            box-sizing: border-box;
+            min-height: 100vh;
+            background: linear-gradient(160deg, #f3effb 0%, #e8e2f4 40%, #d4c8e8 100%);
+        }
+        h1 {
+            font-family: 'Cormorant Garamond', Georgia, serif;
+            font-size: 1.85rem;
+            font-weight: 700;
+            text-align: center;
+            background: linear-gradient(135deg, #4a3f6b 0%, #6b5b95 50%, #8b7cb8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        label { display: block; margin-top: 14px; font-weight: 600; color: #4a3f6b; font-size: 14px; }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 16px 18px;
+            margin-top: 6px;
+            box-sizing: border-box;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            font-size: 16px;
+            font-family: inherit;
+            line-height: 1.4;
+            background: rgba(255,255,255,0.95);
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        input[type="text"]:focus, input[type="password"]:focus {
+            outline: none;
+            border-color: #6b5b95;
+            box-shadow: 0 0 0 3px rgba(107, 91, 149, 0.14);
+            background: #fff;
+        }
+        button {
+            margin-top: 22px;
+            padding: 14px 22px;
+            width: 100%;
+            background: linear-gradient(135deg, #7c6ba8, #5b4d8f);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        button:hover { filter: brightness(1.05); }
         .err { color: #b91c1c; margin-bottom: 12px; }
+        a { color: #5b4d8f; }
     </style>
 </head>
 <body>
-    <h1>Complete registration</h1>
+    <h1>Cost Savings Pro Tool</h1>
+    <p style="text-align:center;color:#5c4d7a;margin:0 0 20px;font-size:15px;">Complete your registration</p>
     <?php if ($error): ?><p class="err"><?php echo htmlspecialchars($error); ?></p><?php endif; ?>
     <form method="post">
         <input type="hidden" name="token" value="<?php echo htmlspecialchars($token); ?>">

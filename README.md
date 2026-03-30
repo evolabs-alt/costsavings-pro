@@ -1,4 +1,4 @@
-# Savvy CFO Cost Savings Tool
+# Savvy CFO Cost Savings Pro Tool
 
 PHP application for teams to track vendor costs, cancellation intent, and savings estimates. Data is stored in MySQL; optional GoHighLevel sync runs when a user saves their demographic role.
 

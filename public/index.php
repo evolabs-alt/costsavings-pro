@@ -440,7 +440,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Savvy CFO Cost Savings Tool</title>
+    <title>Savvy CFO Cost Savings Pro Tool</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-0Z8U4b0JvoQ9QP9N9Pn+a7piklQNoRxwGBUpzUgtjtY+2a9pYNHeT0ZWhhFodS0xsJD6ODwbF8vvZ57D7x6Grg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <style>
         /* Complete CSS Reset */
@@ -458,7 +461,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         body { 
             font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; 
-            background: linear-gradient(135deg, #238FBE 0%, #1a6d91 100%);
+            background: linear-gradient(160deg, #f3effb 0%, #e8e2f4 28%, #ddd2ec 55%, #d0c4e4 100%);
             margin: 0;
             padding: 20px 20px;
             min-height: 100vh;
@@ -481,10 +484,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .container {
             max-width: 700px; 
             margin: 0 auto; 
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.95) 50%, rgba(248, 250, 252, 0.95) 100%);
-            backdrop-filter: blur(10px);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(252, 250, 255, 0.96) 45%, rgba(248, 244, 255, 0.94) 100%);
+            backdrop-filter: blur(12px);
             border-radius: 20px; 
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1), 0 0 0 1px rgba(255,255,255,0.2);
+            box-shadow: 0 24px 56px rgba(74, 63, 107, 0.12), 0 0 0 1px rgba(107, 91, 149, 0.12);
             padding: 0; 
             position: relative;
             overflow: visible;
@@ -503,7 +506,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             left: 0;
             right: 0;
             height: 4px;
-            background: #238FBE;
+            background: linear-gradient(90deg, #7c6ba8, #5b4d8f, #6b5b95);
         }
         
         @keyframes gradientShift {
@@ -520,7 +523,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         .subtitle {
             text-align: center;
-            color: #424242;
+            color: #5c4d7a;
             font-size: 16px;
             margin: -15px 0 30px 0;
             line-height: 1.5;
@@ -528,8 +531,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
         
         h1 { 
-            font-size: 2.2em; 
-            color: #238FBE;
+            font-family: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+            font-size: 2.35em; 
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            background: linear-gradient(135deg, #4a3f6b 0%, #6b5b95 45%, #8b7cb8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
         
         /* Logo styling */
@@ -557,8 +566,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .ebook-promotion {
             margin-top: 40px;
             padding: 25px;
-            background: linear-gradient(135deg, rgba(35, 143, 190, 0.05), rgba(26, 109, 145, 0.05));
-            border: 1px solid rgba(35, 143, 190, 0.15);
+            background: linear-gradient(135deg, rgba(107, 91, 149, 0.05), rgba(26, 109, 145, 0.05));
+            border: 1px solid rgba(107, 91, 149, 0.15);
             border-radius: 12px;
             text-align: center;
             font-size: 14px;
@@ -573,35 +582,35 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
         
         .ebook-promotion .ebook-link {
-            color: #238FBE;
+            color: #6b5b95;
             text-decoration: none;
             font-weight: 600;
             transition: color 0.3s ease;
         }
         
         .ebook-promotion .ebook-link:hover {
-            color: #1a6d91;
+            color: #4a3f6b;
             text-decoration: underline;
         }
 
-        /* Placeholder/Cost Savings Tool Link Styles */
+        /* Placeholder / Cost Savings Pro Tool link styles */
         .cost-calculator-link {
             display: inline-block;
             padding: 15px 40px;
-            background: #238FBE;
+            background: #6b5b95;
             color: white;
             text-decoration: none;
             border-radius: 8px;
             font-size: 18px;
             font-weight: 600;
             transition: background 0.3s, transform 0.2s;
-            box-shadow: 0 4px 6px rgba(0, 120, 212, 0.3);
+            box-shadow: 0 4px 6px rgba(91, 77, 143, 0.28);
         }
 
         .cost-calculator-link:hover {
-            background: #1a6d91;
+            background: #4a3f6b;
             transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(0, 120, 212, 0.4);
+            box-shadow: 0 6px 12px rgba(91, 77, 143, 0.35);
         }
 
         .cost-calculator-link:active {
@@ -616,15 +625,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .placeholder-content p a {
-            color: #238FBE;
+            color: #6b5b95;
             text-decoration: underline;
         }
 
         .placeholder-content p a:hover {
-            color: #1a6d91;
+            color: #4a3f6b;
         }
 
-        /* Cost Savings Tool Grid Styles */
+        /* Cost Savings Pro Tool grid */
         .cost-calculator-table-wrapper {
             overflow-x: auto;
             overflow-y: visible;
@@ -645,12 +654,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
         
         .cost-calculator-table-wrapper::-webkit-scrollbar-thumb {
-            background: #238FBE;
+            background: #6b5b95;
             border-radius: 4px;
         }
         
         .cost-calculator-table-wrapper::-webkit-scrollbar-thumb:hover {
-            background: #1a6d91;
+            background: #4a3f6b;
         }
 
         .cost-calculator-grid {
@@ -663,7 +672,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .cost-calculator-grid thead {
-            background: #238FBE;
+            background: #6b5b95;
             color: white;
         }
 
@@ -671,7 +680,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             padding: 12px 8px;
             text-align: left;
             font-weight: 600;
-            border: 1px solid #1a6d91;
+            border: 1px solid #4a3f6b;
             font-size: 14px;
         }
 
@@ -701,8 +710,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .cost-calculator-grid select:focus,
         .cost-calculator-grid textarea:focus {
             outline: none;
-            border-color: #238FBE;
-            box-shadow: 0 0 0 2px rgba(35, 143, 190, 0.2);
+            border-color: #6b5b95;
+            box-shadow: 0 0 0 2px rgba(107, 91, 149, 0.2);
         }
 
         .cost-calculator-grid .item-number {
@@ -782,12 +791,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .report-filters select:focus {
             outline: none;
-            border-color: #238FBE;
-            box-shadow: 0 0 0 3px rgba(35, 143, 190, 0.1);
+            border-color: #6b5b95;
+            box-shadow: 0 0 0 3px rgba(107, 91, 149, 0.1);
         }
 
         .report-filters select:hover {
-            border-color: #238FBE;
+            border-color: #6b5b95;
         }
 
         .cost-calculator-grid .notes {
@@ -819,7 +828,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .add-row-btn {
-            background: #238FBE;
+            background: #6b5b95;
             color: white;
             border: none;
             padding: 10px 20px;
@@ -830,7 +839,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .add-row-btn:hover {
-            background: #1a6d91;
+            background: #4a3f6b;
         }
 
         .savings-summary {
@@ -843,7 +852,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .savings-section {
             padding: 20px;
             background: #f8f9fa;
-            border: 2px solid #238FBE;
+            border: 2px solid #6b5b95;
             border-radius: 8px;
             text-align: center;
         }
@@ -860,7 +869,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .savings-amount {
             font-size: 32px;
             font-weight: 700;
-            color: #238FBE;
+            color: #6b5b95;
         }
 
         .confirmed-savings-amount {
@@ -1040,12 +1049,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
         
         .score-display-card {
-            background: linear-gradient(135deg, #238FBE, #1a6d91);
+            background: linear-gradient(135deg, #6b5b95, #4a3f6b);
             color: white;
             padding: 30px;
             border-radius: 15px;
             text-align: center;
-            box-shadow: 0 8px 25px rgba(35, 143, 190, 0.3);
+            box-shadow: 0 8px 25px rgba(107, 91, 149, 0.3);
             margin-bottom: 20px;
         }
         
@@ -1142,7 +1151,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
         
         .generate-summary-btn {
-            background: linear-gradient(135deg, #238FBE, #1a6d91);
+            background: linear-gradient(135deg, #6b5b95, #4a3f6b);
             color: white;
             border: none;
             padding: 12px 25px;
@@ -1156,7 +1165,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         .generate-summary-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(35, 143, 190, 0.3);
+            box-shadow: 0 6px 20px rgba(107, 91, 149, 0.3);
         }
         
         .score-actions-section {
@@ -1176,7 +1185,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
         
         .primary-btn {
-            background: #238FBE;
+            background: #6b5b95;
             color: white;
             border: none;
             padding: 12px 24px;
@@ -1188,9 +1197,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
         
         .primary-btn:hover {
-            background: #106ebe;
+            background: #5b4d8f;
             transform: translateY(-1px);
-            box-shadow: 0 4px 15px rgba(0, 120, 212, 0.3);
+            box-shadow: 0 4px 15px rgba(91, 77, 143, 0.28);
         }
         
         .secondary-btn {
@@ -1222,7 +1231,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             height: 20px;
             border: 2px solid #e2e8f0;
             border-radius: 50%;
-            border-top-color: #238FBE;
+            border-top-color: #6b5b95;
             animation: spin 1s ease-in-out infinite;
             margin-right: 10px;
         }
@@ -1278,7 +1287,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             height: 20px;
             margin-top: 2px;
             flex-shrink: 0;
-            accent-color: #238FBE;
+            accent-color: #6b5b95;
             cursor: pointer;
         }
 
@@ -1289,35 +1298,45 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .checkbox-label a {
-            color: #238FBE;
+            color: #6b5b95;
             text-decoration: underline;
         }
 
         .checkbox-label a:hover {
-            color: #1a6d91;
+            color: #4a3f6b;
         }
         
-        input[type="email"], input[type="text"], select { 
+        input[type="email"], input[type="text"], input[type="password"], select { 
             width: 100%; 
             padding: 16px 20px; 
             border: 2px solid #e5e7eb; 
             border-radius: 12px; 
             font-size: 16px; 
+            line-height: 1.4;
             transition: all 0.3s ease;
-            background: rgba(255, 255, 255, 0.8);
+            background: rgba(255, 255, 255, 0.92);
             backdrop-filter: blur(10px);
+            font-family: inherit;
+            -webkit-appearance: none;
+            appearance: none;
+            box-sizing: border-box;
+        }
+
+        input[type="password"] {
+            letter-spacing: 0.02em;
         }
         
-        input[type="email"]:focus, input[type="text"]:focus, select:focus { 
+        input[type="email"]:focus, input[type="text"]:focus, input[type="password"]:focus, select:focus { 
             outline: none;
-            border-color: #238FBE;
-            box-shadow: 0 0 0 3px rgba(35, 143, 190, 0.1);
+            border-color: #6b5b95;
+            box-shadow: 0 0 0 3px rgba(107, 91, 149, 0.14);
             transform: translateY(-2px);
+            background: #fff;
         }
         
         button { 
             padding: 16px 32px; 
-            background: linear-gradient(135deg, #238FBE, #1a6d91); 
+            background: linear-gradient(135deg, #6b5b95, #4a3f6b); 
             color: #fff; 
             border: none; 
             border-radius: 12px; 
@@ -1347,7 +1366,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         button:hover { 
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(35, 143, 190, 0.3);
+            box-shadow: 0 8px 25px rgba(107, 91, 149, 0.3);
         }
         
         .btn-secondary { 
@@ -1394,12 +1413,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .role-option:hover {
-            border-color: #238FBE;
-            box-shadow: 0 6px 18px rgba(35, 143, 190, 0.15);
+            border-color: #6b5b95;
+            box-shadow: 0 6px 18px rgba(107, 91, 149, 0.15);
         }
 
         .role-option input[type="radio"] {
-            accent-color: #238FBE;
+            accent-color: #6b5b95;
             width: 20px;
             height: 20px;
             flex-shrink: 0;
@@ -1517,7 +1536,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
         
         .progress-bar { 
-            background: linear-gradient(90deg, #238FBE, #1a6d91); 
+            background: linear-gradient(90deg, #6b5b95, #4a3f6b); 
             height: 100%; 
             border-radius: 8px; 
             transition: width 0.6s ease;
@@ -1542,7 +1561,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         /* Section styling */
         .section-header { 
-            background: linear-gradient(135deg, #238FBE 0%, #1a6d91 100%); 
+            background: linear-gradient(135deg, #6b5b95 0%, #4a3f6b 100%); 
             color: white; 
             padding: 20px 25px; 
             margin: 0; 
@@ -1552,7 +1571,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             font-weight: 700;
             letter-spacing: 0.5px;
             position: relative;
-            box-shadow: 0 4px 15px rgba(35, 143, 190, 0.3);
+            box-shadow: 0 4px 15px rgba(107, 91, 149, 0.3);
         }
         
         .section-header::after {
@@ -1565,7 +1584,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             height: 0;
             border-left: 15px solid transparent;
             border-right: 15px solid transparent;
-            border-top: 10px solid #1a6d91;
+            border-top: 10px solid #4a3f6b;
         }
 
         /* Content padding for areas that need it */
@@ -1586,22 +1605,22 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         /* Popup link styling */
         .popup-link {
-            color: #238FBE;
+            color: #6b5b95;
             cursor: pointer;
             text-decoration: none;
             font-weight: 600;
             margin: 15px 0;
             display: inline-block;
             padding: 12px 20px;
-            background: rgba(35, 143, 190, 0.1);
+            background: rgba(107, 91, 149, 0.1);
             border-radius: 8px;
             transition: all 0.3s ease;
             border: 2px solid transparent;
         }
         .popup-link:hover {
             color: #4f46e5;
-            background: rgba(35, 143, 190, 0.2);
-            border-color: rgba(35, 143, 190, 0.3);
+            background: rgba(107, 91, 149, 0.2);
+            border-color: rgba(107, 91, 149, 0.3);
             transform: translateY(-2px);
         }
 
@@ -1644,7 +1663,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .modal-header {
-            background: linear-gradient(135deg, #238FBE, #1a6d91);
+            background: linear-gradient(135deg, #6b5b95, #4a3f6b);
             color: white;
             padding: 20px;
             margin: -30px -30px 20px -30px;
@@ -1698,7 +1717,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .modal-body::-webkit-scrollbar-thumb {
-            background: linear-gradient(135deg, #238FBE, #1a6d91);
+            background: linear-gradient(135deg, #6b5b95, #4a3f6b);
             border-radius: 4px;
         }
 
@@ -1724,12 +1743,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             top: 0;
             bottom: 0;
             width: 4px;
-            background: linear-gradient(135deg, #238FBE, #1a6d91);
+            background: linear-gradient(135deg, #6b5b95, #4a3f6b);
         }
         
         .performance-tier:hover {
             transform: translateX(5px);
-            box-shadow: 0 8px 25px rgba(35, 143, 190, 0.15);
+            box-shadow: 0 8px 25px rgba(107, 91, 149, 0.15);
         }
 
         .tier-title {
@@ -1737,7 +1756,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             color: #1f2937;
             margin-bottom: 12px;
             font-size: 17px;
-            background: linear-gradient(135deg, #238FBE, #1a6d91);
+            background: linear-gradient(135deg, #6b5b95, #4a3f6b);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
@@ -1752,9 +1771,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .action-item {
             margin-bottom: 20px;
             padding: 20px;
-            background: linear-gradient(135deg, #eff6ff, #dbeafe);
+            background: linear-gradient(135deg, #f5f0ff, #ede9fe);
             border-radius: 12px;
-            border-left: 4px solid #238FBE;
+            border-left: 4px solid #6b5b95;
             transition: all 0.3s ease;
             position: relative;
             overflow: hidden;
@@ -1762,7 +1781,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         .action-item:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(35, 143, 190, 0.2);
+            box-shadow: 0 8px 25px rgba(107, 91, 149, 0.2);
         }
 
         .action-item.pro-tip {
@@ -1811,7 +1830,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .ai-guidance-header {
-            background: linear-gradient(135deg, #238FBE, #1a6d91);
+            background: linear-gradient(135deg, #6b5b95, #4a3f6b);
             color: white;
             padding: 20px;
             margin: -30px -30px 20px -30px;
@@ -1872,7 +1891,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .chat-bubble.user-bubble {
-            background: linear-gradient(135deg, #238FBE, #1a6d91);
+            background: linear-gradient(135deg, #6b5b95, #4a3f6b);
             color: white;
             border-bottom-right-radius: 6px;
         }
@@ -1903,12 +1922,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .chat-input:focus {
-            border-color: #238FBE;
-            box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.2);
+            border-color: #6b5b95;
+            box-shadow: 0 0 0 2px rgba(91, 77, 143, 0.2);
         }
 
         .chat-send-button {
-            background: #238FBE;
+            background: #6b5b95;
             color: white;
             border: none;
             padding: 10px 20px;
@@ -1919,7 +1938,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .chat-send-button:hover:not(:disabled) {
-            background: #1a6d91;
+            background: #4a3f6b;
         }
 
         .chat-send-button:disabled {
@@ -1951,7 +1970,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .ai-guidance-content::-webkit-scrollbar-thumb {
-            background: linear-gradient(135deg, #238FBE, #1a6d91);
+            background: linear-gradient(135deg, #6b5b95, #4a3f6b);
             border-radius: 4px;
         }
 
@@ -1960,7 +1979,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .ai-guidance-content h4 {
-            color: #238FBE;
+            color: #6b5b95;
             margin-top: 20px;
             margin-bottom: 10px;
         }
@@ -1984,7 +2003,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             width: 30px;
             height: 30px;
             border: 3px solid #f3f3f3;
-            border-top: 3px solid #238FBE;
+            border-top: 3px solid #6b5b95;
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin-bottom: 15px;
@@ -2003,7 +2022,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .ai-guidance-button {
-            background: #238FBE;
+            background: #6b5b95;
             color: white;
             border: none;
             padding: 12px 30px;
@@ -2014,7 +2033,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .ai-guidance-        button:hover { 
-            background: #1a6d91;
+            background: #4a3f6b;
         }
 
         .ai-guidance-button.secondary {
@@ -2107,7 +2126,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 padding: 20px !important;
             }
             
-            input[type="email"], input[type="text"], select {
+            input[type="email"], input[type="text"], input[type="password"], select {
                 padding: 14px 16px;
             }
             
@@ -2133,7 +2152,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             top: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background: linear-gradient(135deg, #238FBE 0%, #1a6d91 100%);
+            background: linear-gradient(135deg, #6b5b95 0%, #4a3f6b 100%);
             color: white;
             text-align: center;
             border-radius: 12px;
@@ -2252,7 +2271,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         <div class="container">
             <?php if ($current_view === 'login'): ?>
             <div class="content-padding login-page">
-                <h1>Cost Savings Tool</h1>
+                <h1>Cost Savings Pro Tool</h1>
                 <p class="subtitle">Sign in with your username and password.</p>
             
             <?php if (!empty($_SESSION['awaiting_role'])): ?>
@@ -2302,12 +2321,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         <?php elseif ($current_view === 'placeholder'): ?>
             <div class="content-padding">
-                <h1>Cost Savings Tool</h1>
+                <h1>Cost Savings Pro Tool</h1>
                 <p class="subtitle" style="margin-bottom:16px;">Signed in as <?php echo htmlspecialchars($_SESSION['username'] ?? $_SESSION['user_email'] ?? ''); ?>
                     <?php if ($is_admin): ?> (Admin)<?php endif; ?></p>
 
                 <?php if ($is_admin): ?>
-                <div class="admin-bar" style="margin-bottom:16px;padding:12px;background:#f0f9ff;border-radius:8px;border:1px solid #bae6fd;">
+                <div class="admin-bar" style="margin-bottom:16px;padding:12px;background:linear-gradient(135deg,#faf8ff,#f3effb);border-radius:8px;border:1px solid #d4c4e8;">
                     <form method="POST" style="display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">
                         <input type="hidden" name="action" value="invite_member">
                         <label>Invite member email</label>
@@ -2324,9 +2343,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
                 <div class="tool-bar" style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
                     <a href="?action=export_vendors&amp;format=xlsx" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;">Download Excel</a>
-                    <a href="?action=export_vendors&amp;format=pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#1a6d91;">Download PDF</a>
-                    <a href="?action=export_vendors&amp;format=summary_pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#0f766e;">Executive summary PDF</a>
-                    <label style="cursor:pointer;padding:8px 12px;background:#e0f2fe;border-radius:6px;">
+                    <a href="?action=export_vendors&amp;format=pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#4a3f6b;">Download PDF</a>
+                    <a href="?action=export_vendors&amp;format=summary_pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#5b4d8f;">Executive summary PDF</a>
+                    <label style="cursor:pointer;padding:8px 12px;background:#ede9fe;border-radius:6px;border:1px solid #d4c4e8;">
                         Import CSV
                         <input type="file" id="csvImportInput" accept=".csv,text/csv" style="display:none;">
                     </label>
@@ -2337,9 +2356,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     </form>
                 </div>
 
-                <div id="aiAssistant" style="margin-bottom:20px;padding:16px;background:#fafafa;border-radius:8px;border:1px solid #e5e7eb;">
-                    <h3 style="margin-bottom:8px;font-size:16px;">Ask AI (Savvy CFO)</h3>
-                    <p style="font-size:13px;color:#64748b;margin-bottom:8px;">Up to 50 questions per month per user.</p>
+                <div id="aiAssistant" style="margin-bottom:20px;padding:18px;background:linear-gradient(145deg,#faf8ff,#f5f0ff);border-radius:12px;border:1px solid #e4daf5;box-shadow:0 4px 20px rgba(74,63,107,0.06);">
+                    <h3 style="margin-bottom:8px;font-size:17px;font-family:'Cormorant Garamond',Georgia,serif;color:#4a3f6b;font-weight:700;">Ask AI (Savvy CFO)</h3>
+                    <p style="font-size:13px;color:#6b5b80;margin-bottom:8px;">Up to 50 questions per month per user.</p>
                     <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
                         <button type="button" class="btn-secondary ai-preset" data-preset="overlap">Overlap between vendors</button>
                         <button type="button" class="btn-secondary ai-preset" data-preset="alternatives">Cheaper alternatives</button>
@@ -2349,7 +2368,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     </div>
                     <textarea id="aiQuestion" rows="2" style="width:100%;max-width:100%;box-sizing:border-box;margin-bottom:8px;" placeholder="Ask a specific question..."></textarea>
                     <button type="button" id="aiSubmitBtn">Ask</button>
-                    <pre id="aiReply" style="margin-top:12px;white-space:pre-wrap;font-size:13px;background:#fff;padding:12px;border-radius:6px;border:1px solid #e5e7eb;max-height:240px;overflow:auto;"></pre>
+                    <pre id="aiReply" style="margin-top:12px;white-space:pre-wrap;font-size:13px;background:#fff;padding:12px;border-radius:8px;border:1px solid #e4daf5;max-height:240px;overflow:auto;"></pre>
                 </div>
                 
                 <div class="report-filters">
