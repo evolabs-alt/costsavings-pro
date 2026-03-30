@@ -423,14 +423,17 @@ if ($is_logged_in && !empty($_SESSION['org_id'])) {
     }
 }
 
+$team_members_rows = [];
 $team_members_json = '[]';
 if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id'])) {
     try {
         $pdoTeam = getDBConnection();
-        $stTeam = $pdoTeam->prepare('SELECT id, username, display_name, email FROM users WHERE org_id = ? ORDER BY username, email');
+        $stTeam = $pdoTeam->prepare('SELECT id, username, display_name, email, role FROM users WHERE org_id = ? ORDER BY username, email');
         $stTeam->execute([(int) $_SESSION['org_id']]);
-        $team_members_json = json_encode($stTeam->fetchAll(PDO::FETCH_ASSOC), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+        $team_members_rows = $stTeam->fetchAll(PDO::FETCH_ASSOC);
+        $team_members_json = json_encode($team_members_rows, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
     } catch (Exception $e) {
+        $team_members_rows = [];
         $team_members_json = '[]';
     }
 }
@@ -2032,8 +2035,151 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             margin: 0 10px;
         }
 
-        .ai-guidance-        button:hover { 
+        .ai-guidance-button:hover {
             background: #4a3f6b;
+        }
+
+        .app-nav {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 18px;
+            align-items: center;
+        }
+
+        .app-nav-btn {
+            font-family: 'Inter', system-ui, sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            padding: 10px 18px;
+            border-radius: 8px;
+            border: 1px solid #d4c4e8;
+            background: linear-gradient(135deg, #faf8ff, #f3effb);
+            color: #4a3f6b;
+            cursor: pointer;
+            transition: background 0.15s ease, border-color 0.15s ease;
+        }
+
+        .app-nav-btn:hover {
+            background: #ede9fe;
+            border-color: #b8a5d9;
+        }
+
+        .app-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            background: rgba(45, 35, 70, 0.45);
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .app-modal-overlay.is-open {
+            display: flex;
+        }
+
+        .app-modal {
+            background: #fff;
+            border-radius: 12px;
+            border: 1px solid #e4daf5;
+            box-shadow: 0 20px 50px rgba(74, 63, 107, 0.18);
+            max-width: 640px;
+            width: 100%;
+            max-height: min(90vh, 720px);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .app-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 14px 18px;
+            border-bottom: 1px solid #ede9fe;
+            background: linear-gradient(135deg, #faf8ff, #f8f5fc);
+        }
+
+        .app-modal-header h2 {
+            margin: 0;
+            font-size: 1.25rem;
+            font-family: 'Cormorant Garamond', Georgia, serif;
+            color: #4a3f6b;
+            font-weight: 700;
+        }
+
+        .app-modal-close {
+            border: none;
+            background: transparent;
+            font-size: 1.5rem;
+            line-height: 1;
+            cursor: pointer;
+            color: #6b5b80;
+            padding: 4px 8px;
+            border-radius: 6px;
+        }
+
+        .app-modal-close:hover {
+            background: #ede9fe;
+            color: #4a3f6b;
+        }
+
+        .app-modal-body {
+            padding: 16px 18px;
+            overflow-y: auto;
+            font-size: 14px;
+        }
+
+        .members-table-wrap {
+            margin-top: 16px;
+            overflow-x: auto;
+        }
+
+        .members-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .members-table th,
+        .members-table td {
+            text-align: left;
+            padding: 8px 10px;
+            border-bottom: 1px solid #ede9fe;
+        }
+
+        .members-table th {
+            font-weight: 600;
+            color: #4a3f6b;
+            background: #faf8ff;
+        }
+
+        .app-modal-body .invite-block {
+            margin-bottom: 12px;
+            padding: 12px;
+            background: linear-gradient(135deg, #faf8ff, #f3effb);
+            border-radius: 8px;
+            border: 1px solid #d4c4e8;
+        }
+
+        .app-modal-body .data-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .app-modal-body .settings-block {
+            margin-bottom: 16px;
+            padding: 12px;
+            background: #f9fafb;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
         }
 
         .ai-guidance-button.secondary {
@@ -2325,52 +2471,131 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <p class="subtitle" style="margin-bottom:16px;">Signed in as <?php echo htmlspecialchars($_SESSION['username'] ?? $_SESSION['user_email'] ?? ''); ?>
                     <?php if ($is_admin): ?> (Admin)<?php endif; ?></p>
 
-                <?php if ($is_admin): ?>
-                <div class="admin-bar" style="margin-bottom:16px;padding:12px;background:linear-gradient(135deg,#faf8ff,#f3effb);border-radius:8px;border:1px solid #d4c4e8;">
-                    <form method="POST" style="display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">
-                        <input type="hidden" name="action" value="invite_member">
-                        <label>Invite member email</label>
-                        <input type="email" name="email" required placeholder="member@company.com" style="min-width:200px;">
-                        <button type="submit">Send invite</button>
-                    </form>
-                    <form method="POST" style="display:inline-flex;align-items:center;gap:8px;">
-                        <input type="hidden" name="action" value="save_org_reminders">
-                        <label><input type="checkbox" name="deadline_reminders_enabled" value="1" <?php echo $deadline_reminders_org ? 'checked' : ''; ?>> Org: deadline email assistant</label>
-                        <button type="submit">Save</button>
-                    </form>
-                </div>
-                <?php endif; ?>
+                <nav class="app-nav" aria-label="App sections">
+                    <button type="button" class="app-nav-btn" data-open-modal="appModalMembers">Members</button>
+                    <button type="button" class="app-nav-btn" data-open-modal="appModalAI">AI</button>
+                    <button type="button" class="app-nav-btn" data-open-modal="appModalData">Data</button>
+                    <button type="button" class="app-nav-btn" data-open-modal="appModalSettings">Settings</button>
+                </nav>
 
-                <div class="tool-bar" style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
-                    <a href="?action=export_vendors&amp;format=xlsx" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;">Download Excel</a>
-                    <a href="?action=export_vendors&amp;format=pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#4a3f6b;">Download PDF</a>
-                    <a href="?action=export_vendors&amp;format=summary_pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#5b4d8f;">Executive summary PDF</a>
-                    <label style="cursor:pointer;padding:8px 12px;background:#ede9fe;border-radius:6px;border:1px solid #d4c4e8;">
-                        Import CSV
-                        <input type="file" id="csvImportInput" accept=".csv,text/csv" style="display:none;">
-                    </label>
-                    <form method="POST" style="display:inline-flex;align-items:center;gap:6px;">
-                        <input type="hidden" name="action" value="save_user_reminder_pref">
-                        <label style="font-size:14px;"><input type="checkbox" name="user_deadline_reminders" value="1" <?php echo $deadline_reminders_user ? 'checked' : ''; ?>> My deadline reminders</label>
-                        <button type="submit" style="padding:6px 10px;">Save</button>
-                    </form>
-                </div>
-
-                <div id="aiAssistant" style="margin-bottom:20px;padding:18px;background:linear-gradient(145deg,#faf8ff,#f5f0ff);border-radius:12px;border:1px solid #e4daf5;box-shadow:0 4px 20px rgba(74,63,107,0.06);">
-                    <h3 style="margin-bottom:8px;font-size:17px;font-family:'Cormorant Garamond',Georgia,serif;color:#4a3f6b;font-weight:700;">Ask AI (Savvy CFO)</h3>
-                    <p style="font-size:13px;color:#6b5b80;margin-bottom:8px;">Up to 50 questions per month per user.</p>
-                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-                        <button type="button" class="btn-secondary ai-preset" data-preset="overlap">Overlap between vendors</button>
-                        <button type="button" class="btn-secondary ai-preset" data-preset="alternatives">Cheaper alternatives</button>
-                        <button type="button" class="btn-secondary ai-preset" data-preset="lower_tiers">Lower service tiers</button>
-                        <button type="button" class="btn-secondary ai-preset" data-preset="duplicates">Duplicate subscriptions</button>
-                        <button type="button" class="btn-secondary ai-preset" data-preset="executive">Executive summary suggestions</button>
+                <div class="app-modal-overlay" id="appModalMembers" role="dialog" aria-modal="true" aria-labelledby="appModalMembersTitle" aria-hidden="true">
+                    <div class="app-modal" tabindex="-1">
+                        <div class="app-modal-header">
+                            <h2 id="appModalMembersTitle">Members</h2>
+                            <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+                        </div>
+                        <div class="app-modal-body">
+                            <?php if ($is_admin): ?>
+                            <div class="invite-block">
+                                <form method="POST" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                                    <input type="hidden" name="action" value="invite_member">
+                                    <label>Invite member email</label>
+                                    <input type="email" name="email" required placeholder="member@company.com" style="min-width:200px;">
+                                    <button type="submit">Send invite</button>
+                                </form>
+                            </div>
+                            <?php endif; ?>
+                            <div class="members-table-wrap">
+                                <table class="members-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Email</th>
+                                            <th>Role</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php if (empty($team_members_rows)): ?>
+                                        <tr><td colspan="3">No members in this organization yet.</td></tr>
+                                        <?php else: ?>
+                                        <?php foreach ($team_members_rows as $tm): ?>
+                                        <tr>
+                                            <td><?php echo htmlspecialchars($tm['display_name'] ?? $tm['username'] ?? '—'); ?></td>
+                                            <td><?php echo htmlspecialchars($tm['email'] ?? ''); ?></td>
+                                            <td><?php echo htmlspecialchars($tm['role'] ?? 'member'); ?></td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
-                    <textarea id="aiQuestion" rows="2" style="width:100%;max-width:100%;box-sizing:border-box;margin-bottom:8px;" placeholder="Ask a specific question..."></textarea>
-                    <button type="button" id="aiSubmitBtn">Ask</button>
-                    <pre id="aiReply" style="margin-top:12px;white-space:pre-wrap;font-size:13px;background:#fff;padding:12px;border-radius:8px;border:1px solid #e4daf5;max-height:240px;overflow:auto;"></pre>
                 </div>
-                
+
+                <div class="app-modal-overlay" id="appModalAI" role="dialog" aria-modal="true" aria-labelledby="appModalAITitle" aria-hidden="true">
+                    <div class="app-modal" tabindex="-1">
+                        <div class="app-modal-header">
+                            <h2 id="appModalAITitle">Ask AI</h2>
+                            <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+                        </div>
+                        <div class="app-modal-body">
+                            <div id="aiAssistant" style="padding:18px;background:linear-gradient(145deg,#faf8ff,#f5f0ff);border-radius:12px;border:1px solid #e4daf5;box-shadow:0 4px 20px rgba(74,63,107,0.06);">
+                                <h3 style="margin-bottom:8px;font-size:17px;font-family:'Cormorant Garamond',Georgia,serif;color:#4a3f6b;font-weight:700;">Ask AI (Savvy CFO)</h3>
+                                <p style="font-size:13px;color:#6b5b80;margin-bottom:8px;">Up to 50 questions per month per user.</p>
+                                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+                                    <button type="button" class="btn-secondary ai-preset" data-preset="overlap">Overlap between vendors</button>
+                                    <button type="button" class="btn-secondary ai-preset" data-preset="alternatives">Cheaper alternatives</button>
+                                    <button type="button" class="btn-secondary ai-preset" data-preset="lower_tiers">Lower service tiers</button>
+                                    <button type="button" class="btn-secondary ai-preset" data-preset="duplicates">Duplicate subscriptions</button>
+                                    <button type="button" class="btn-secondary ai-preset" data-preset="executive">Executive summary suggestions</button>
+                                </div>
+                                <textarea id="aiQuestion" rows="2" style="width:100%;max-width:100%;box-sizing:border-box;margin-bottom:8px;" placeholder="Ask a specific question..."></textarea>
+                                <button type="button" id="aiSubmitBtn">Ask</button>
+                                <pre id="aiReply" style="margin-top:12px;white-space:pre-wrap;font-size:13px;background:#fff;padding:12px;border-radius:8px;border:1px solid #e4daf5;max-height:240px;overflow:auto;"></pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="app-modal-overlay" id="appModalData" role="dialog" aria-modal="true" aria-labelledby="appModalDataTitle" aria-hidden="true">
+                    <div class="app-modal" tabindex="-1">
+                        <div class="app-modal-header">
+                            <h2 id="appModalDataTitle">Data</h2>
+                            <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+                        </div>
+                        <div class="app-modal-body">
+                            <p style="margin:0 0 12px;color:#4b5563;">Download reports or import vendor data from CSV.</p>
+                            <div class="data-actions">
+                                <a href="?action=export_vendors&amp;format=xlsx" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;">Download Excel</a>
+                                <a href="?action=export_vendors&amp;format=pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#4a3f6b;">Download PDF</a>
+                                <a href="?action=export_vendors&amp;format=summary_pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#5b4d8f;">Executive summary PDF</a>
+                                <label style="cursor:pointer;padding:8px 12px;background:#ede9fe;border-radius:6px;border:1px solid #d4c4e8;">
+                                    Import CSV
+                                    <input type="file" id="csvImportInput" accept=".csv,text/csv" style="display:none;">
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="app-modal-overlay" id="appModalSettings" role="dialog" aria-modal="true" aria-labelledby="appModalSettingsTitle" aria-hidden="true">
+                    <div class="app-modal" tabindex="-1">
+                        <div class="app-modal-header">
+                            <h2 id="appModalSettingsTitle">Settings</h2>
+                            <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+                        </div>
+                        <div class="app-modal-body">
+                            <?php if ($is_admin): ?>
+                            <div class="settings-block">
+                                <form method="POST" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
+                                    <input type="hidden" name="action" value="save_org_reminders">
+                                    <label><input type="checkbox" name="deadline_reminders_enabled" value="1" <?php echo $deadline_reminders_org ? 'checked' : ''; ?>> Org: deadline email assistant</label>
+                                    <button type="submit">Save</button>
+                                </form>
+                            </div>
+                            <?php endif; ?>
+                            <div class="settings-block">
+                                <form method="POST" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
+                                    <input type="hidden" name="action" value="save_user_reminder_pref">
+                                    <label style="font-size:14px;"><input type="checkbox" name="user_deadline_reminders" value="1" <?php echo $deadline_reminders_user ? 'checked' : ''; ?>> My deadline reminders</label>
+                                    <button type="submit" style="padding:6px 10px;">Save</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="report-filters">
                     <label for="reportFilter">Report Filters:</label>
                     <select id="reportFilter" onchange="filterTableRows(this.value)">
@@ -2423,6 +2648,49 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             
             <script>
             let rowCount = 0;
+            function openAppModal(overlay) {
+                if (!overlay) return;
+                overlay.classList.add('is-open');
+                overlay.setAttribute('aria-hidden', 'false');
+                document.body.style.overflow = 'hidden';
+                var focusable = overlay.querySelector('button, [href], input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])');
+                if (focusable) focusable.focus();
+            }
+            function closeAppModal(overlay) {
+                if (!overlay) return;
+                overlay.classList.remove('is-open');
+                overlay.setAttribute('aria-hidden', 'true');
+                if (!document.querySelector('.app-modal-overlay.is-open')) {
+                    document.body.style.overflow = '';
+                }
+            }
+            function initAppModals() {
+                document.querySelectorAll('.app-nav-btn').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        var id = btn.getAttribute('data-open-modal');
+                        var el = id ? document.getElementById(id) : null;
+                        if (el) openAppModal(el);
+                    });
+                });
+                document.querySelectorAll('.app-modal-overlay').forEach(function(overlay) {
+                    var modal = overlay.querySelector('.app-modal');
+                    if (modal) {
+                        modal.addEventListener('click', function(e) { e.stopPropagation(); });
+                    }
+                    overlay.addEventListener('click', function(e) {
+                        if (e.target === overlay) closeAppModal(overlay);
+                    });
+                    overlay.querySelectorAll('.app-modal-close').forEach(function(b) {
+                        b.addEventListener('click', function() { closeAppModal(overlay); });
+                    });
+                });
+                document.addEventListener('keydown', function(e) {
+                    if (e.key !== 'Escape') return;
+                    document.querySelectorAll('.app-modal-overlay.is-open').forEach(function(ov) {
+                        closeAppModal(ov);
+                    });
+                });
+            }
             const TEAM_MEMBERS = <?php echo $team_members_json; ?>;
             const IS_ADMIN = <?php echo $is_admin ? 'true' : 'false'; ?>;
             const CURRENT_USER_ID = <?php echo (int) ($_SESSION['user_id'] ?? 0); ?>;
@@ -2987,6 +3255,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             
             // Initialize: Load data on page load; flush debounced saves before refresh/navigation
             document.addEventListener('DOMContentLoaded', function() {
+                initAppModals();
                 loadCalculatorData();
                 var csvIn = document.getElementById('csvImportInput');
                 if (csvIn) {
