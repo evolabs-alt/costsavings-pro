@@ -43,6 +43,7 @@ function sendEmail($to, $subject, $body) {
     $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
 
     try {
+        $mail->CharSet = 'UTF-8';
         $mail->SMTPDebug = 0;
         $mail->isSMTP();
         $mail->Host = SMTP_HOST;
@@ -59,20 +60,33 @@ function sendEmail($to, $subject, $body) {
             ],
         ];
         $mail->setFrom(SMTP_FROM_EMAIL, SMTP_FROM_NAME);
+        // Align envelope sender with From (helps SPF/DMARC on strict hosts).
+        if (defined('SMTP_ENVELOPE_FROM') && SMTP_ENVELOPE_FROM !== '') {
+            $mail->Sender = SMTP_ENVELOPE_FROM;
+        } else {
+            $mail->Sender = SMTP_FROM_EMAIL;
+        }
+        $mail->addReplyTo(SMTP_FROM_EMAIL, SMTP_FROM_NAME);
         $mail->addAddress($to);
         $mail->isHTML(true);
         $mail->Subject = $subject;
         $mail->Body = $body;
+        $plain = html_entity_decode(
+            strip_tags(str_ireplace(['<br>', '<br/>', '<br />'], "\n", $body)),
+            ENT_QUOTES | ENT_HTML5,
+            'UTF-8'
+        );
+        $mail->AltBody = trim($plain) !== '' ? trim($plain) : 'Please view this message in an HTML-capable email client.';
         $mail->send();
 
         return true;
-    } catch (\PHPMailer\PHPMailer\Exception $e) {
+    } catch (\Throwable $e) {
         error_log('PHPMailer sending failed: ' . $e->getMessage());
 
         return [
             'success' => false,
             'error_message' => $e->getMessage(),
-            'error_info' => $mail->ErrorInfo,
+            'error_info' => isset($mail->ErrorInfo) ? $mail->ErrorInfo : '',
         ];
     }
 }

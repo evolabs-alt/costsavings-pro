@@ -111,7 +111,10 @@ function handleInviteMember() {
     $invId = (int) $pdo->lastInsertId();
 
     $link = publicAppBaseUrl() . 'register.php?token=' . urlencode($plain);
-    $body = '<p>You have been invited to join the Savvy CFO Cost Savings tool.</p><p><a href="' . htmlspecialchars($link) . '">Complete registration</a></p>';
+    $body = '<p>You have been invited to join the Savvy CFO Cost Savings tool.</p>'
+        . '<p><a href="' . htmlspecialchars($link) . '">Complete registration</a></p>'
+        . '<p style="font-size:13px;color:#555;">If the link above does not work, copy and paste this address into your browser:<br>'
+        . htmlspecialchars($link) . '</p>';
     $mailResult = sendEmail($email, 'Your invitation — Cost Savings Pro Tool', $body);
     if ($mailResult !== true) {
         try {
@@ -131,7 +134,7 @@ function handleInviteMember() {
         $_SESSION['error'] = 'Could not send invitation email. Check SMTP settings in config or contact support.';
         $redir();
     }
-    $_SESSION['message'] = 'Invitation sent.';
+    $_SESSION['message'] = 'Invitation sent. If the recipient does not see it within a few minutes, ask them to check spam/junk and promotions tabs.';
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;
 }

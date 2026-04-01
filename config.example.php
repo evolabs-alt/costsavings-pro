@@ -12,6 +12,7 @@ define('SMTP_USERNAME', 'user@example.com');
 define('SMTP_PASSWORD', 'your-smtp-password');
 define('SMTP_FROM_EMAIL', 'user@example.com');
 define('SMTP_FROM_NAME', 'Savvy CFO Portal');
+/** Optional Return-Path. If messages are accepted but never arrive (e.g. Gmail), set to the same address you use for SMTP_USERNAME. Example: define('SMTP_ENVELOPE_FROM', 'user@example.com'); */
 
 define('GHL_API_KEY', 'your-ghl-private-integration-token');
 define('GHL_LOCATION_ID', 'your-location-id');

@@ -53,18 +53,24 @@ class AiService
         $ym = date('Y-m');
         $limit = defined('AI_MONTHLY_LIMIT') ? (int) AI_MONTHLY_LIMIT : 50;
 
-        $st0 = $pdo->prepare('SELECT count FROM ai_usage WHERE user_id = ? AND year_month = ?');
-        $st0->execute([$userId, $ym]);
-        $row0 = $st0->fetch(PDO::FETCH_ASSOC);
-        $current = (int) ($row0['count'] ?? 0);
+        try {
+            $st0 = $pdo->prepare('SELECT `count` FROM ai_usage WHERE user_id = ? AND year_month = ?');
+            $st0->execute([$userId, $ym]);
+            $row0 = $st0->fetch(PDO::FETCH_ASSOC);
+            $current = (int) ($row0['count'] ?? 0);
+        } catch (PDOException $e) {
+            error_log('AiService::ask usage read: ' . $e->getMessage());
+
+            return ['success' => false, 'error' => 'Could not check AI usage.'];
+        }
         if ($current >= $limit) {
             return ['success' => false, 'error' => 'Monthly AI limit reached (' . $limit . ').', 'remaining' => 0];
         }
 
         try {
             $st = $pdo->prepare(
-                'INSERT INTO ai_usage (user_id, year_month, count) VALUES (?,?,1)
-                 ON DUPLICATE KEY UPDATE count = count + 1'
+                'INSERT INTO ai_usage (user_id, year_month, `count`) VALUES (?,?,1)
+                 ON DUPLICATE KEY UPDATE `count` = `count` + 1'
             );
             $st->execute([$userId, $ym]);
         } catch (PDOException $e) {
