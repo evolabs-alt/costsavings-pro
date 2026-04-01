@@ -22,7 +22,8 @@ function sendEmail($to, $subject, $body) {
 
     error_log('sendEmail called for: ' . $to);
 
-    if (!$phpmailer_loaded || !class_exists('PHPMailer\PHPMailer\PHPMailer')) {
+    // Use PHPMailer whenever the class is available (Composer autoload loads it even if manual paths above missed).
+    if (!class_exists('PHPMailer\PHPMailer\PHPMailer')) {
         $headers = [
             'MIME-Version: 1.0',
             'Content-type: text/html; charset=UTF-8',

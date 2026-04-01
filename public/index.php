@@ -2102,6 +2102,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             padding: 14px 18px;
             border-bottom: 1px solid #ede9fe;
             background: linear-gradient(135deg, #faf8ff, #f8f5fc);
+            cursor: grab;
+            user-select: none;
+            -webkit-user-select: none;
+            flex-shrink: 0;
+        }
+
+        .app-modal-header:active {
+            cursor: grabbing;
         }
 
         .app-modal-header h2 {
@@ -2478,124 +2486,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <button type="button" class="app-nav-btn" data-open-modal="appModalSettings">Settings</button>
                 </nav>
 
-                <div class="app-modal-overlay" id="appModalMembers" role="dialog" aria-modal="true" aria-labelledby="appModalMembersTitle" aria-hidden="true">
-                    <div class="app-modal" tabindex="-1">
-                        <div class="app-modal-header">
-                            <h2 id="appModalMembersTitle">Members</h2>
-                            <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
-                        </div>
-                        <div class="app-modal-body">
-                            <?php if ($is_admin): ?>
-                            <div class="invite-block">
-                                <form method="POST" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-                                    <input type="hidden" name="action" value="invite_member">
-                                    <label>Invite member email</label>
-                                    <input type="email" name="email" required placeholder="member@company.com" style="min-width:200px;">
-                                    <button type="submit">Send invite</button>
-                                </form>
-                            </div>
-                            <?php endif; ?>
-                            <div class="members-table-wrap">
-                                <table class="members-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Name</th>
-                                            <th>Email</th>
-                                            <th>Role</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php if (empty($team_members_rows)): ?>
-                                        <tr><td colspan="3">No members in this organization yet.</td></tr>
-                                        <?php else: ?>
-                                        <?php foreach ($team_members_rows as $tm): ?>
-                                        <tr>
-                                            <td><?php echo htmlspecialchars($tm['display_name'] ?? $tm['username'] ?? '—'); ?></td>
-                                            <td><?php echo htmlspecialchars($tm['email'] ?? ''); ?></td>
-                                            <td><?php echo htmlspecialchars($tm['role'] ?? 'member'); ?></td>
-                                        </tr>
-                                        <?php endforeach; ?>
-                                        <?php endif; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="app-modal-overlay" id="appModalAI" role="dialog" aria-modal="true" aria-labelledby="appModalAITitle" aria-hidden="true">
-                    <div class="app-modal" tabindex="-1">
-                        <div class="app-modal-header">
-                            <h2 id="appModalAITitle">Ask AI</h2>
-                            <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
-                        </div>
-                        <div class="app-modal-body">
-                            <div id="aiAssistant" style="padding:18px;background:linear-gradient(145deg,#faf8ff,#f5f0ff);border-radius:12px;border:1px solid #e4daf5;box-shadow:0 4px 20px rgba(74,63,107,0.06);">
-                                <h3 style="margin-bottom:8px;font-size:17px;font-family:'Cormorant Garamond',Georgia,serif;color:#4a3f6b;font-weight:700;">Ask AI (Savvy CFO)</h3>
-                                <p style="font-size:13px;color:#6b5b80;margin-bottom:8px;">Up to 50 questions per month per user.</p>
-                                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-                                    <button type="button" class="btn-secondary ai-preset" data-preset="overlap">Overlap between vendors</button>
-                                    <button type="button" class="btn-secondary ai-preset" data-preset="alternatives">Cheaper alternatives</button>
-                                    <button type="button" class="btn-secondary ai-preset" data-preset="lower_tiers">Lower service tiers</button>
-                                    <button type="button" class="btn-secondary ai-preset" data-preset="duplicates">Duplicate subscriptions</button>
-                                    <button type="button" class="btn-secondary ai-preset" data-preset="executive">Executive summary suggestions</button>
-                                </div>
-                                <textarea id="aiQuestion" rows="2" style="width:100%;max-width:100%;box-sizing:border-box;margin-bottom:8px;" placeholder="Ask a specific question..."></textarea>
-                                <button type="button" id="aiSubmitBtn">Ask</button>
-                                <pre id="aiReply" style="margin-top:12px;white-space:pre-wrap;font-size:13px;background:#fff;padding:12px;border-radius:8px;border:1px solid #e4daf5;max-height:240px;overflow:auto;"></pre>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="app-modal-overlay" id="appModalData" role="dialog" aria-modal="true" aria-labelledby="appModalDataTitle" aria-hidden="true">
-                    <div class="app-modal" tabindex="-1">
-                        <div class="app-modal-header">
-                            <h2 id="appModalDataTitle">Data</h2>
-                            <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
-                        </div>
-                        <div class="app-modal-body">
-                            <p style="margin:0 0 12px;color:#4b5563;">Download reports or import vendor data from CSV.</p>
-                            <div class="data-actions">
-                                <a href="?action=export_vendors&amp;format=xlsx" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;">Download Excel</a>
-                                <a href="?action=export_vendors&amp;format=pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#4a3f6b;">Download PDF</a>
-                                <a href="?action=export_vendors&amp;format=summary_pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#5b4d8f;">Executive summary PDF</a>
-                                <label style="cursor:pointer;padding:8px 12px;background:#ede9fe;border-radius:6px;border:1px solid #d4c4e8;">
-                                    Import CSV
-                                    <input type="file" id="csvImportInput" accept=".csv,text/csv" style="display:none;">
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="app-modal-overlay" id="appModalSettings" role="dialog" aria-modal="true" aria-labelledby="appModalSettingsTitle" aria-hidden="true">
-                    <div class="app-modal" tabindex="-1">
-                        <div class="app-modal-header">
-                            <h2 id="appModalSettingsTitle">Settings</h2>
-                            <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
-                        </div>
-                        <div class="app-modal-body">
-                            <?php if ($is_admin): ?>
-                            <div class="settings-block">
-                                <form method="POST" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
-                                    <input type="hidden" name="action" value="save_org_reminders">
-                                    <label><input type="checkbox" name="deadline_reminders_enabled" value="1" <?php echo $deadline_reminders_org ? 'checked' : ''; ?>> Org: deadline email assistant</label>
-                                    <button type="submit">Save</button>
-                                </form>
-                            </div>
-                            <?php endif; ?>
-                            <div class="settings-block">
-                                <form method="POST" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
-                                    <input type="hidden" name="action" value="save_user_reminder_pref">
-                                    <label style="font-size:14px;"><input type="checkbox" name="user_deadline_reminders" value="1" <?php echo $deadline_reminders_user ? 'checked' : ''; ?>> My deadline reminders</label>
-                                    <button type="submit" style="padding:6px 10px;">Save</button>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <div class="report-filters">
                     <label for="reportFilter">Report Filters:</label>
                     <select id="reportFilter" onchange="filterTableRows(this.value)">
@@ -2648,8 +2538,20 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             
             <script>
             let rowCount = 0;
+            function resetAppModalPosition(modal) {
+                if (!modal) return;
+                modal.style.position = '';
+                modal.style.left = '';
+                modal.style.top = '';
+                modal.style.width = '';
+                modal.style.margin = '';
+                modal.style.transform = '';
+                modal.style.maxHeight = '';
+            }
             function openAppModal(overlay) {
                 if (!overlay) return;
+                var modal = overlay.querySelector('.app-modal');
+                resetAppModalPosition(modal);
                 overlay.classList.add('is-open');
                 overlay.setAttribute('aria-hidden', 'false');
                 document.body.style.overflow = 'hidden';
@@ -2658,11 +2560,66 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             }
             function closeAppModal(overlay) {
                 if (!overlay) return;
+                var modal = overlay.querySelector('.app-modal');
+                resetAppModalPosition(modal);
                 overlay.classList.remove('is-open');
                 overlay.setAttribute('aria-hidden', 'true');
                 if (!document.querySelector('.app-modal-overlay.is-open')) {
                     document.body.style.overflow = '';
                 }
+            }
+            function attachModalDrag(overlay) {
+                var modal = overlay.querySelector('.app-modal');
+                var header = overlay.querySelector('.app-modal-header');
+                if (!modal || !header) return;
+                var closeBtn = modal.querySelector('.app-modal-close');
+                var dragging = false;
+                var startX, startY, origLeft, origTop;
+
+                function clientXY(e) {
+                    if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                    return { x: e.clientX, y: e.clientY };
+                }
+                function onStart(e) {
+                    if (e.target === closeBtn || (closeBtn && closeBtn.contains(e.target))) return;
+                    var rect = modal.getBoundingClientRect();
+                    modal.style.position = 'fixed';
+                    modal.style.left = rect.left + 'px';
+                    modal.style.top = rect.top + 'px';
+                    modal.style.width = rect.width + 'px';
+                    modal.style.margin = '0';
+                    modal.style.transform = 'none';
+                    modal.style.maxHeight = 'min(90vh, 720px)';
+                    var xy = clientXY(e);
+                    startX = xy.x;
+                    startY = xy.y;
+                    origLeft = rect.left;
+                    origTop = rect.top;
+                    dragging = true;
+                    e.preventDefault();
+                }
+                function onMove(e) {
+                    if (!dragging) return;
+                    var xy = clientXY(e);
+                    var nw = modal.offsetWidth;
+                    var nh = modal.offsetHeight;
+                    var nl = origLeft + (xy.x - startX);
+                    var nt = origTop + (xy.y - startY);
+                    nl = Math.max(8, Math.min(nl, window.innerWidth - nw - 8));
+                    nt = Math.max(8, Math.min(nt, window.innerHeight - nh - 8));
+                    modal.style.left = nl + 'px';
+                    modal.style.top = nt + 'px';
+                    e.preventDefault();
+                }
+                function onEnd() {
+                    dragging = false;
+                }
+                header.addEventListener('mousedown', onStart);
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onEnd);
+                header.addEventListener('touchstart', onStart, { passive: false });
+                document.addEventListener('touchmove', onMove, { passive: false });
+                document.addEventListener('touchend', onEnd);
             }
             function initAppModals() {
                 document.querySelectorAll('.app-nav-btn').forEach(function(btn) {
@@ -2673,6 +2630,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     });
                 });
                 document.querySelectorAll('.app-modal-overlay').forEach(function(overlay) {
+                    attachModalDrag(overlay);
                     var modal = overlay.querySelector('.app-modal');
                     if (modal) {
                         modal.addEventListener('click', function(e) { e.stopPropagation(); });
@@ -3323,6 +3281,126 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         </div>
 
     </div>
+
+    <?php if ($current_view === 'placeholder'): ?>
+    <div class="app-modal-overlay" id="appModalMembers" role="dialog" aria-modal="true" aria-labelledby="appModalMembersTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalMembersTitle">Members</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <?php if ($is_admin): ?>
+                <div class="invite-block">
+                    <form method="POST" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                        <input type="hidden" name="action" value="invite_member">
+                        <label>Invite member email</label>
+                        <input type="email" name="email" required placeholder="member@company.com" style="min-width:200px;">
+                        <button type="submit">Send invite</button>
+                    </form>
+                </div>
+                <?php endif; ?>
+                <div class="members-table-wrap">
+                    <table class="members-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($team_members_rows)): ?>
+                            <tr><td colspan="3">No members in this organization yet.</td></tr>
+                            <?php else: ?>
+                            <?php foreach ($team_members_rows as $tm): ?>
+                            <tr>
+                                <td><?php echo htmlspecialchars($tm['display_name'] ?? $tm['username'] ?? '—'); ?></td>
+                                <td><?php echo htmlspecialchars($tm['email'] ?? ''); ?></td>
+                                <td><?php echo htmlspecialchars($tm['role'] ?? 'member'); ?></td>
+                            </tr>
+                            <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay" id="appModalAI" role="dialog" aria-modal="true" aria-labelledby="appModalAITitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalAITitle">Ask AI</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <div id="aiAssistant" style="padding:18px;background:linear-gradient(145deg,#faf8ff,#f5f0ff);border-radius:12px;border:1px solid #e4daf5;box-shadow:0 4px 20px rgba(74,63,107,0.06);">
+                    <h3 style="margin-bottom:8px;font-size:17px;font-family:'Cormorant Garamond',Georgia,serif;color:#4a3f6b;font-weight:700;">Ask AI (Savvy CFO)</h3>
+                    <p style="font-size:13px;color:#6b5b80;margin-bottom:8px;">Up to 50 questions per month per user.</p>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+                        <button type="button" class="btn-secondary ai-preset" data-preset="overlap">Overlap between vendors</button>
+                        <button type="button" class="btn-secondary ai-preset" data-preset="alternatives">Cheaper alternatives</button>
+                        <button type="button" class="btn-secondary ai-preset" data-preset="lower_tiers">Lower service tiers</button>
+                        <button type="button" class="btn-secondary ai-preset" data-preset="duplicates">Duplicate subscriptions</button>
+                        <button type="button" class="btn-secondary ai-preset" data-preset="executive">Executive summary suggestions</button>
+                    </div>
+                    <textarea id="aiQuestion" rows="2" style="width:100%;max-width:100%;box-sizing:border-box;margin-bottom:8px;" placeholder="Ask a specific question..."></textarea>
+                    <button type="button" id="aiSubmitBtn">Ask</button>
+                    <pre id="aiReply" style="margin-top:12px;white-space:pre-wrap;font-size:13px;background:#fff;padding:12px;border-radius:8px;border:1px solid #e4daf5;max-height:240px;overflow:auto;"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay" id="appModalData" role="dialog" aria-modal="true" aria-labelledby="appModalDataTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalDataTitle">Data</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <p style="margin:0 0 12px;color:#4b5563;">Download reports or import vendor data from CSV.</p>
+                <div class="data-actions">
+                    <a href="?action=export_vendors&amp;format=xlsx" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;">Download Excel</a>
+                    <a href="?action=export_vendors&amp;format=pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#4a3f6b;">Download PDF</a>
+                    <a href="?action=export_vendors&amp;format=summary_pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#5b4d8f;">Executive summary PDF</a>
+                    <label style="cursor:pointer;padding:8px 12px;background:#ede9fe;border-radius:6px;border:1px solid #d4c4e8;">
+                        Import CSV
+                        <input type="file" id="csvImportInput" accept=".csv,text/csv" style="display:none;">
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay" id="appModalSettings" role="dialog" aria-modal="true" aria-labelledby="appModalSettingsTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalSettingsTitle">Settings</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <?php if ($is_admin): ?>
+                <div class="settings-block">
+                    <form method="POST" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
+                        <input type="hidden" name="action" value="save_org_reminders">
+                        <label><input type="checkbox" name="deadline_reminders_enabled" value="1" <?php echo $deadline_reminders_org ? 'checked' : ''; ?>> Org: deadline email assistant</label>
+                        <button type="submit">Save</button>
+                    </form>
+                </div>
+                <?php endif; ?>
+                <div class="settings-block">
+                    <form method="POST" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
+                        <input type="hidden" name="action" value="save_user_reminder_pref">
+                        <label style="font-size:14px;"><input type="checkbox" name="user_deadline_reminders" value="1" <?php echo $deadline_reminders_user ? 'checked' : ''; ?>> My deadline reminders</label>
+                        <button type="submit" style="padding:6px 10px;">Save</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
 </body>
 </html>
