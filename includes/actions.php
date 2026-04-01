@@ -9,6 +9,37 @@ function normalizeUserEmail($email) {
     return strtolower(trim($email));
 }
 
+/**
+ * Absolute base URL for links into public/ (invite emails, etc.).
+ * Uses BASE_URL when set; otherwise derives from the current request (HTTPS, proxy headers, SCRIPT_NAME).
+ */
+function publicAppBaseUrl(): string {
+    if (defined('BASE_URL')) {
+        $u = trim((string) BASE_URL);
+        if ($u !== '' && $u !== '/') {
+            return rtrim($u, '/') . '/';
+        }
+    }
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (isset($_SERVER['SERVER_PORT']) && (string) $_SERVER['SERVER_PORT'] === '443')
+        || (!empty($_SERVER['HTTP_X_FORWARDED_PROTO'])
+            && strtolower((string) $_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https');
+    $scheme = $https ? 'https' : 'http';
+    $host = $_SERVER['HTTP_X_FORWARDED_HOST'] ?? $_SERVER['HTTP_HOST'] ?? 'localhost';
+    if (strpos($host, ',') !== false) {
+        $host = trim(explode(',', $host)[0]);
+    }
+    $script = $_SERVER['SCRIPT_NAME'] ?? '/index.php';
+    $dir = str_replace('\\', '/', dirname($script));
+    if ($dir === '/' || $dir === '.') {
+        $path = '';
+    } else {
+        $path = rtrim($dir, '/');
+    }
+
+    return $scheme . '://' . $host . $path . '/';
+}
+
 function handleLogin() {
     $pdo = getDBConnection();
     $u = trim($_POST['username'] ?? '');
@@ -70,11 +101,36 @@ function handleInviteMember() {
     $ins = $pdo->prepare(
         'INSERT INTO invitations (org_id, email, token_hash, invited_by_user_id, expires_at) VALUES (?,?,?,?,?)'
     );
-    $ins->execute([$orgId, $email, $hash, (int) $_SESSION['user_id'], $exp]);
-    $base = defined('BASE_URL') ? BASE_URL : '/';
-    $link = rtrim($base, '/') . '/register.php?token=' . urlencode($plain);
+    try {
+        $ins->execute([$orgId, $email, $hash, (int) $_SESSION['user_id'], $exp]);
+    } catch (PDOException $e) {
+        error_log('handleInviteMember insert: ' . $e->getMessage());
+        $_SESSION['error'] = 'Could not save invitation. Please try again.';
+        $redir();
+    }
+    $invId = (int) $pdo->lastInsertId();
+
+    $link = publicAppBaseUrl() . 'register.php?token=' . urlencode($plain);
     $body = '<p>You have been invited to join the Savvy CFO Cost Savings tool.</p><p><a href="' . htmlspecialchars($link) . '">Complete registration</a></p>';
-    sendEmail($email, 'Your invitation — Cost Savings Pro Tool', $body);
+    $mailResult = sendEmail($email, 'Your invitation — Cost Savings Pro Tool', $body);
+    if ($mailResult !== true) {
+        try {
+            $del = $pdo->prepare('DELETE FROM invitations WHERE id = ?');
+            $del->execute([$invId]);
+        } catch (PDOException $e) {
+            error_log('handleInviteMember rollback delete: ' . $e->getMessage());
+        }
+        if (is_array($mailResult)) {
+            error_log(
+                'handleInviteMember mail: '
+                . ($mailResult['error_message'] ?? '')
+                . ' '
+                . ($mailResult['error_info'] ?? '')
+            );
+        }
+        $_SESSION['error'] = 'Could not send invitation email. Check SMTP settings in config or contact support.';
+        $redir();
+    }
     $_SESSION['message'] = 'Invitation sent.';
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;

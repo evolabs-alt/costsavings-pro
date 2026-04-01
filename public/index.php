@@ -306,18 +306,18 @@ function createGHLTag($tagName) {
 function syncContactToGHL($email, $role) {
     // Map user roles to simplified tag names
     $roleTagMap = [
-        'Business owner' => 'cost savings tool business owner',
-        'Financial professional (book keeper, CPA, fractional CFO, accountant, etc)' => 'cost savings tool financial professional',
-        'Aspiring business owner.' => 'cost savings tool aspiring business owner',
-        'Employee of a small/medium-size business.' => 'cost savings tool employee of smb',
-        'Other' => 'cost savings tool other'
+        'Business owner' => 'cost savings pro tool business owner',
+        'Financial professional (book keeper, CPA, fractional CFO, accountant, etc)' => 'cost savings pro tool financial professional',
+        'Aspiring business owner.' => 'cost savings pro tool aspiring business owner',
+        'Employee of a small/medium-size business.' => 'cost savings pro tool employee of smb',
+        'Other' => 'cost savings pro tool other'
     ];
     
-    // Get the tag name for this role, default to 'cost savings tool other' if not found
-    $roleTagName = $roleTagMap[$role] ?? 'cost savings tool other';
+    // Get the tag name for this role, default to 'cost savings pro tool other' if not found
+    $roleTagName = $roleTagMap[$role] ?? 'cost savings pro tool other';
     
     // Tags to apply: role-specific tag + general registration tag
-    $tags = [$roleTagName, 'cost savings tool registered'];
+    $tags = [$roleTagName, 'cost savings pro tool registered'];
     
     // Create all tags first
     foreach ($tags as $tagName) {

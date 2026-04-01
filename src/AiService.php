@@ -44,8 +44,10 @@ class AiService
      */
     public static function ask(PDO $pdo, int $userId, string $prompt): array
     {
-        if (!defined('OPENAI_API_KEY') || OPENAI_API_KEY === '') {
-            return ['success' => false, 'error' => 'AI is not configured (missing API key).'];
+        $hasPerplexity = defined('PERPLEXITY_API_KEY') && PERPLEXITY_API_KEY !== '';
+        $hasOpenAI = defined('OPENAI_API_KEY') && OPENAI_API_KEY !== '';
+        if (!$hasPerplexity && !$hasOpenAI) {
+            return ['success' => false, 'error' => 'AI is not configured (set PERPLEXITY_API_KEY or OPENAI_API_KEY).'];
         }
 
         $ym = date('Y-m');
@@ -74,21 +76,53 @@ class AiService
         $cnt = $current + 1;
         $remaining = max(0, $limit - $cnt);
 
-        $body = json_encode([
-            'model' => 'gpt-4o-mini',
-            'messages' => [
-                ['role' => 'system', 'content' => 'You are a concise CFO-style advisor.'],
-                ['role' => 'user', 'content' => $prompt],
-            ],
-            'max_tokens' => 1200,
-        ]);
+        $maxTokens = defined('AI_MAX_TOKENS') ? (int) AI_MAX_TOKENS : 1200;
+        $messages = [
+            ['role' => 'system', 'content' => 'You are a concise CFO-style advisor.'],
+            ['role' => 'user', 'content' => $prompt],
+        ];
 
-        $ch = curl_init('https://api.openai.com/v1/chat/completions');
+        if ($hasPerplexity) {
+            $model = defined('AI_MODEL') ? AI_MODEL : 'sonar';
+            $temperature = defined('AI_TEMPERATURE') ? (float) AI_TEMPERATURE : 0.7;
+            $url = defined('PERPLEXITY_API_URL') ? PERPLEXITY_API_URL : 'https://api.perplexity.ai/chat/completions';
+            $payload = [
+                'model' => $model,
+                'messages' => $messages,
+                'max_tokens' => $maxTokens,
+                'temperature' => $temperature,
+            ];
+            $out = self::postChatCompletion($url, PERPLEXITY_API_KEY, $payload);
+        } else {
+            $payload = [
+                'model' => 'gpt-4o-mini',
+                'messages' => $messages,
+                'max_tokens' => $maxTokens,
+            ];
+            $out = self::postChatCompletion('https://api.openai.com/v1/chat/completions', OPENAI_API_KEY, $payload);
+        }
+
+        if (!$out['ok']) {
+            return ['success' => false, 'error' => 'AI request failed.', 'remaining' => $remaining];
+        }
+
+        return ['success' => true, 'reply' => $out['text'] ?? '', 'remaining' => $remaining];
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     *
+     * @return array{ok: bool, text?: string}
+     */
+    private static function postChatCompletion(string $url, string $bearer, array $payload): array
+    {
+        $body = json_encode($payload);
+        $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
             CURLOPT_HTTPHEADER => [
                 'Content-Type: application/json',
-                'Authorization: Bearer ' . OPENAI_API_KEY,
+                'Authorization: Bearer ' . $bearer,
             ],
             CURLOPT_POSTFIELDS => $body,
             CURLOPT_RETURNTRANSFER => true,
@@ -99,11 +133,11 @@ class AiService
         curl_close($ch);
 
         if ($resp === false || $code >= 400) {
-            return ['success' => false, 'error' => 'AI request failed.', 'remaining' => $remaining];
+            return ['ok' => false];
         }
         $data = json_decode($resp, true);
         $text = $data['choices'][0]['message']['content'] ?? '';
 
-        return ['success' => true, 'reply' => $text, 'remaining' => $remaining];
+        return ['ok' => true, 'text' => $text];
     }
 }

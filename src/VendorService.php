@@ -84,12 +84,8 @@ class VendorService
     {
         foreach ($items as $item) {
             $ck = self::normalizeCancelKeep($item['cancel_keep'] ?? 'Keep');
-            $purpose = trim((string) ($item['purpose_of_subscription'] ?? $item['notes'] ?? ''));
             $deadline = trim((string) ($item['cancellation_deadline'] ?? ''));
 
-            if ($ck === 'Keep' && $purpose === '') {
-                return ['success' => false, 'error' => 'Purpose of subscription is required when Keep is selected.'];
-            }
             if ($ck === 'Cancel' && $deadline === '') {
                 return ['success' => false, 'error' => 'Cancellation deadline is required when Cancel is selected.'];
             }

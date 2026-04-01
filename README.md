@@ -10,7 +10,7 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
 - **CSV import** — QuickBooks-style “Cost Savings - Transaction List by Vendor” exports ([src/CsvImport.php](src/CsvImport.php)).
 - **Exports** — Excel (PhpSpreadsheet) and PDF (Dompdf) for vendor list and executive summary ([src/ExportService.php](src/ExportService.php)).
 - **Email reminders** — Cron script [public/cron_reminders.php](public/cron_reminders.php) for cancellation deadlines (T−7, T, T+7) and monthly renewal summaries.
-- **Ask AI** — OpenAI Chat Completions (optional `OPENAI_API_KEY`); 50 requests per user per month ([src/AiService.php](src/AiService.php)).
+- **Ask AI** — Perplexity Chat Completions when `PERPLEXITY_API_KEY` is set; otherwise OpenAI (`OPENAI_API_KEY`). 50 requests per user per month ([src/AiService.php](src/AiService.php)); see `config.example.php` for `AI_MODEL`, `AI_MAX_TOKENS`, and `AI_TEMPERATURE`.
 - **GoHighLevel** — On first demographic role save, `syncContactToGHL()` creates tags and a contact.
 
 ## Layout
@@ -32,7 +32,7 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
 
 ## Configuration
 
-1. Copy `config.example.php` to `config.php`, then set `CACHE_DIR`, SMTP, GHL, database credentials, `BASE_URL` (for invite links), and optional `OPENAI_API_KEY`.
+1. Copy `config.example.php` to `config.php`, then set `CACHE_DIR`, SMTP, GHL, database credentials, and at least one of `PERPLEXITY_API_KEY` or `OPENAI_API_KEY` (via environment or defines) for Ask AI. Set **`BASE_URL`** to your public app URL with trailing slash (e.g. `https://yourdomain.com/public/`) so invitation emails use correct links; if omitted, the app builds the URL from the current request (set `BASE_URL` when behind a reverse proxy or if invites point to the wrong host).
 2. **Composer:** From the project root run `composer install` (requires PHP with Composer) to install PhpSpreadsheet and Dompdf for exports.
 3. **Seed admin (local testing):** Set `SEED_ADMIN_PASSWORD` in the environment or in `config.php` so the first bootstrap can create the seeded admin (`SEED_ADMIN_USERNAME` / `SEED_ADMIN_EMAIL` in `config.example.php`). Leave empty in production if you do not want a seeded account.
 4. **Cron:** Schedule `php public/cron_reminders.php` daily (or call via HTTP with `CRON_SECRET` if defined in config).

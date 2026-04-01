@@ -36,6 +36,11 @@ define('SEED_ADMIN_EMAIL', 'admin@example.com');
 define('SEED_ADMIN_PASSWORD', getenv('SEED_ADMIN_PASSWORD') ?: '');
 
 define('OPENAI_API_KEY', getenv('OPENAI_API_KEY') ?: '');
+define('PERPLEXITY_API_KEY', getenv('PERPLEXITY_API_KEY') ?: '');
+define('PERPLEXITY_API_URL', getenv('PERPLEXITY_API_URL') ?: 'https://api.perplexity.ai/chat/completions');
+define('AI_MODEL', getenv('AI_MODEL') ?: 'sonar');
+define('AI_MAX_TOKENS', (int) (getenv('AI_MAX_TOKENS') ?: '1200'));
+define('AI_TEMPERATURE', (float) (getenv('AI_TEMPERATURE') ?: '0.7'));
 define('AI_MONTHLY_LIMIT', 50);
 
 /** Optional: protect cron_reminders.php when called via HTTP */
