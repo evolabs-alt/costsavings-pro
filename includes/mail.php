@@ -134,8 +134,12 @@ function sendEmail($to, $subject, $body) {
         }
         $smtpInst = $mail->getSMTPInstance();
         if (is_object($smtpInst)) {
-            if (property_exists($smtpInst, 'last_reply')) {
-                $okCtx['smtp_last_reply'] = trim((string) $smtpInst->last_reply);
+            // $last_reply is protected — use getter only (direct access throws and was mis-reported as send failure).
+            if (method_exists($smtpInst, 'getLastReply')) {
+                $lr = $smtpInst->getLastReply();
+                if ($lr !== null && $lr !== '') {
+                    $okCtx['smtp_last_reply'] = trim((string) $lr);
+                }
             }
             if (method_exists($smtpInst, 'getLastTransactionID')) {
                 $tid = $smtpInst->getLastTransactionID();
