@@ -40,11 +40,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
-    error_log("POST request received");
-    error_log("POST data: " . print_r($_POST, true));
-    
+
     if (isset($_POST['action'])) {
-        error_log("Action: " . $_POST['action']);
         switch ($_POST['action']) {
             case 'login':
                 handleLogin();

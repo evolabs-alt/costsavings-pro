@@ -117,12 +117,6 @@ function handleInviteMember() {
         . htmlspecialchars($link) . '</p>';
     $mailResult = sendEmail($email, 'Your invitation — Cost Savings Pro Tool', $body);
     if ($mailResult !== true) {
-        try {
-            $del = $pdo->prepare('DELETE FROM invitations WHERE id = ?');
-            $del->execute([$invId]);
-        } catch (PDOException $e) {
-            error_log('handleInviteMember rollback delete: ' . $e->getMessage());
-        }
         if (is_array($mailResult)) {
             error_log(
                 'handleInviteMember mail: '
@@ -131,7 +125,9 @@ function handleInviteMember() {
                 . ($mailResult['error_info'] ?? '')
             );
         }
-        $_SESSION['error'] = 'Could not send invitation email. Check SMTP settings in config or contact support.';
+        // Keep the invitation row so the token stays valid; admin can share the link manually.
+        $_SESSION['error'] = 'Could not send invitation email. Check SMTP_HOST, SMTP_PORT, SMTP_SECURE (ssl vs tls), and credentials in config.php. '
+            . 'You can share this registration link manually: ' . $link;
         $redir();
     }
     $_SESSION['message'] = 'Invitation sent. If the recipient does not see it within a few minutes, ask them to check spam/junk and promotions tabs.';

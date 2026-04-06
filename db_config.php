@@ -100,7 +100,7 @@ function ensureAiUsageTable(PDO $pdo): void {
         $pdo->exec("CREATE TABLE IF NOT EXISTS `ai_usage` (
             `user_id` INT UNSIGNED NOT NULL,
             `year_month` CHAR(7) NOT NULL,
-            `count` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `usage_count` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
             PRIMARY KEY (`user_id`, `year_month`),
             CONSTRAINT `fk_ai_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
@@ -110,13 +110,30 @@ function ensureAiUsageTable(PDO $pdo): void {
             $pdo->exec("CREATE TABLE IF NOT EXISTS `ai_usage` (
                 `user_id` INT UNSIGNED NOT NULL,
                 `year_month` CHAR(7) NOT NULL,
-                `count` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+                `usage_count` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
                 PRIMARY KEY (`user_id`, `year_month`),
                 KEY `idx_ai_user` (`user_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         } catch (PDOException $e2) {
             error_log('ensureAiUsageTable (no FK): ' . $e2->getMessage());
         }
+    }
+
+    // Legacy installs used column `count` (reserved in SQL); PDO native prepares can fail on it.
+    try {
+        $exists = $pdo->query("SHOW TABLES LIKE 'ai_usage'")->fetch(PDO::FETCH_NUM);
+        if (!$exists) {
+            return;
+        }
+        $hasOld = $pdo->query("SHOW COLUMNS FROM `ai_usage` LIKE 'count'")->fetch();
+        $hasNew = $pdo->query("SHOW COLUMNS FROM `ai_usage` LIKE 'usage_count'")->fetch();
+        if ($hasOld && !$hasNew) {
+            $pdo->exec('ALTER TABLE `ai_usage` CHANGE `count` `usage_count` SMALLINT UNSIGNED NOT NULL DEFAULT 0');
+        } elseif (!$hasNew) {
+            $pdo->exec('ALTER TABLE `ai_usage` ADD COLUMN `usage_count` SMALLINT UNSIGNED NOT NULL DEFAULT 0');
+        }
+    } catch (PDOException $e) {
+        error_log('ensureAiUsageTable column repair: ' . $e->getMessage());
     }
 }
 

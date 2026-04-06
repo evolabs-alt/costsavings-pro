@@ -45,13 +45,25 @@ function sendEmail($to, $subject, $body) {
     try {
         $mail->CharSet = 'UTF-8';
         $mail->SMTPDebug = 0;
+        $mail->Timeout = 30;
         $mail->isSMTP();
         $mail->Host = SMTP_HOST;
         $mail->SMTPAuth = true;
         $mail->Username = SMTP_USERNAME;
         $mail->Password = SMTP_PASSWORD;
-        $mail->SMTPSecure = SMTP_SECURE;
-        $mail->Port = SMTP_PORT;
+        $mail->Port = (int) SMTP_PORT;
+        // Map config strings to PHPMailer constants (avoids subtle mismatches on some PHP/OpenSSL builds).
+        $sec = strtolower(trim((string) SMTP_SECURE));
+        if ($sec === 'ssl' || $sec === 'smtps') {
+            $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
+        } elseif ($sec === 'tls' || $sec === 'starttls') {
+            $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+        } else {
+            $mail->SMTPSecure = SMTP_SECURE;
+        }
+        if (defined('SMTP_HELO_HOST') && SMTP_HELO_HOST !== '') {
+            $mail->Hostname = SMTP_HELO_HOST;
+        }
         $mail->SMTPOptions = [
             'ssl' => [
                 'verify_peer' => false,
