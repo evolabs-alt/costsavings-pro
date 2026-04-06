@@ -267,6 +267,18 @@ function handleAiAsk() {
     exit;
 }
 
+function handleAiUsageStats() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Not logged in']);
+        exit;
+    }
+    $pdo = getDBConnection();
+    $stats = AiService::getMonthlyUsageStats($pdo, (int) $_SESSION['user_id']);
+    echo json_encode(array_merge(['success' => true], $stats));
+    exit;
+}
+
 function handleLoadTeamMembers() {
     header('Content-Type: application/json');
     if (empty($_SESSION['user_id'])) {

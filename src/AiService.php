@@ -2,6 +2,9 @@
 
 namespace CostSavings;
 
+use DateTimeImmutable;
+use DateTimeZone;
+use Exception;
 use PDO;
 use PDOException;
 
@@ -35,19 +38,82 @@ class AiService
         $preset = $presetKey && isset(self::PRESETS[$presetKey]) ? self::PRESETS[$presetKey] : '';
 
         return "You are Savvy CFO assistant. Be concise and actionable.\n\n"
+            . "Output format: Respond using HTML only. Use tags such as <p>, <ul>, <li>, <strong>, <em>, <h3> for structure. "
+            . "Do not use Markdown (no asterisks for bold, no # headings, no backticks, no horizontal rules with ---).\n\n"
             . ($preset !== '' ? "Focus: {$preset}\n\n" : '')
             . "User question:\n{$question}\n\nVendor data (visible to this user):\n{$ctx}\n";
     }
 
     /**
-     * @return array{success:bool, reply?:string, error?:string, remaining?:int}
+     * Current calendar-month usage for the Ask AI quota (same month key as `ask()`).
+     *
+     * @return array{limit:int, used:int, remaining:int, reset_hint:string}
+     */
+    public static function getMonthlyUsageStats(PDO $pdo, int $userId): array
+    {
+        \ensureAiUsageTable($pdo);
+        $ym = date('Y-m');
+        $limit = defined('AI_MONTHLY_LIMIT') ? (int) AI_MONTHLY_LIMIT : 50;
+        $used = 0;
+        try {
+            $st = $pdo->prepare(
+                'SELECT `usage_count` FROM `ai_usage` WHERE `user_id` = ? AND `year_month` = ?'
+            );
+            $st->execute([$userId, $ym]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            $used = (int) (is_array($row) ? ($row['usage_count'] ?? 0) : 0);
+        } catch (PDOException $e) {
+            error_log('AiService::getMonthlyUsageStats: ' . $e->getMessage());
+        }
+
+        return self::usageFields($limit, $used);
+    }
+
+    /**
+     * @return array{limit:int, used:int, remaining:int, reset_hint:string}
+     */
+    private static function usageFields(int $limit, int $used): array
+    {
+        return [
+            'limit' => $limit,
+            'used' => $used,
+            'remaining' => max(0, $limit - $used),
+            'reset_hint' => self::monthlyResetHint(),
+        ];
+    }
+
+    private static function monthlyResetHint(): string
+    {
+        $tzName = @date_default_timezone_get() ?: 'UTC';
+        try {
+            $tz = new DateTimeZone($tzName);
+        } catch (Exception $e) {
+            $tz = new DateTimeZone('UTC');
+            $tzName = 'UTC';
+        }
+        $next = new DateTimeImmutable('first day of next month 00:00:00', $tz);
+
+        return sprintf(
+            'Quota resets at the start of each calendar month (next reset: %s, %s).',
+            $next->format('F j, Y \a\t g:i A'),
+            $tzName
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
      */
     public static function ask(PDO $pdo, int $userId, string $prompt): array
     {
         $hasPerplexity = defined('PERPLEXITY_API_KEY') && PERPLEXITY_API_KEY !== '';
         $hasOpenAI = defined('OPENAI_API_KEY') && OPENAI_API_KEY !== '';
         if (!$hasPerplexity && !$hasOpenAI) {
-            return ['success' => false, 'error' => 'AI is not configured (set PERPLEXITY_API_KEY or OPENAI_API_KEY).'];
+            $u = self::getMonthlyUsageStats($pdo, $userId);
+
+            return array_merge(
+                ['success' => false, 'error' => 'AI is not configured (set PERPLEXITY_API_KEY or OPENAI_API_KEY).'],
+                $u
+            );
         }
 
         \ensureAiUsageTable($pdo);
@@ -68,7 +134,14 @@ class AiService
             return ['success' => false, 'error' => 'Could not check AI usage.'];
         }
         if ($current >= $limit) {
-            return ['success' => false, 'error' => 'Monthly AI limit reached (' . $limit . ').', 'remaining' => 0];
+            return array_merge(
+                [
+                    'success' => false,
+                    'error' => 'Monthly AI limit reached (' . $limit . ').',
+                    'remaining' => 0,
+                ],
+                self::usageFields($limit, $current)
+            );
         }
 
         try {
@@ -80,15 +153,19 @@ class AiService
         } catch (PDOException $e) {
             error_log('AiService::ask db: ' . $e->getMessage());
 
-            return ['success' => false, 'error' => 'Could not record usage.'];
+            return array_merge(
+                ['success' => false, 'error' => 'Could not record usage.'],
+                self::usageFields($limit, $current)
+            );
         }
 
         $cnt = $current + 1;
         $remaining = max(0, $limit - $cnt);
 
         $maxTokens = defined('AI_MAX_TOKENS') ? (int) AI_MAX_TOKENS : 1200;
+        $systemHtml = 'You are a concise CFO-style advisor. Always format your reply as HTML only: use <p>, <ul>, <ol>, <li>, <strong>, <em>, <h3>, <h4> as appropriate. Never use Markdown syntax: no * or ** for emphasis, no # for headings, no ``` code fences, no --- dividers. Do not wrap the entire answer in a markdown code block.';
         $messages = [
-            ['role' => 'system', 'content' => 'You are a concise CFO-style advisor.'],
+            ['role' => 'system', 'content' => $systemHtml],
             ['role' => 'user', 'content' => $prompt],
         ];
 
@@ -113,10 +190,36 @@ class AiService
         }
 
         if (!$out['ok']) {
-            return ['success' => false, 'error' => 'AI request failed.', 'remaining' => $remaining];
+            return array_merge(
+                ['success' => false, 'error' => 'AI request failed.', 'remaining' => $remaining],
+                self::usageFields($limit, $cnt)
+            );
         }
 
-        return ['success' => true, 'reply' => $out['text'] ?? '', 'remaining' => $remaining];
+        $replyHtml = self::sanitizeAiHtml((string) ($out['text'] ?? ''));
+
+        return array_merge(
+            ['success' => true, 'reply' => $replyHtml, 'remaining' => $remaining],
+            self::usageFields($limit, $cnt)
+        );
+    }
+
+    /**
+     * Allow safe HTML from the model; strip scripts and unknown tags. Plain text is wrapped in <p>.
+     */
+    private static function sanitizeAiHtml(string $html): string
+    {
+        $s = trim($html);
+        if ($s === '') {
+            return '';
+        }
+        $allowed = '<p><br><ul><ol><li><strong><em><b><i><h3><h4><h5><div><span>';
+        $s = strip_tags($s, $allowed);
+        if (!preg_match('/<[a-z][^>]*>/i', $s)) {
+            return '<p>' . htmlspecialchars($s, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</p>';
+        }
+
+        return $s;
     }
 
     /**

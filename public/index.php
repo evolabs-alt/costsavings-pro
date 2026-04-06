@@ -67,6 +67,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'ai_ask':
                 handleAiAsk();
                 break;
+            case 'ai_usage_stats':
+                handleAiUsageStats();
+                break;
             case 'load_team_members':
                 handleLoadTeamMembers();
                 break;
@@ -1376,6 +1379,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .btn-secondary:hover { 
             box-shadow: 0 8px 25px rgba(107, 114, 128, 0.3);
         }
+
+        .btn-secondary:disabled,
+        #aiSubmitBtn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            transform: none;
+        }
         
         .button-group { 
             display: flex; 
@@ -2185,6 +2195,71 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             background: #f9fafb;
             border-radius: 8px;
             border: 1px solid #e5e7eb;
+        }
+
+        .app-modal-body .ai-usage-bar {
+            font-size: 12px;
+            color: #4a3f6b;
+            background: #fff;
+            border: 1px solid #e4daf5;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 10px;
+            line-height: 1.45;
+        }
+
+        .app-modal-body .ai-usage-bar strong {
+            color: #352a55;
+        }
+
+        .app-modal-body .ai-chat-log {
+            max-height: 280px;
+            min-height: 72px;
+            overflow-y: auto;
+            margin-top: 10px;
+            padding: 8px;
+            border: 1px solid #e4daf5;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+
+        .app-modal-body .ai-chat-log .chat-message {
+            margin-bottom: 12px;
+        }
+
+        .app-modal-body .ai-chat-log .chat-bubble {
+            font-size: 13px;
+        }
+
+        .app-modal-body .ai-chat-log .ai-bubble-html p {
+            margin: 0 0 0.5em 0;
+        }
+
+        .app-modal-body .ai-chat-log .ai-bubble-html p:last-child {
+            margin-bottom: 0;
+        }
+
+        .app-modal-body .ai-chat-log .ai-bubble-html ul,
+        .app-modal-body .ai-chat-log .ai-bubble-html ol {
+            margin: 0.35em 0 0.5em 0;
+            padding-left: 1.15em;
+        }
+
+        .app-modal-body .ai-chat-log .ai-bubble-html li {
+            margin-bottom: 0.25em;
+        }
+
+        .app-modal-body .ai-chat-log .ai-bubble-html h3,
+        .app-modal-body .ai-chat-log .ai-bubble-html h4,
+        .app-modal-body .ai-chat-log .ai-bubble-html h5 {
+            margin: 0.5em 0 0.35em 0;
+            font-size: 1.05em;
+            font-weight: 600;
+        }
+
+        .app-modal-body .ai-chat-log .ai-bubble-html h3:first-child,
+        .app-modal-body .ai-chat-log .ai-bubble-html h4:first-child {
+            margin-top: 0;
         }
 
         .ai-guidance-button.secondary {
@@ -3234,38 +3309,116 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         this.value = '';
                     });
                 }
+                function aiEscapeHtml(s) {
+                    var d = document.createElement('div');
+                    d.textContent = s;
+                    return d.innerHTML;
+                }
+                function updateAiUsageBar(d) {
+                    var bar = document.getElementById('aiUsageBar');
+                    if (!bar || d.limit === undefined) return;
+                    var used = d.used !== undefined ? d.used : Math.max(0, d.limit - (d.remaining !== undefined ? d.remaining : 0));
+                    var hint = d.reset_hint || '';
+                    bar.innerHTML = '<strong>This month:</strong> ' + used + ' / ' + d.limit + ' questions used'
+                        + (hint ? '<br><span style="font-size:11px;color:#6b5b80;">' + aiEscapeHtml(hint) + '</span>' : '');
+                }
+                function appendAiChatMessage(role, text, asHtml) {
+                    var log = document.getElementById('aiChatLog');
+                    if (!log) return;
+                    var wrap = document.createElement('div');
+                    wrap.className = 'chat-message ' + (role === 'user' ? 'user-message' : 'ai-message');
+                    var bubble = document.createElement('div');
+                    bubble.className = 'chat-bubble ' + (role === 'user' ? 'user-bubble' : 'ai-bubble');
+                    if (role === 'assistant' && asHtml) {
+                        bubble.className += ' ai-bubble-html';
+                        bubble.innerHTML = text;
+                    } else {
+                        bubble.textContent = text;
+                    }
+                    wrap.appendChild(bubble);
+                    log.appendChild(wrap);
+                    log.scrollTop = log.scrollHeight;
+                }
+                function setAiUiBusy(busy) {
+                    var aiBtn = document.getElementById('aiSubmitBtn');
+                    if (aiBtn) aiBtn.disabled = !!busy;
+                    document.querySelectorAll('.ai-preset').forEach(function(b) { b.disabled = !!busy; });
+                }
+                function fetchAiUsageStats() {
+                    var fd = new FormData();
+                    fd.append('action', 'ai_usage_stats');
+                    fetch(window.location.href, { method: 'POST', body: fd })
+                        .then(function(r) { return r.json(); })
+                        .then(function(d) {
+                            if (d.success) updateAiUsageBar(d);
+                            else {
+                                var bar = document.getElementById('aiUsageBar');
+                                if (bar) bar.textContent = 'Could not load usage.';
+                            }
+                        })
+                        .catch(function() {
+                            var bar = document.getElementById('aiUsageBar');
+                            if (bar) bar.textContent = 'Could not load usage.';
+                        });
+                }
+                fetchAiUsageStats();
+                var aiOpenBtn = document.querySelector('[data-open-modal="appModalAI"]');
+                if (aiOpenBtn) {
+                    aiOpenBtn.addEventListener('click', function() { setTimeout(fetchAiUsageStats, 150); });
+                }
                 var aiBtn = document.getElementById('aiSubmitBtn');
                 if (aiBtn) {
                     aiBtn.addEventListener('click', function() {
                         var q = document.getElementById('aiQuestion').value.trim();
+                        if (!q) {
+                            showSnackbar('Enter a question or use a preset.', 'error');
+                            return;
+                        }
+                        appendAiChatMessage('user', q);
                         var fd = new FormData();
                         fd.append('action', 'ai_ask');
                         fd.append('question', q);
+                        setAiUiBusy(true);
                         fetch(window.location.href, { method: 'POST', body: fd })
                             .then(function(r) { return r.json(); })
                             .then(function(d) {
-                                var el = document.getElementById('aiReply');
-                                if (!el) return;
+                                setAiUiBusy(false);
+                                updateAiUsageBar(d);
                                 if (d.success) {
-                                    el.textContent = (d.reply || '') + (d.remaining !== undefined ? '\n\n(Remaining this month: ' + d.remaining + ')' : '');
+                                    appendAiChatMessage('assistant', d.reply || '', true);
                                 } else {
-                                    el.textContent = d.error || 'Error';
+                                    appendAiChatMessage('assistant', d.error || 'Error', false);
                                 }
+                            })
+                            .catch(function() {
+                                setAiUiBusy(false);
+                                appendAiChatMessage('assistant', 'Request failed.', false);
                             });
                     });
                 }
                 document.querySelectorAll('.ai-preset').forEach(function(btn) {
                     btn.addEventListener('click', function() {
+                        var label = (btn.textContent || '').trim();
+                        appendAiChatMessage('user', label);
                         var fd = new FormData();
                         fd.append('action', 'ai_ask');
                         fd.append('preset', btn.getAttribute('data-preset') || '');
                         fd.append('question', '');
+                        setAiUiBusy(true);
                         fetch(window.location.href, { method: 'POST', body: fd })
                             .then(function(r) { return r.json(); })
                             .then(function(d) {
-                                var el = document.getElementById('aiReply');
-                                if (!el) return;
-                                el.textContent = d.success ? (d.reply || '') : (d.error || '');
+                                setAiUiBusy(false);
+                                updateAiUsageBar(d);
+                                if (d.success) {
+                                    appendAiChatMessage('assistant', d.reply || '', true);
+                                } else {
+                                    appendAiChatMessage('assistant', d.error || 'Error', false);
+                                }
+                            })
+                            .catch(function() {
+                                setAiUiBusy(false);
+                                appendAiChatMessage('assistant', 'Request failed.', false);
                             });
                     });
                 });
@@ -3334,7 +3487,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             <div class="app-modal-body">
                 <div id="aiAssistant" style="padding:18px;background:linear-gradient(145deg,#faf8ff,#f5f0ff);border-radius:12px;border:1px solid #e4daf5;box-shadow:0 4px 20px rgba(74,63,107,0.06);">
                     <h3 style="margin-bottom:8px;font-size:17px;font-family:'Cormorant Garamond',Georgia,serif;color:#4a3f6b;font-weight:700;">Ask AI (Savvy CFO)</h3>
-                    <p style="font-size:13px;color:#6b5b80;margin-bottom:8px;">Up to 50 questions per month per user.</p>
+                    <div id="aiUsageBar" class="ai-usage-bar" aria-live="polite">Loading usage…</div>
                     <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
                         <button type="button" class="btn-secondary ai-preset" data-preset="overlap">Overlap between vendors</button>
                         <button type="button" class="btn-secondary ai-preset" data-preset="alternatives">Cheaper alternatives</button>
@@ -3344,7 +3497,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     </div>
                     <textarea id="aiQuestion" rows="2" style="width:100%;max-width:100%;box-sizing:border-box;margin-bottom:8px;" placeholder="Ask a specific question..."></textarea>
                     <button type="button" id="aiSubmitBtn">Ask</button>
-                    <pre id="aiReply" style="margin-top:12px;white-space:pre-wrap;font-size:13px;background:#fff;padding:12px;border-radius:8px;border:1px solid #e4daf5;max-height:240px;overflow:auto;"></pre>
+                    <div id="aiChatLog" class="chat-container ai-chat-log" aria-label="Ask AI conversation"></div>
                 </div>
             </div>
         </div>
