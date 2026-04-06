@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/pro_log.php';
+
 $phpmailer_paths = [
     __DIR__ . '/../public/phpmailer/phpmailer/src/PHPMailer.php',
     __DIR__ . '/../public/vendor/phpmailer/phpmailer/src/PHPMailer.php',
@@ -22,6 +24,11 @@ function sendEmail($to, $subject, $body) {
 
     // Use PHPMailer whenever the class is available (Composer autoload loads it even if manual paths above missed).
     if (!class_exists('PHPMailer\PHPMailer\PHPMailer')) {
+        proLog('sendEmail_mail_fallback_start', [
+            'to' => $to,
+            'subject' => $subject,
+            'from' => SMTP_FROM_EMAIL,
+        ]);
         $headers = [
             'MIME-Version: 1.0',
             'Content-type: text/html; charset=UTF-8',
@@ -30,6 +37,11 @@ function sendEmail($to, $subject, $body) {
             'X-Mailer: PHP/' . phpversion(),
         ];
         $result = mail($to, $subject, $body, implode("\r\n", $headers));
+        if ($result) {
+            proLog('sendEmail_mail_fallback_ok', ['to' => $to]);
+        } else {
+            proLog('sendEmail_mail_fallback_fail', ['to' => $to]);
+        }
 
         return $result ? true : [
             'success' => false,
@@ -41,6 +53,16 @@ function sendEmail($to, $subject, $body) {
     $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
     $smtpTranscript = '';
     $captureSmtp = defined('SMTP_BROWSER_DEBUG') && SMTP_BROWSER_DEBUG;
+
+    proLog('sendEmail_smtp_start', [
+        'to' => $to,
+        'subject' => $subject,
+        'host' => SMTP_HOST,
+        'port' => (int) SMTP_PORT,
+        'secure' => (string) SMTP_SECURE,
+        'from' => SMTP_FROM_EMAIL,
+        'username' => SMTP_USERNAME,
+    ]);
 
     try {
         $mail->CharSet = 'UTF-8';
@@ -98,9 +120,27 @@ function sendEmail($to, $subject, $body) {
         $mail->AltBody = trim($plain) !== '' ? trim($plain) : 'Please view this message in an HTML-capable email client.';
         $mail->send();
 
+        proLog('sendEmail_smtp_ok', [
+            'to' => $to,
+            'subject' => $subject,
+            'host' => SMTP_HOST,
+        ]);
+
         return true;
     } catch (\Throwable $e) {
         error_log('PHPMailer sending failed: ' . $e->getMessage());
+
+        $failCtx = [
+            'to' => $to,
+            'subject' => $subject,
+            'host' => SMTP_HOST,
+            'error_message' => $e->getMessage(),
+            'error_info' => isset($mail->ErrorInfo) ? $mail->ErrorInfo : '',
+        ];
+        if ($captureSmtp && $smtpTranscript !== '') {
+            $failCtx['smtp_transcript'] = trim($smtpTranscript);
+        }
+        proLog('sendEmail_smtp_fail', $failCtx);
 
         return [
             'success' => false,

@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/pro_log.php';
+
 use CostSavings\AiService;
 use CostSavings\CsvImport;
 use CostSavings\ExportService;
@@ -48,6 +50,7 @@ function logInviteEvent(string $event, array $context = []): void {
         }
     }
     error_log('[invite] ' . $event . ' ' . json_encode($safe));
+    proLog('[invite] ' . $event, $safe);
 }
 
 function handleLogin() {

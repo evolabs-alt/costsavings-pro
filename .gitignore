@@ -2,5 +2,6 @@ config.php
 /vendor/
 cache/
 *.log
+pro.logs
 .DS_Store
 Thumbs.db
