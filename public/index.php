@@ -2056,29 +2056,111 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .app-nav {
+            width: 100%;
+            margin: 0 0 18px 0;
+            border: 1px solid #d8caec;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #faf8ff, #f3effb);
+            box-shadow: 0 6px 18px rgba(74, 63, 107, 0.08);
             display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-bottom: 18px;
-            align-items: center;
+            justify-content: center;
+            padding: 4px 10px;
         }
 
-        .app-nav-btn {
+        .app-nav-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            max-width: 780px;
+        }
+
+        .app-nav-item {
+            position: relative;
+        }
+
+        .app-nav-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 40px;
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: #4a3f6b;
             font-family: 'Inter', system-ui, sans-serif;
             font-size: 14px;
             font-weight: 600;
-            padding: 10px 18px;
-            border-radius: 8px;
-            border: 1px solid #d4c4e8;
-            background: linear-gradient(135deg, #faf8ff, #f3effb);
-            color: #4a3f6b;
+            text-decoration: none;
             cursor: pointer;
-            transition: background 0.15s ease, border-color 0.15s ease;
+            transition: background .15s ease, border-color .15s ease, color .15s ease;
         }
 
-        .app-nav-btn:hover {
+        .app-nav-link:hover,
+        .app-nav-link:focus-visible,
+        .app-nav-item.is-open > .app-nav-link {
             background: #ede9fe;
-            border-color: #b8a5d9;
+            border-color: #c7b5e4;
+            color: #352a55;
+            outline: none;
+        }
+
+        .app-nav-item.has-submenu .app-nav-link::after {
+            content: '▾';
+            margin-left: 8px;
+            font-size: 11px;
+            opacity: 0.8;
+        }
+
+        .app-submenu {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            min-width: 220px;
+            list-style: none;
+            margin: 0;
+            padding: 8px;
+            border: 1px solid #d9ccec;
+            border-radius: 10px;
+            background: #fff;
+            box-shadow: 0 12px 24px rgba(51, 40, 78, 0.14);
+            z-index: 25;
+            display: none;
+        }
+
+        .app-nav-item.is-open > .app-submenu {
+            display: block;
+        }
+
+        .app-submenu-item {
+            display: block;
+            width: 100%;
+            box-sizing: border-box;
+            margin: 0;
+            padding: 9px 10px;
+            border: 0;
+            border-radius: 7px;
+            background: transparent;
+            color: #4a3f6b;
+            text-decoration: none;
+            text-align: left;
+            font-family: 'Inter', system-ui, sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .app-submenu-item:hover,
+        .app-submenu-item:focus-visible {
+            background: #f1ebfd;
+            color: #352a55;
+            outline: none;
         }
 
         .app-modal-overlay {
@@ -2671,10 +2753,29 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <?php if ($is_admin): ?> (Admin)<?php endif; ?></p>
 
                 <nav class="app-nav" aria-label="App sections">
-                    <button type="button" class="app-nav-btn" data-open-modal="appModalMembers">Members</button>
-                    <button type="button" class="app-nav-btn" data-open-modal="appModalAI">AI</button>
-                    <button type="button" class="app-nav-btn" data-open-modal="appModalData">Data</button>
-                    <button type="button" class="app-nav-btn" data-open-modal="appModalSettings">Settings</button>
+                    <ul class="app-nav-list">
+                        <li class="app-nav-item">
+                            <button type="button" class="app-nav-link" data-open-modal="appModalMembers">Members</button>
+                        </li>
+                        <li class="app-nav-item has-submenu" id="appDataNavItem">
+                            <button type="button" class="app-nav-link" id="appDataMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appDataSubmenu">Data</button>
+                            <ul class="app-submenu" id="appDataSubmenu" role="menu" aria-label="Data actions">
+                                <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=xlsx">Download Excel</a></li>
+                                <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=pdf">Download PDF</a></li>
+                                <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=summary_pdf">Executive summary PDF</a></li>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" id="appImportCsvBtn">Import CSV</button>
+                                    <input type="file" id="csvImportInput" accept=".csv,text/csv" style="display:none;">
+                                </li>
+                            </ul>
+                        </li>
+                        <li class="app-nav-item">
+                            <button type="button" class="app-nav-link" data-open-modal="appModalAI">AI</button>
+                        </li>
+                        <li class="app-nav-item">
+                            <button type="button" class="app-nav-link" data-open-modal="appModalSettings">Settings</button>
+                        </li>
+                    </ul>
                 </nav>
 
                 <div class="report-filters">
@@ -2813,7 +2914,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 document.addEventListener('touchend', onEnd);
             }
             function initAppModals() {
-                document.querySelectorAll('.app-nav-btn').forEach(function(btn) {
+                document.querySelectorAll('[data-open-modal]').forEach(function(btn) {
                     btn.addEventListener('click', function() {
                         var id = btn.getAttribute('data-open-modal');
                         var el = id ? document.getElementById(id) : null;
@@ -2839,6 +2940,46 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         closeAppModal(ov);
                     });
                 });
+            }
+            function initDataSubmenu() {
+                var navItem = document.getElementById('appDataNavItem');
+                var menuBtn = document.getElementById('appDataMenuBtn');
+                var submenu = document.getElementById('appDataSubmenu');
+                var csvIn = document.getElementById('csvImportInput');
+                var csvBtn = document.getElementById('appImportCsvBtn');
+                if (!navItem || !menuBtn || !submenu) return;
+                function closeMenu() {
+                    navItem.classList.remove('is-open');
+                    menuBtn.setAttribute('aria-expanded', 'false');
+                }
+                function toggleMenu() {
+                    var willOpen = !navItem.classList.contains('is-open');
+                    if (willOpen) {
+                        navItem.classList.add('is-open');
+                        menuBtn.setAttribute('aria-expanded', 'true');
+                    } else {
+                        closeMenu();
+                    }
+                }
+                menuBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    toggleMenu();
+                });
+                document.addEventListener('click', function(e) {
+                    if (!navItem.contains(e.target)) closeMenu();
+                });
+                document.addEventListener('keydown', function(e) {
+                    if (e.key === 'Escape') closeMenu();
+                });
+                submenu.querySelectorAll('a,button').forEach(function(item) {
+                    item.addEventListener('click', function() { closeMenu(); });
+                });
+                if (csvBtn && csvIn) {
+                    csvBtn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        csvIn.click();
+                    });
+                }
             }
             const TEAM_MEMBERS = <?php echo $team_members_json; ?>;
             const IS_ADMIN = <?php echo $is_admin ? 'true' : 'false'; ?>;
@@ -3405,6 +3546,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             // Initialize: Load data on page load; flush debounced saves before refresh/navigation
             document.addEventListener('DOMContentLoaded', function() {
                 initAppModals();
+                initDataSubmenu();
                 loadCalculatorData();
                 var csvIn = document.getElementById('csvImportInput');
                 if (csvIn) {
@@ -3621,27 +3763,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <button type="button" id="aiSubmitBtn" class="ai-submit-btn">Ask</button>
                     </div>
                     <div id="aiChatLog" class="chat-container ai-chat-log" aria-label="Ask AI conversation"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="app-modal-overlay" id="appModalData" role="dialog" aria-modal="true" aria-labelledby="appModalDataTitle" aria-hidden="true">
-        <div class="app-modal" tabindex="-1">
-            <div class="app-modal-header">
-                <h2 id="appModalDataTitle">Data</h2>
-                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
-            </div>
-            <div class="app-modal-body">
-                <p style="margin:0 0 12px;color:#4b5563;">Download reports or import vendor data from CSV.</p>
-                <div class="data-actions">
-                    <a href="?action=export_vendors&amp;format=xlsx" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;">Download Excel</a>
-                    <a href="?action=export_vendors&amp;format=pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#4a3f6b;">Download PDF</a>
-                    <a href="?action=export_vendors&amp;format=summary_pdf" class="cost-calculator-link" style="padding:8px 16px;font-size:14px;background:#5b4d8f;">Executive summary PDF</a>
-                    <label style="cursor:pointer;padding:8px 12px;background:#ede9fe;border-radius:6px;border:1px solid #d4c4e8;">
-                        Import CSV
-                        <input type="file" id="csvImportInput" accept=".csv,text/csv" style="display:none;">
-                    </label>
                 </div>
             </div>
         </div>
