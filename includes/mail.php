@@ -120,11 +120,32 @@ function sendEmail($to, $subject, $body) {
         $mail->AltBody = trim($plain) !== '' ? trim($plain) : 'Please view this message in an HTML-capable email client.';
         $mail->send();
 
-        proLog('sendEmail_smtp_ok', [
+        $okCtx = [
             'to' => $to,
             'subject' => $subject,
             'host' => SMTP_HOST,
-        ]);
+            'envelope_sender' => (defined('SMTP_ENVELOPE_FROM') && SMTP_ENVELOPE_FROM !== '') ? SMTP_ENVELOPE_FROM : SMTP_FROM_EMAIL,
+        ];
+        if (method_exists($mail, 'getLastMessageID')) {
+            $mid = $mail->getLastMessageID();
+            if ($mid !== '') {
+                $okCtx['message_id'] = $mid;
+            }
+        }
+        $smtpInst = $mail->getSMTPInstance();
+        if (is_object($smtpInst)) {
+            if (property_exists($smtpInst, 'last_reply')) {
+                $okCtx['smtp_last_reply'] = trim((string) $smtpInst->last_reply);
+            }
+            if (method_exists($smtpInst, 'getLastTransactionID')) {
+                $tid = $smtpInst->getLastTransactionID();
+                if ($tid !== null && $tid !== '') {
+                    $okCtx['smtp_transaction_id'] = $tid;
+                }
+            }
+        }
+        $okCtx['delivery_note'] = 'SMTP accepted for relay; inbox delivery depends on recipient/spam/DMARC.';
+        proLog('sendEmail_smtp_ok', $okCtx);
 
         return true;
     } catch (\Throwable $e) {
