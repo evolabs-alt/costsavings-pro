@@ -79,6 +79,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'save_user_reminder_pref':
                 handleSaveUserReminderPref();
                 break;
+            case 'save_reminder_settings':
+                handleSaveReminderSettings();
+                break;
         }
     }
 }
@@ -425,6 +428,8 @@ if ($is_logged_in && !empty($_SESSION['org_id'])) {
 
 $team_members_rows = [];
 $team_members_json = '[]';
+$team_members_count = 0;
+$team_members_max = 10;
 if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id'])) {
     try {
         $pdoTeam = getDBConnection();
@@ -432,9 +437,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         $stTeam->execute([(int) $_SESSION['org_id']]);
         $team_members_rows = $stTeam->fetchAll(PDO::FETCH_ASSOC);
         $team_members_json = json_encode($team_members_rows, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+        $team_members_count = count($team_members_rows);
+        $team_members_max = getOrganizationMaxUsers($pdoTeam, (int) $_SESSION['org_id']);
     } catch (Exception $e) {
         $team_members_rows = [];
         $team_members_json = '[]';
+        $team_members_count = 0;
+        $team_members_max = 10;
     }
 }
 ?>
@@ -2197,6 +2206,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             border: 1px solid #e5e7eb;
         }
 
+        .app-modal-body .ai-assistant-card {
+            padding: 18px;
+            background: linear-gradient(145deg, #faf8ff, #f5f0ff);
+            border-radius: 12px;
+            border: 1px solid #e4daf5;
+            box-shadow: 0 4px 20px rgba(74,63,107,0.06);
+        }
+
         .app-modal-body .ai-usage-bar {
             font-size: 12px;
             color: #4a3f6b;
@@ -2212,15 +2229,105 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             color: #352a55;
         }
 
+        .app-modal-body .ai-presets-row {
+            display: flex;
+            flex-wrap: nowrap;
+            gap: 8px;
+            margin-bottom: 10px;
+            overflow-x: auto;
+            padding-bottom: 2px;
+            scrollbar-width: thin;
+        }
+
+        .app-modal-body .ai-preset {
+            flex: 0 0 auto;
+            border: 0;
+            border-radius: 10px;
+            padding: 11px 16px;
+            min-height: 42px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #fff;
+            background: linear-gradient(145deg, #5e6a7f, #4f5b6f);
+            box-shadow: 0 4px 10px rgba(65, 74, 94, 0.22);
+            white-space: nowrap;
+        }
+
+        .app-modal-body .ai-preset:hover {
+            background: linear-gradient(145deg, #677389, #566276);
+            transform: translateY(-1px);
+        }
+
+        .app-modal-body .ai-preset:disabled {
+            opacity: 0.72;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .app-modal-body .ai-composer {
+            display: flex;
+            align-items: flex-end;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .app-modal-body .ai-question-input {
+            width: 100%;
+            max-width: 100%;
+            min-height: 70px;
+            box-sizing: border-box;
+            padding: 12px 14px;
+            border: 1px solid #d6caeb;
+            border-radius: 10px;
+            background: #fff;
+            color: #352a55;
+            font-size: 14px;
+            line-height: 1.4;
+            resize: vertical;
+            transition: border-color .15s ease, box-shadow .15s ease;
+        }
+
+        .app-modal-body .ai-question-input:focus {
+            outline: none;
+            border-color: #a78bda;
+            box-shadow: 0 0 0 3px rgba(167, 139, 218, 0.2);
+        }
+
+        .app-modal-body .ai-submit-btn {
+            border: 0;
+            border-radius: 10px;
+            padding: 11px 18px;
+            min-width: 84px;
+            min-height: 44px;
+            font-size: 18px;
+            font-weight: 700;
+            color: #fff;
+            background: linear-gradient(145deg, #6f5a99, #57427f);
+            box-shadow: 0 5px 12px rgba(87, 66, 127, 0.3);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .app-modal-body .ai-submit-btn:hover {
+            background: linear-gradient(145deg, #7a65a5, #614b8c);
+            transform: translateY(-1px);
+        }
+
+        .app-modal-body .ai-submit-btn:disabled {
+            opacity: 0.72;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         .app-modal-body .ai-chat-log {
             max-height: 280px;
             min-height: 72px;
             overflow-y: auto;
-            margin-top: 10px;
-            padding: 8px;
-            border: 1px solid #e4daf5;
+            margin-top: 6px;
+            padding: 10px;
+            border: 1px solid #ddd0f0;
             border-radius: 8px;
-            background: #f8f9fa;
+            background: #fcfbff;
         }
 
         .app-modal-body .ai-chat-log .chat-message {
@@ -3452,6 +3559,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
             </div>
             <div class="app-modal-body">
+                <p style="margin:0 0 10px;color:#4b5563;font-size:14px;">
+                    Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> members
+                </p>
                 <?php if ($is_admin): ?>
                 <div class="invite-block">
                     <form method="POST" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
@@ -3497,18 +3607,19 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
             </div>
             <div class="app-modal-body">
-                <div id="aiAssistant" style="padding:18px;background:linear-gradient(145deg,#faf8ff,#f5f0ff);border-radius:12px;border:1px solid #e4daf5;box-shadow:0 4px 20px rgba(74,63,107,0.06);">
-                    <h3 style="margin-bottom:8px;font-size:17px;font-family:'Cormorant Garamond',Georgia,serif;color:#4a3f6b;font-weight:700;">Ask AI (Savvy CFO)</h3>
+                <div id="aiAssistant" class="ai-assistant-card">
                     <div id="aiUsageBar" class="ai-usage-bar" aria-live="polite">Loading usage…</div>
-                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+                    <div class="ai-presets-row">
                         <button type="button" class="btn-secondary ai-preset" data-preset="overlap">Overlap between vendors</button>
                         <button type="button" class="btn-secondary ai-preset" data-preset="alternatives">Cheaper alternatives</button>
                         <button type="button" class="btn-secondary ai-preset" data-preset="lower_tiers">Lower service tiers</button>
                         <button type="button" class="btn-secondary ai-preset" data-preset="duplicates">Duplicate subscriptions</button>
                         <button type="button" class="btn-secondary ai-preset" data-preset="executive">Executive summary suggestions</button>
                     </div>
-                    <textarea id="aiQuestion" rows="2" style="width:100%;max-width:100%;box-sizing:border-box;margin-bottom:8px;" placeholder="Ask a specific question..."></textarea>
-                    <button type="button" id="aiSubmitBtn">Ask</button>
+                    <div class="ai-composer">
+                        <textarea id="aiQuestion" class="ai-question-input" rows="2" placeholder="Ask a specific question..."></textarea>
+                        <button type="button" id="aiSubmitBtn" class="ai-submit-btn">Ask</button>
+                    </div>
                     <div id="aiChatLog" class="chat-container ai-chat-log" aria-label="Ask AI conversation"></div>
                 </div>
             </div>
@@ -3543,20 +3654,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
             </div>
             <div class="app-modal-body">
-                <?php if ($is_admin): ?>
                 <div class="settings-block">
                     <form method="POST" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
-                        <input type="hidden" name="action" value="save_org_reminders">
+                        <input type="hidden" name="action" value="save_reminder_settings">
+                        <?php if ($is_admin): ?>
                         <label><input type="checkbox" name="deadline_reminders_enabled" value="1" <?php echo $deadline_reminders_org ? 'checked' : ''; ?>> Org: deadline email assistant</label>
-                        <button type="submit">Save</button>
-                    </form>
-                </div>
-                <?php endif; ?>
-                <div class="settings-block">
-                    <form method="POST" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
-                        <input type="hidden" name="action" value="save_user_reminder_pref">
+                        <?php endif; ?>
                         <label style="font-size:14px;"><input type="checkbox" name="user_deadline_reminders" value="1" <?php echo $deadline_reminders_user ? 'checked' : ''; ?>> My deadline reminders</label>
-                        <button type="submit" style="padding:6px 10px;">Save</button>
+                        <button type="submit">Save</button>
                     </form>
                 </div>
             </div>

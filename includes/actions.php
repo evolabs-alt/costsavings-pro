@@ -358,6 +358,28 @@ function handleSaveUserReminderPref() {
     exit;
 }
 
+function handleSaveReminderSettings() {
+    if (empty($_SESSION['user_id'])) {
+        return;
+    }
+    $pdo = getDBConnection();
+    $isAdmin = (($_SESSION['role'] ?? '') === 'admin');
+
+    if ($isAdmin) {
+        $orgOn = isset($_POST['deadline_reminders_enabled']) && $_POST['deadline_reminders_enabled'] === '1';
+        $stOrg = $pdo->prepare('UPDATE organizations SET deadline_reminders_enabled = ? WHERE id = ?');
+        $stOrg->execute([$orgOn ? 1 : 0, (int) $_SESSION['org_id']]);
+    }
+
+    $userOn = isset($_POST['user_deadline_reminders']) && $_POST['user_deadline_reminders'] === '1';
+    $stUser = $pdo->prepare('UPDATE users SET deadline_reminders_enabled = ? WHERE id = ?');
+    $stUser->execute([$userOn ? 1 : 0, (int) $_SESSION['user_id']]);
+
+    $_SESSION['message'] = $isAdmin ? 'Settings saved.' : 'Reminder preference saved.';
+    header('Location: ' . $_SERVER['PHP_SELF']);
+    exit;
+}
+
 function handleSaveCostCalculator() {
     header('Content-Type: application/json');
 
