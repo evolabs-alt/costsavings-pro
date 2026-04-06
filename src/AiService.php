@@ -213,6 +213,7 @@ class AiService
         if ($s === '') {
             return '';
         }
+        $s = self::normalizeAiReplyWhitespace($s);
         $allowed = '<p><br><ul><ol><li><strong><em><b><i><h3><h4><h5><div><span>';
         $s = strip_tags($s, $allowed);
         if (!preg_match('/<[a-z][^>]*>/i', $s)) {
@@ -220,6 +221,20 @@ class AiService
         }
 
         return $s;
+    }
+
+    /**
+     * Strip redundant CR/LF and extra blank lines from model output before sanitizing.
+     */
+    private static function normalizeAiReplyWhitespace(string $html): string
+    {
+        $s = str_replace(["\r\n", "\r"], "\n", $html);
+        $s = preg_replace('/>\s+</s', '><', $s) ?? $s;
+        $s = preg_replace('/(?:<br\s*\/?>\s*){2,}/i', '<br>', $s) ?? $s;
+        $s = preg_replace('/\n{2,}/', "\n", $s) ?? $s;
+        $s = preg_replace("/[ \t]+\n/", "\n", $s) ?? $s;
+
+        return trim($s);
     }
 
     /**

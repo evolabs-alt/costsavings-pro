@@ -2231,6 +2231,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             font-size: 13px;
         }
 
+        .app-modal-body .ai-chat-log .ai-bubble-html {
+            white-space: normal;
+        }
+
         .app-modal-body .ai-chat-log .ai-bubble-html p {
             margin: 0 0 0.5em 0;
         }

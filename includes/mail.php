@@ -20,8 +20,6 @@ foreach ($phpmailer_paths as $path) {
 function sendEmail($to, $subject, $body) {
     global $phpmailer_loaded;
 
-    error_log('sendEmail called for: ' . $to);
-
     // Use PHPMailer whenever the class is available (Composer autoload loads it even if manual paths above missed).
     if (!class_exists('PHPMailer\PHPMailer\PHPMailer')) {
         $headers = [
