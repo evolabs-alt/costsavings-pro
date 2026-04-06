@@ -39,10 +39,19 @@ function sendEmail($to, $subject, $body) {
     }
 
     $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+    $smtpTranscript = '';
+    $captureSmtp = defined('SMTP_BROWSER_DEBUG') && SMTP_BROWSER_DEBUG;
 
     try {
         $mail->CharSet = 'UTF-8';
-        $mail->SMTPDebug = 0;
+        if ($captureSmtp) {
+            $mail->SMTPDebug = 2;
+            $mail->Debugoutput = static function ($str, $level) use (&$smtpTranscript): void {
+                $smtpTranscript .= '[L' . (int) $level . '] ' . trim((string) $str) . "\n";
+            };
+        } else {
+            $mail->SMTPDebug = 0;
+        }
         $mail->Timeout = 30;
         $mail->isSMTP();
         $mail->Host = SMTP_HOST;
@@ -97,6 +106,7 @@ function sendEmail($to, $subject, $body) {
             'success' => false,
             'error_message' => $e->getMessage(),
             'error_info' => isset($mail->ErrorInfo) ? $mail->ErrorInfo : '',
+            'smtp_debug' => $captureSmtp ? trim($smtpTranscript) : '',
         ];
     }
 }

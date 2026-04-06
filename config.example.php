@@ -12,6 +12,8 @@ define('SMTP_USERNAME', 'user@example.com');
 define('SMTP_PASSWORD', 'your-smtp-password');
 define('SMTP_FROM_EMAIL', 'user@example.com');
 define('SMTP_FROM_NAME', 'Savvy CFO Portal');
+/** Optional: set true temporarily to print PHPMailer SMTP transcript in browser console after invite failures. */
+define('SMTP_BROWSER_DEBUG', false);
 /** Optional: EHLO/HELO hostname (use your mail domain if the server rejects connections). Example: define('SMTP_HELO_HOST', 'mail.example.com'); */
 /** Optional Return-Path. If messages are accepted but never arrive (e.g. Gmail), set to the same address you use for SMTP_USERNAME. Example: define('SMTP_ENVELOPE_FROM', 'user@example.com'); */
 

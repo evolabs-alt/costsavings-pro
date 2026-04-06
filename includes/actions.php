@@ -153,6 +153,9 @@ function handleInviteMember() {
                 . ' '
                 . ($mailResult['error_info'] ?? '')
             );
+            if (!empty($mailResult['smtp_debug']) && defined('SMTP_BROWSER_DEBUG') && SMTP_BROWSER_DEBUG) {
+                $_SESSION['smtp_debug_transcript'] = (string) $mailResult['smtp_debug'];
+            }
         }
         logInviteEvent('mail_failed', ['invitation_id' => $invId, 'org_id' => $orgId, 'email' => $email]);
         // Keep the invitation row so the token stays valid; admin can share the link manually.
