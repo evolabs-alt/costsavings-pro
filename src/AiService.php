@@ -50,6 +50,8 @@ class AiService
             return ['success' => false, 'error' => 'AI is not configured (set PERPLEXITY_API_KEY or OPENAI_API_KEY).'];
         }
 
+        \ensureAiUsageTable($pdo);
+
         $ym = date('Y-m');
         $limit = defined('AI_MONTHLY_LIMIT') ? (int) AI_MONTHLY_LIMIT : 50;
 

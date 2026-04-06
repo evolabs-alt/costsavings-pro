@@ -90,6 +90,37 @@ function initializeDatabase($pdo) {
 }
 
 /**
+ * AI monthly usage counter table. Invoked from migrateSchema (after users exist) and from AiService::ask
+ * so usage checks never hit a missing table if a later migration step failed.
+ *
+ * @param PDO $pdo
+ */
+function ensureAiUsageTable(PDO $pdo): void {
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `ai_usage` (
+            `user_id` INT UNSIGNED NOT NULL,
+            `year_month` CHAR(7) NOT NULL,
+            `count` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (`user_id`, `year_month`),
+            CONSTRAINT `fk_ai_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    } catch (PDOException $e) {
+        error_log('ensureAiUsageTable (with FK): ' . $e->getMessage());
+        try {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS `ai_usage` (
+                `user_id` INT UNSIGNED NOT NULL,
+                `year_month` CHAR(7) NOT NULL,
+                `count` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+                PRIMARY KEY (`user_id`, `year_month`),
+                KEY `idx_ai_user` (`user_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        } catch (PDOException $e2) {
+            error_log('ensureAiUsageTable (no FK): ' . $e2->getMessage());
+        }
+    }
+}
+
+/**
  * Extended schema: organizations, auth, invitations, vendor columns, AI/reminder tables.
  *
  * @param PDO $pdo
@@ -99,7 +130,6 @@ function migrateSchema(PDO $pdo) {
     if ($migrated) {
         return;
     }
-    $migrated = true;
 
     try {
         $pdo->exec("CREATE TABLE IF NOT EXISTS `organizations` (
@@ -178,6 +208,8 @@ function migrateSchema(PDO $pdo) {
             }
         }
 
+        ensureAiUsageTable($pdo);
+
         $pdo->exec("CREATE TABLE IF NOT EXISTS `invitations` (
             `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             `org_id` INT UNSIGNED NOT NULL,
@@ -191,14 +223,6 @@ function migrateSchema(PDO $pdo) {
             KEY `idx_inv_email` (`email`),
             CONSTRAINT `fk_inv_org` FOREIGN KEY (`org_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE,
             CONSTRAINT `fk_inv_user` FOREIGN KEY (`invited_by_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-        $pdo->exec("CREATE TABLE IF NOT EXISTS `ai_usage` (
-            `user_id` INT UNSIGNED NOT NULL,
-            `year_month` CHAR(7) NOT NULL,
-            `count` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
-            PRIMARY KEY (`user_id`, `year_month`),
-            CONSTRAINT `fk_ai_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS `reminder_sent` (
@@ -220,6 +244,7 @@ function migrateSchema(PDO $pdo) {
 
         migrateCostCalculatorSchema($pdo);
         seedInitialAdminIfNeeded($pdo);
+        $migrated = true;
     } catch (PDOException $e) {
         error_log('migrateSchema error: ' . $e->getMessage());
     }
