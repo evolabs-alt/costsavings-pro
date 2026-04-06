@@ -40,6 +40,16 @@ function publicAppBaseUrl(): string {
     return $scheme . '://' . $host . $path . '/';
 }
 
+function logInviteEvent(string $event, array $context = []): void {
+    $safe = [];
+    foreach ($context as $k => $v) {
+        if (is_scalar($v) || $v === null) {
+            $safe[$k] = $v;
+        }
+    }
+    error_log('[invite] ' . $event . ' ' . json_encode($safe));
+}
+
 function handleLogin() {
     $pdo = getDBConnection();
     $u = trim($_POST['username'] ?? '');
@@ -84,15 +94,32 @@ function handleInviteMember() {
     }
     $pdo = getDBConnection();
     $orgId = (int) $_SESSION['org_id'];
+    logInviteEvent('request_received', [
+        'admin_user_id' => (int) $_SESSION['user_id'],
+        'org_id' => $orgId,
+        'email' => $email,
+    ]);
+    $maxUsers = getOrganizationMaxUsers($pdo, $orgId);
     $c = (int) $pdo->query('SELECT COUNT(*) AS c FROM users WHERE org_id = ' . (int) $orgId)->fetch()['c'];
-    if ($c >= 10) {
-        $_SESSION['error'] = 'Organization is at the maximum of 10 users.';
+    if ($c >= $maxUsers) {
+        logInviteEvent('blocked_org_limit', ['org_id' => $orgId, 'users' => $c, 'max_users' => $maxUsers]);
+        $_SESSION['error'] = 'Organization is at the maximum of ' . $maxUsers . ' users.';
         $redir();
     }
     $exists = $pdo->prepare('SELECT id FROM users WHERE email = ?');
     $exists->execute([$email]);
     if ($exists->fetch()) {
+        logInviteEvent('blocked_existing_user', ['org_id' => $orgId, 'email' => $email]);
         $_SESSION['error'] = 'A user with this email already exists.';
+        $redir();
+    }
+    $pending = $pdo->prepare(
+        'SELECT id FROM invitations WHERE org_id = ? AND email = ? AND consumed_at IS NULL AND expires_at > NOW() LIMIT 1'
+    );
+    $pending->execute([$orgId, $email]);
+    if ($pending->fetch()) {
+        logInviteEvent('blocked_pending_invite', ['org_id' => $orgId, 'email' => $email]);
+        $_SESSION['error'] = 'A pending invitation already exists for this email. The recipient can use the link from that email, or wait until it expires and send a new one.';
         $redir();
     }
     $plain = bin2hex(random_bytes(32));
@@ -105,10 +132,12 @@ function handleInviteMember() {
         $ins->execute([$orgId, $email, $hash, (int) $_SESSION['user_id'], $exp]);
     } catch (PDOException $e) {
         error_log('handleInviteMember insert: ' . $e->getMessage());
+        logInviteEvent('insert_failed', ['org_id' => $orgId, 'email' => $email]);
         $_SESSION['error'] = 'Could not save invitation. Please try again.';
         $redir();
     }
     $invId = (int) $pdo->lastInsertId();
+    logInviteEvent('invite_saved', ['invitation_id' => $invId, 'org_id' => $orgId, 'email' => $email]);
 
     $link = publicAppBaseUrl() . 'register.php?token=' . urlencode($plain);
     $body = '<p>You have been invited to join the Savvy CFO Cost Savings tool.</p>'
@@ -125,11 +154,13 @@ function handleInviteMember() {
                 . ($mailResult['error_info'] ?? '')
             );
         }
+        logInviteEvent('mail_failed', ['invitation_id' => $invId, 'org_id' => $orgId, 'email' => $email]);
         // Keep the invitation row so the token stays valid; admin can share the link manually.
         $_SESSION['error'] = 'Could not send invitation email. Check SMTP_HOST, SMTP_PORT, SMTP_SECURE (ssl vs tls), and credentials in config.php. '
             . 'You can share this registration link manually: ' . $link;
         $redir();
     }
+    logInviteEvent('mail_sent', ['invitation_id' => $invId, 'org_id' => $orgId, 'email' => $email]);
     $_SESSION['message'] = 'Invitation sent. If the recipient does not see it within a few minutes, ask them to check spam/junk and promotions tabs.';
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;

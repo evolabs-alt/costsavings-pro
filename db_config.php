@@ -365,6 +365,21 @@ function seedInitialAdminIfNeeded(PDO $pdo) {
 }
 
 /**
+ * Member cap for an organization (invites + registration must respect this).
+ *
+ * @return int
+ */
+function getOrganizationMaxUsers(PDO $pdo, int $orgId): int
+{
+    $st = $pdo->prepare('SELECT `max_users` FROM `organizations` WHERE `id` = ?');
+    $st->execute([$orgId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    $m = (int) ($row['max_users'] ?? 10);
+
+    return $m > 0 ? $m : 10;
+}
+
+/**
  * @param string $email
  */
 function ensureUserExists($email) {

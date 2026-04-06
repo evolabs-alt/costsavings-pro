@@ -9,7 +9,11 @@ if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
 require_once __DIR__ . '/../includes/mail.php';
 
 $error = '';
-$token = $_GET['token'] ?? ($_POST['token'] ?? '');
+$token = $_POST['token'] ?? ($_GET['token'] ?? '');
+
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && $token === '') {
+    $error = 'Open this page using the link from your invitation email.';
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
     $token = $_POST['token'] ?? '';
@@ -33,17 +37,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
         $st->execute([$hash]);
         $inv = $st->fetch(PDO::FETCH_ASSOC);
         if (!$inv) {
+            error_log('[invite-register] token_invalid_or_expired');
             $error = 'Invalid or expired invitation link.';
         } else {
             $orgId = (int) $inv['org_id'];
             $email = strtolower(trim($inv['email']));
+            error_log('[invite-register] token_valid org_id=' . $orgId . ' email=' . $email);
+            $maxUsers = getOrganizationMaxUsers($pdo, $orgId);
             $c = (int) $pdo->query('SELECT COUNT(*) AS c FROM users WHERE org_id = ' . $orgId)->fetch()['c'];
-            if ($c >= 10) {
-                $error = 'This organization already has the maximum number of users.';
+            if ($c >= $maxUsers) {
+                error_log('[invite-register] blocked_org_limit org_id=' . $orgId . ' users=' . $c . ' max=' . $maxUsers);
+                $error = 'This organization already has the maximum number of users (' . $maxUsers . ').';
             } else {
                 $dup = $pdo->prepare('SELECT id FROM users WHERE username = ? OR email = ?');
                 $dup->execute([$username, $email]);
                 if ($dup->fetch()) {
+                    error_log('[invite-register] blocked_duplicate_user org_id=' . $orgId . ' email=' . $email . ' username=' . $username);
                     $error = 'Username or email is already taken.';
                 } else {
                     $ph = password_hash($password, PASSWORD_DEFAULT);
@@ -51,7 +60,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
                         'INSERT INTO users (org_id, username, email, password_hash, role, display_name) VALUES (?,?,?,?,?,?)'
                     );
                     $ins->execute([$orgId, $username, $email, $ph, 'member', $displayName]);
+                    error_log('[invite-register] user_created org_id=' . $orgId . ' email=' . $email . ' username=' . $username);
                     $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
+                    error_log('[invite-register] invite_consumed invitation_id=' . (int) $inv['id']);
                     $_SESSION['message'] = 'Registration complete. You can log in.';
                     header('Location: index.php');
                     exit;
