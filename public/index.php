@@ -2083,6 +2083,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             position: relative;
         }
 
+        .app-nav-inline-form {
+            margin: 0;
+        }
+
         .app-nav-link {
             display: inline-flex;
             align-items: center;
@@ -2190,6 +2194,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             display: flex;
             flex-direction: column;
             overflow: hidden;
+        }
+
+        #appModalAI .app-modal {
+            width: 90vw;
+            max-width: 90vw;
         }
 
         .app-modal-header {
@@ -2627,15 +2636,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
     </script>    
 </head>
 <body>
-    <?php if ($is_logged_in && empty($_SESSION['awaiting_role'])): ?>
-        <form method="POST" class="logout-form">
-            <input type="hidden" name="action" value="logout">
-            <button type="submit" class="logout-button" title="Logout">
-                <i class="fas fa-right-from-bracket" aria-hidden="true"></i>
-                <span>Log out</span>
-            </button>
-        </form>
-    <?php endif; ?>
 
     <!-- Snackbar for messages -->
     <div id="snackbar" class="snackbar">
@@ -2754,8 +2754,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
                 <nav class="app-nav" aria-label="App sections">
                     <ul class="app-nav-list">
-                        <li class="app-nav-item">
-                            <button type="button" class="app-nav-link" data-open-modal="appModalMembers">Members</button>
+                        <li class="app-nav-item has-submenu" id="appMembersNavItem">
+                            <button type="button" class="app-nav-link" id="appMembersMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appMembersSubmenu">Members</button>
+                            <ul class="app-submenu" id="appMembersSubmenu" role="menu" aria-label="Members actions">
+                                <?php if ($is_admin): ?>
+                                <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersInvite">Invite</button></li>
+                                <?php endif; ?>
+                                <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage</button></li>
+                            </ul>
                         </li>
                         <li class="app-nav-item has-submenu" id="appDataNavItem">
                             <button type="button" class="app-nav-link" id="appDataMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appDataSubmenu">Data</button>
@@ -2770,10 +2776,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             </ul>
                         </li>
                         <li class="app-nav-item">
-                            <button type="button" class="app-nav-link" data-open-modal="appModalAI">AI</button>
+                            <button type="button" class="app-nav-link" data-open-modal="appModalAI">AI Assistant</button>
                         </li>
                         <li class="app-nav-item">
                             <button type="button" class="app-nav-link" data-open-modal="appModalSettings">Settings</button>
+                        </li>
+                        <li class="app-nav-item">
+                            <form method="POST" class="app-nav-inline-form">
+                                <input type="hidden" name="action" value="logout">
+                                <button type="submit" class="app-nav-link">Logout</button>
+                            </form>
                         </li>
                     </ul>
                 </nav>
@@ -2941,39 +2953,41 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     });
                 });
             }
-            function initDataSubmenu() {
-                var navItem = document.getElementById('appDataNavItem');
-                var menuBtn = document.getElementById('appDataMenuBtn');
-                var submenu = document.getElementById('appDataSubmenu');
-                var csvIn = document.getElementById('csvImportInput');
-                var csvBtn = document.getElementById('appImportCsvBtn');
-                if (!navItem || !menuBtn || !submenu) return;
-                function closeMenu() {
-                    navItem.classList.remove('is-open');
-                    menuBtn.setAttribute('aria-expanded', 'false');
+            function initNavSubmenus() {
+                var submenuItems = Array.from(document.querySelectorAll('.app-nav-item.has-submenu'));
+                if (!submenuItems.length) return;
+                function closeMenu(item) {
+                    var trigger = item.querySelector('.app-nav-link[aria-controls]');
+                    item.classList.remove('is-open');
+                    if (trigger) trigger.setAttribute('aria-expanded', 'false');
                 }
-                function toggleMenu() {
-                    var willOpen = !navItem.classList.contains('is-open');
-                    if (willOpen) {
-                        navItem.classList.add('is-open');
-                        menuBtn.setAttribute('aria-expanded', 'true');
-                    } else {
-                        closeMenu();
-                    }
+                function closeAll() {
+                    submenuItems.forEach(closeMenu);
                 }
-                menuBtn.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    toggleMenu();
+                submenuItems.forEach(function(item) {
+                    var trigger = item.querySelector('.app-nav-link[aria-controls]');
+                    if (!trigger) return;
+                    trigger.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        var willOpen = !item.classList.contains('is-open');
+                        closeAll();
+                        if (willOpen) {
+                            item.classList.add('is-open');
+                            trigger.setAttribute('aria-expanded', 'true');
+                        }
+                    });
+                    item.querySelectorAll('.app-submenu a, .app-submenu button').forEach(function(action) {
+                        action.addEventListener('click', function() { closeAll(); });
+                    });
                 });
                 document.addEventListener('click', function(e) {
-                    if (!navItem.contains(e.target)) closeMenu();
+                    if (!submenuItems.some(function(item) { return item.contains(e.target); })) closeAll();
                 });
                 document.addEventListener('keydown', function(e) {
-                    if (e.key === 'Escape') closeMenu();
+                    if (e.key === 'Escape') closeAll();
                 });
-                submenu.querySelectorAll('a,button').forEach(function(item) {
-                    item.addEventListener('click', function() { closeMenu(); });
-                });
+                var csvIn = document.getElementById('csvImportInput');
+                var csvBtn = document.getElementById('appImportCsvBtn');
                 if (csvBtn && csvIn) {
                     csvBtn.addEventListener('click', function(e) {
                         e.preventDefault();
@@ -3546,7 +3560,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             // Initialize: Load data on page load; flush debounced saves before refresh/navigation
             document.addEventListener('DOMContentLoaded', function() {
                 initAppModals();
-                initDataSubmenu();
+                initNavSubmenus();
                 loadCalculatorData();
                 var csvIn = document.getElementById('csvImportInput');
                 if (csvIn) {
@@ -3694,17 +3708,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
     </div>
 
     <?php if ($current_view === 'placeholder'): ?>
-    <div class="app-modal-overlay" id="appModalMembers" role="dialog" aria-modal="true" aria-labelledby="appModalMembersTitle" aria-hidden="true">
+    <div class="app-modal-overlay" id="appModalMembersInvite" role="dialog" aria-modal="true" aria-labelledby="appModalMembersInviteTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
-                <h2 id="appModalMembersTitle">Members</h2>
+                <h2 id="appModalMembersInviteTitle">Invite Member</h2>
                 <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
             </div>
             <div class="app-modal-body">
                 <p style="margin:0 0 10px;color:#4b5563;font-size:14px;">
                     Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> members
                 </p>
-                <?php if ($is_admin): ?>
                 <div class="invite-block">
                     <form method="POST" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
                         <input type="hidden" name="action" value="invite_member">
@@ -3713,7 +3726,20 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <button type="submit">Send invite</button>
                     </form>
                 </div>
-                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay" id="appModalMembersManage" role="dialog" aria-modal="true" aria-labelledby="appModalMembersManageTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalMembersManageTitle">Manage Members</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <p style="margin:0 0 10px;color:#4b5563;font-size:14px;">
+                    Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> members
+                </p>
                 <div class="members-table-wrap">
                     <table class="members-table">
                         <thead>
@@ -3745,7 +3771,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
     <div class="app-modal-overlay" id="appModalAI" role="dialog" aria-modal="true" aria-labelledby="appModalAITitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
-                <h2 id="appModalAITitle">Ask AI</h2>
+                <h2 id="appModalAITitle">AI Assistant</h2>
                 <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
             </div>
             <div class="app-modal-body">
@@ -3762,7 +3788,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <textarea id="aiQuestion" class="ai-question-input" rows="2" placeholder="Ask a specific question..."></textarea>
                         <button type="button" id="aiSubmitBtn" class="ai-submit-btn">Ask</button>
                     </div>
-                    <div id="aiChatLog" class="chat-container ai-chat-log" aria-label="Ask AI conversation"></div>
+                    <div id="aiChatLog" class="chat-container ai-chat-log" aria-label="AI Assistant conversation"></div>
                 </div>
             </div>
         </div>
