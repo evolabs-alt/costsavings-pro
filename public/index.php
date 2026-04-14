@@ -826,6 +826,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             font-weight: 600;
         }
 
+        .cost-calculator-grid .annual-cost-display {
+            font-size: 13px;
+        }
+
         .cost-calculator-grid .manager-col {
             min-width: 90px;
         }
@@ -838,11 +842,29 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             min-width: 90px;
         }
 
-        .cost-calculator-grid .cancel-deadline {
-            min-width: 110px;
+        .cost-calculator-grid .cancel-keep .cancelled-status-inline {
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            font-size: 11px;
+            color: #6b7280;
+            font-weight: 500;
         }
 
-        .cost-calculator-grid .last-pay {
+        .cost-calculator-grid .cancel-keep .cancelled-status-inline input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+            cursor: pointer;
+        }
+
+        .cost-calculator-grid .cancel-keep .cancelled-status-inline input[type="checkbox"]:disabled {
+            cursor: not-allowed;
+            opacity: 0.35;
+        }
+
+        .cost-calculator-grid .cancel-deadline {
             min-width: 110px;
         }
 
@@ -1132,6 +1154,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 font-size: 11px;
             }
 
+            .cost-calculator-grid .annual-cost-display {
+                font-size: 11px;
+            }
+
             .cost-calculator-grid .manager-col,
             .cost-calculator-grid .visibility-col {
                 min-width: 85px;
@@ -1141,13 +1167,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 min-width: 80px;
             }
 
-            .cost-calculator-grid .cancel-deadline,
-            .cost-calculator-grid .last-pay {
+            .cost-calculator-grid .cancel-deadline {
                 min-width: 100px;
-            }
-
-            .cost-calculator-grid .cancelled-status {
-                min-width: 90px;
             }
 
             .report-filters {
@@ -2973,8 +2994,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 </li>
                             </ul>
                         </li>
-                        <li class="app-nav-item">
-                            <button type="button" class="app-nav-link" data-open-modal="appModalAI">AI Assistant</button>
+                        <li class="app-nav-item has-submenu" id="appAiNavItem">
+                            <button type="button" class="app-nav-link" id="appAiMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appAiSubmenu">AI</button>
+                            <ul class="app-submenu" id="appAiSubmenu" role="menu" aria-label="AI actions">
+                                <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appAiAssistantBtn" data-open-modal="appModalAI">Assistant</button></li>
+                                <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appAutoPopulatePurposeBtn">Auto populate purpose</button></li>
+                            </ul>
                         </li>
                         <li class="app-nav-item">
                             <button type="button" class="app-nav-link" data-open-modal="appModalSettings">Settings</button>
@@ -3015,8 +3040,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <th class="visibility-col">Visibility</th>
                             <th class="cancel-keep" title="Cancel = cancel this cost">Cancel/Keep</th>
                             <th class="cancel-deadline">Deadline</th>
-                            <th class="cancelled-status" title="Confirmed cancellation">Confirmed cancelled</th>
-                            <th class="last-pay">Last Pay</th>
                             <th class="notes">Purpose</th>
                             <th class="delete-row"></th>
                         </tr>
@@ -3394,18 +3417,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <option value="Keep">Keep</option>
                             <option value="Cancel">Cancel</option>
                         </select>
+                        <label class="cancelled-status-inline" title="Confirmed cancellation">
+                            <input type="checkbox" name="cancelled_status[]" class="cancelled-status-checkbox" data-row="${rowCount}" />
+                            <span>Confirmed</span>
+                        </label>
                     </td>
                     <td class="cancel-deadline">
                         <input type="date" class="cancel-deadline-input" data-row="${rowCount}" />
                     </td>
-                    <td class="cancelled-status">
-                        <input type="checkbox" name="cancelled_status[]" class="cancelled-status-checkbox" data-row="${rowCount}" />
-                    </td>
-                    <td class="last-pay">
-                        <input type="date" class="last-payment-input" data-row="${rowCount}" />
-                    </td>
                     <td class="notes">
                         <textarea name="notes[]" class="purpose-textarea" rows="2" placeholder="Purpose of subscription"></textarea>
+                        <input type="hidden" class="last-payment-input" data-row="${rowCount}" />
                     </td>
                     <td class="delete-row">
                         <button type="button" class="delete-btn" onclick="deleteRow(this)">Delete</button>
@@ -3885,10 +3907,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 if (!rawBtn || !vendorInput) return;
                 const idVal = idEl && idEl.value ? parseInt(idEl.value, 10) : 0;
                 const vendorName = vendorInput.value ? vendorInput.value.trim() : '';
-                const enabled = idVal > 0 && vendorName !== '';
+                const enabled = vendorName !== '';
                 rawBtn.disabled = !enabled;
                 rawBtn.setAttribute('data-vendor-name', enabled ? vendorName : '');
-                rawBtn.title = enabled ? ('View raw transactions for ' + vendorName) : 'Save/import this row first to view raw data';
+                rawBtn.title = enabled ? ('View raw transactions for ' + vendorName) : 'Enter a vendor name first';
             }
             
             // Override attachRowListeners to use the new version with auto-save
@@ -4156,9 +4178,55 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         });
                 }
                 fetchAiUsageStats();
-                var aiOpenBtn = document.querySelector('[data-open-modal="appModalAI"]');
+                function triggerAutoPopulatePurpose() {
+                    appendAiChatMessage('user', 'Auto populate purpose');
+                    var rows = collectVisibleVendorRowsForPurposeLookup();
+                    if (!rows.length) {
+                        appendAiChatMessage('assistant', 'No saved vendor rows found on screen.', false);
+                        showSnackbar('No saved vendor rows found on screen.', 'error');
+                        return;
+                    }
+                    var fd2 = new FormData();
+                    fd2.append('action', 'auto_populate_purpose');
+                    fd2.append('rows', JSON.stringify(rows));
+                    setAiUiBusy(true);
+                    fetch(window.location.href, { method: 'POST', body: fd2 })
+                        .then(function(r) { return r.json(); })
+                        .then(function(d) {
+                            setAiUiBusy(false);
+                            if (d.success) {
+                                applyPurposeLookupResultsToUi(d.resolved || []);
+                                var unresolved = Array.isArray(d.unresolved) ? d.unresolved.length : 0;
+                                appendAiChatMessage(
+                                    'assistant',
+                                    'Auto populate finished. Updated ' + (d.updated || 0) + ' rows.' + (unresolved ? (' ' + unresolved + ' vendors could not be resolved.') : ''),
+                                    false
+                                );
+                                showSnackbar('Purpose auto-populate completed.', 'success');
+                            } else {
+                                appendAiChatMessage('assistant', d.error || 'Auto populate failed.', false);
+                                showSnackbar(d.error || 'Auto populate failed.', 'error');
+                            }
+                        })
+                        .catch(function() {
+                            setAiUiBusy(false);
+                            appendAiChatMessage('assistant', 'Request failed.', false);
+                            showSnackbar('Auto populate request failed.', 'error');
+                        });
+                }
+
+                var aiOpenBtn = document.getElementById('appAiAssistantBtn');
                 if (aiOpenBtn) {
                     aiOpenBtn.addEventListener('click', function() { setTimeout(fetchAiUsageStats, 150); });
+                }
+                var autoPurposeBtn = document.getElementById('appAutoPopulatePurposeBtn');
+                if (autoPurposeBtn) {
+                    autoPurposeBtn.addEventListener('click', function() {
+                        var overlay = document.getElementById('appModalAI');
+                        if (overlay) openAppModal(overlay);
+                        setTimeout(fetchAiUsageStats, 150);
+                        triggerAutoPopulatePurpose();
+                    });
                 }
                 var aiBtn = document.getElementById('aiSubmitBtn');
                 if (aiBtn) {
@@ -4194,42 +4262,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     btn.addEventListener('click', function() {
                         var preset = btn.getAttribute('data-preset') || '';
                         var label = (btn.textContent || '').trim();
-                        appendAiChatMessage('user', label);
                         if (preset === 'auto_purpose') {
-                            var rows = collectVisibleVendorRowsForPurposeLookup();
-                            if (!rows.length) {
-                                appendAiChatMessage('assistant', 'No saved vendor rows found on screen.', false);
-                                return;
-                            }
-                            var fd2 = new FormData();
-                            fd2.append('action', 'auto_populate_purpose');
-                            fd2.append('rows', JSON.stringify(rows));
-                            setAiUiBusy(true);
-                            fetch(window.location.href, { method: 'POST', body: fd2 })
-                                .then(function(r) { return r.json(); })
-                                .then(function(d) {
-                                    setAiUiBusy(false);
-                                    if (d.success) {
-                                        applyPurposeLookupResultsToUi(d.resolved || []);
-                                        var unresolved = Array.isArray(d.unresolved) ? d.unresolved.length : 0;
-                                        appendAiChatMessage(
-                                            'assistant',
-                                            'Auto populate finished. Updated ' + (d.updated || 0) + ' rows.' + (unresolved ? (' ' + unresolved + ' vendors could not be resolved.') : ''),
-                                            false
-                                        );
-                                        showSnackbar('Purpose auto-populate completed.', 'success');
-                                    } else {
-                                        appendAiChatMessage('assistant', d.error || 'Auto populate failed.', false);
-                                        showSnackbar(d.error || 'Auto populate failed.', 'error');
-                                    }
-                                })
-                                .catch(function() {
-                                    setAiUiBusy(false);
-                                    appendAiChatMessage('assistant', 'Request failed.', false);
-                                    showSnackbar('Auto populate request failed.', 'error');
-                                });
+                            triggerAutoPopulatePurpose();
                             return;
                         }
+                        appendAiChatMessage('user', label);
                         var fd = new FormData();
                         fd.append('action', 'ai_ask');
                         fd.append('preset', preset);
@@ -4338,7 +4375,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <button type="button" class="btn-secondary ai-preset" data-preset="lower_tiers">Lower service tiers</button>
                         <button type="button" class="btn-secondary ai-preset" data-preset="duplicates">Duplicate subscriptions</button>
                         <button type="button" class="btn-secondary ai-preset" data-preset="executive">Executive summary suggestions</button>
-                        <button type="button" class="btn-secondary ai-preset" data-preset="auto_purpose">Auto populate purpose</button>
                     </div>
                     <div class="ai-composer">
                         <textarea id="aiQuestion" class="ai-question-input" rows="2" placeholder="Ask a specific question..."></textarea>
