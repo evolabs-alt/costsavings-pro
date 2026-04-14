@@ -943,6 +943,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             color: #4a3f6b;
         }
 
+        .report-filters .bulk-action-btn {
+            padding: 8px 12px;
+            font-size: 13px;
+            border-radius: 8px;
+        }
+
         .cost-calculator-grid.notes-collapsed {
             min-width: 880px;
         }
@@ -953,25 +959,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .cost-calculator-grid .notes {
             min-width: 140px;
-        }
-
-        .cost-calculator-grid .delete-row {
-            width: 44px;
-            text-align: center;
-        }
-
-        .cost-calculator-grid .delete-btn {
-            background: #dc3545;
-            color: white;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-        }
-
-        .cost-calculator-grid .delete-btn:hover {
-            background: #c82333;
         }
 
         .cost-calculator-actions {
@@ -1036,6 +1023,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             justify-content: flex-end;
             flex-wrap: wrap;
             margin-top: 8px;
+        }
+
+        .bulk-actions-buttons .btn-secondary {
+            font-size: 13px;
+            padding: 8px 12px;
         }
 
         .bulk-actions-form .bulk-confirm-summary {
@@ -1193,15 +1185,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             .cost-calculator-grid .notes textarea {
                 rows: 1;
                 min-height: 30px;
-            }
-
-            .cost-calculator-grid .delete-row {
-                width: 40px;
-            }
-
-            .cost-calculator-grid .delete-btn {
-                padding: 4px 8px;
-                font-size: 10px;
             }
 
             .cost-calculator-actions {
@@ -3021,6 +3004,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <option value="pending_cancelled">Pending Cancelled</option>
                         <option value="confirmed_cancelled">Confirmed Cancelled</option>
                     </select>
+                    <button type="button" class="bulk-action-btn" data-open-modal="appModalBulkActions">Bulk Actions</button>
                     <button type="button" id="togglePurposeColumnBtn" class="column-toggle-btn" aria-pressed="false">Show Purpose</button>
                 </div>
                 
@@ -3041,7 +3025,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <th class="cancel-keep" title="Cancel = cancel this cost">Cancel/Keep</th>
                             <th class="cancel-deadline">Deadline</th>
                             <th class="notes">Purpose</th>
-                            <th class="delete-row"></th>
                         </tr>
                     </thead>
                     <tbody id="calculatorRows">
@@ -3051,7 +3034,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 
                 <div class="cost-calculator-actions">
                     <button type="button" class="add-row-btn" onclick="addCalculatorRow()">+ Add Row</button>
-                    <button type="button" class="bulk-action-btn" data-open-modal="appModalBulkActions">Bulk Actions</button>
                 </div>
                 
                 <div class="savings-summary">
@@ -3366,6 +3348,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 });
                 return o;
             }
+
+            function syncBulkManagerOptions() {
+                const bulkManager = document.getElementById('bulkManagerValue');
+                if (!bulkManager) return;
+                bulkManager.innerHTML = managerOptionsHtml('');
+            }
             
             function addCalculatorRow() {
                 rowCount++;
@@ -3428,9 +3416,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <td class="notes">
                         <textarea name="notes[]" class="purpose-textarea" rows="2" placeholder="Purpose of subscription"></textarea>
                         <input type="hidden" class="last-payment-input" data-row="${rowCount}" />
-                    </td>
-                    <td class="delete-row">
-                        <button type="button" class="delete-btn" onclick="deleteRow(this)">Delete</button>
                     </td>
                 `;
                 
@@ -3524,16 +3509,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             
             function formatCurrency(amount) {
                 return '$' + amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-            }
-            
-            function deleteRow(button) {
-                const row = button.closest('tr');
-                row.remove();
-                updateRowNumbers();
-                calculateAnnualSavings();
-                calculateConfirmedSavings();
-                updateSelectAllCheckboxState();
-                autoSave(); // Auto-save after deletion
             }
             
             function updateRowNumbers() {
@@ -3882,8 +3857,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
                 if (rawBtn) {
                     rawBtn.addEventListener('click', function() {
-                        const v = (rawBtn.getAttribute('data-vendor-name') || '').trim();
-                        if (!v) return;
+                        const v = ((rawBtn.getAttribute('data-vendor-name') || '').trim() || (vendorInput ? vendorInput.value.trim() : ''));
+                        if (!v) {
+                            showSnackbar('Enter a vendor name first.', 'error');
+                            return;
+                        }
                         loadVendorRawDataModal(v);
                     });
                 }
@@ -3989,6 +3967,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 initAppModals();
                 initNavSubmenus();
                 initPurposeColumnToggle();
+                syncBulkManagerOptions();
                 const selectAll = document.getElementById('selectAllVendors');
                 if (selectAll) {
                     selectAll.addEventListener('change', function() {
@@ -4446,14 +4425,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         </div>
                         <div id="bulkManagerWrap" style="display:none;">
                             <label for="bulkManagerValue">Manager value</label>
-                            <select id="bulkManagerValue">
-                                <option value="">Select manager</option>
-                                <?php foreach ($team_members_rows as $tm): ?>
-                                <option value="<?php echo (int) ($tm['id'] ?? 0); ?>">
-                                    <?php echo htmlspecialchars($tm['display_name'] ?? $tm['username'] ?? $tm['email'] ?? ''); ?>
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
+                            <select id="bulkManagerValue"></select>
                         </div>
                     </div>
                     <div class="bulk-actions-buttons">
