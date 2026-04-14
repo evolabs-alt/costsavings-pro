@@ -3080,6 +3080,53 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     document.body.style.overflow = '';
                 }
             }
+            function aiEscapeHtml(s) {
+                var d = document.createElement('div');
+                d.textContent = s;
+                return d.innerHTML;
+            }
+            function loadVendorRawDataModal(vendorName) {
+                var overlay = document.getElementById('appModalVendorRaw');
+                var title = document.getElementById('appModalVendorRawTitle');
+                var body = document.getElementById('vendorRawBody');
+                if (!overlay || !title || !body) return;
+                title.textContent = 'Raw Data - ' + vendorName;
+                body.innerHTML = '<p>Loading transaction history...</p>';
+                openAppModal(overlay);
+                var fd = new FormData();
+                fd.append('action', 'load_vendor_raw_data');
+                fd.append('vendor_name', vendorName);
+                fetch(window.location.href, { method: 'POST', body: fd })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (!d.success) {
+                            body.innerHTML = '<p>' + aiEscapeHtml(d.error || 'Could not load raw data.') + '</p>';
+                            return;
+                        }
+                        var rows = Array.isArray(d.transactions) ? d.transactions : [];
+                        if (!rows.length) {
+                            body.innerHTML = '<p>No raw transactions found for this vendor yet.</p>';
+                            return;
+                        }
+                        var html = '<div class="vendor-raw-results"><table><thead><tr>'
+                            + '<th>Date</th><th>Amount</th><th>Transaction Type</th><th>Account</th><th>Memo/Description</th>'
+                            + '</tr></thead><tbody>';
+                        rows.forEach(function(row) {
+                            var date = aiEscapeHtml(String(row.transaction_date || ''));
+                            var amountNum = parseFloat(row.amount || 0);
+                            var amount = '$' + (isNaN(amountNum) ? '0.00' : amountNum.toFixed(2));
+                            var type = aiEscapeHtml(String(row.transaction_type || ''));
+                            var account = aiEscapeHtml(String(row.account || ''));
+                            var memo = aiEscapeHtml(String(row.memo || ''));
+                            html += '<tr><td>' + date + '</td><td>' + amount + '</td><td>' + type + '</td><td>' + account + '</td><td>' + memo + '</td></tr>';
+                        });
+                        html += '</tbody></table></div>';
+                        body.innerHTML = html;
+                    })
+                    .catch(function() {
+                        body.innerHTML = '<p>Could not load raw data.</p>';
+                    });
+            }
             function attachModalDrag(overlay) {
                 var modal = overlay.querySelector('.app-modal');
                 var header = overlay.querySelector('.app-modal-header');
@@ -3886,7 +3933,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const idVal = idEl && idEl.value ? parseInt(idEl.value, 10) : 0;
                 const vendorName = vendorInput.value ? vendorInput.value.trim() : '';
                 const enabled = vendorName !== '';
-                rawBtn.disabled = !enabled;
+                // Keep button clickable so users always get immediate feedback.
+                rawBtn.disabled = false;
                 rawBtn.setAttribute('data-vendor-name', enabled ? vendorName : '');
                 rawBtn.title = enabled ? ('View raw transactions for ' + vendorName) : 'Enter a vendor name first';
             }
@@ -4009,6 +4057,21 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     bulkConfirmCancelBtn.addEventListener('click', function() {
                         pendingBulkActionData = null;
                         closeBulkModalById('appModalBulkConfirm');
+                    });
+                }
+                const calculatorRowsEl = document.getElementById('calculatorRows');
+                if (calculatorRowsEl) {
+                    calculatorRowsEl.addEventListener('click', function(e) {
+                        const rawBtn = e.target.closest('.vendor-raw-btn');
+                        if (!rawBtn) return;
+                        const row = rawBtn.closest('tr');
+                        const vendorInput = row ? row.querySelector('input[name="vendor[]"]') : null;
+                        const vendorName = ((rawBtn.getAttribute('data-vendor-name') || '').trim() || (vendorInput ? vendorInput.value.trim() : ''));
+                        if (!vendorName) {
+                            showSnackbar('Enter a vendor name first.', 'error');
+                            return;
+                        }
+                        loadVendorRawDataModal(vendorName);
                     });
                 }
                 loadCalculatorData();
