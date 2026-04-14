@@ -277,6 +277,15 @@ class AiService
             $json = trim($json);
         }
         $data = json_decode($json, true);
+        if (!is_array($data)) {
+            // Some models wrap JSON in prose/citations; recover the first JSON object block.
+            $start = strpos($json, '{');
+            $end = strrpos($json, '}');
+            if ($start !== false && $end !== false && $end > $start) {
+                $candidate = substr($json, $start, ($end - $start + 1));
+                $data = json_decode($candidate, true);
+            }
+        }
         if (!is_array($data) || !isset($data['results']) || !is_array($data['results'])) {
             return ['success' => false, 'error' => 'Live lookup returned invalid JSON structure.'];
         }
