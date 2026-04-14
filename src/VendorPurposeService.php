@@ -53,47 +53,45 @@ class VendorPurposeService
             $lookupNames[] = $u['vendor_name'];
         }
         $lookupNames = array_values(array_unique($lookupNames));
-        $ai = AiService::lookupVendorPurposesLive($lookupNames);
-        if (!$ai['success']) {
-            return [
-                'success' => false,
-                'resolved' => $resolved,
-                'unresolved' => $unresolved,
-                'error' => (string) ($ai['error'] ?? 'Purpose lookup failed.'),
-            ];
-        }
-
         $byCanonical = [];
-        foreach (($ai['results'] ?? []) as $item) {
-            if (!is_array($item)) {
+        $lookupErrors = [];
+        foreach (array_chunk($lookupNames, 25) as $chunk) {
+            $ai = AiService::lookupVendorPurposesLive($chunk);
+            if (!$ai['success']) {
+                $lookupErrors[] = (string) ($ai['error'] ?? 'Purpose lookup failed.');
                 continue;
             }
-            $vendor = trim((string) ($item['vendor'] ?? ''));
-            $purpose = trim((string) ($item['purpose'] ?? ''));
-            $aliases = isset($item['aliases']) && is_array($item['aliases']) ? $item['aliases'] : [];
-            if ($vendor === '' || $purpose === '') {
-                continue;
-            }
-            $canon = self::canon($vendor);
-            $names = [];
-            foreach ($aliases as $a) {
-                $s = trim((string) $a);
-                if ($s !== '') {
-                    $names[] = $s;
+            foreach (($ai['results'] ?? []) as $item) {
+                if (!is_array($item)) {
+                    continue;
                 }
+                $vendor = trim((string) ($item['vendor'] ?? ''));
+                $purpose = trim((string) ($item['purpose'] ?? ''));
+                $aliases = isset($item['aliases']) && is_array($item['aliases']) ? $item['aliases'] : [];
+                if ($vendor === '' || $purpose === '') {
+                    continue;
+                }
+                $canon = self::canon($vendor);
+                $names = [];
+                foreach ($aliases as $a) {
+                    $s = trim((string) $a);
+                    if ($s !== '') {
+                        $names[] = $s;
+                    }
+                }
+                if (!in_array($vendor, $names, true)) {
+                    array_unshift($names, $vendor);
+                }
+                $names = array_values(array_unique($names));
+                while (count($names) < 5) {
+                    $names[] = $vendor;
+                }
+                $byCanonical[$canon] = [
+                    'purpose' => substr($purpose, 0, 220),
+                    'names' => array_slice($names, 0, 5),
+                ];
+                self::upsertVendorDetail($pdo, $orgId, array_slice($names, 0, 5), substr($purpose, 0, 220));
             }
-            if (!in_array($vendor, $names, true)) {
-                array_unshift($names, $vendor);
-            }
-            $names = array_values(array_unique($names));
-            while (count($names) < 5) {
-                $names[] = $vendor;
-            }
-            $byCanonical[$canon] = [
-                'purpose' => substr($purpose, 0, 220),
-                'names' => array_slice($names, 0, 5),
-            ];
-            self::upsertVendorDetail($pdo, $orgId, array_slice($names, 0, 5), substr($purpose, 0, 220));
         }
 
         foreach ($unresolved as $u) {
@@ -117,6 +115,15 @@ class VendorPurposeService
             if (!isset($resolvedKeys[(int) $u['id']])) {
                 $left[] = $u;
             }
+        }
+
+        if (count($left) > 0 && count($lookupErrors) > 0) {
+            return [
+                'success' => true,
+                'resolved' => $resolved,
+                'unresolved' => $left,
+                'error' => 'Some live-lookup batches failed and were skipped.',
+            ];
         }
 
         return ['success' => true, 'resolved' => $resolved, 'unresolved' => $left];

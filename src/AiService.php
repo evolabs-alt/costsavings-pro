@@ -286,6 +286,9 @@ class AiService
                 $data = json_decode($candidate, true);
             }
         }
+        if (is_array($data) && !isset($data['results']) && array_is_list($data)) {
+            $data = ['results' => $data];
+        }
         if (!is_array($data) || !isset($data['results']) || !is_array($data['results'])) {
             return ['success' => false, 'error' => 'Live lookup returned invalid JSON structure.'];
         }
