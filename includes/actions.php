@@ -367,6 +367,8 @@ function handleAutoPopulatePurpose() {
     echo json_encode([
         'success' => true,
         'updated' => $apply['updated'] ?? 0,
+        'applied' => $apply['applied'] ?? 0,
+        'applied_ids' => $apply['applied_ids'] ?? [],
         'resolved' => $resolved['resolved'] ?? [],
         'unresolved' => $resolved['unresolved'] ?? [],
     ]);

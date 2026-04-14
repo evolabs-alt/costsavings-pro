@@ -4202,6 +4202,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         if (notesTextarea) notesTextarea.value = byId[idVal];
                     });
                 }
+                function filterResolvedRowsById(resultRows, allowedIds) {
+                    if (!Array.isArray(resultRows) || !Array.isArray(allowedIds)) return [];
+                    var allow = {};
+                    allowedIds.forEach(function(id) {
+                        var normalized = parseInt(id, 10);
+                        if (normalized > 0) allow[String(normalized)] = true;
+                    });
+                    return resultRows.filter(function(row) {
+                        if (!row || !row.id) return false;
+                        return !!allow[String(parseInt(row.id, 10) || 0)];
+                    });
+                }
                 function fetchAiUsageStats() {
                     var fd = new FormData();
                     fd.append('action', 'ai_usage_stats');
@@ -4237,11 +4249,23 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         .then(function(d) {
                             setAiUiBusy(false);
                             if (d.success) {
-                                applyPurposeLookupResultsToUi(d.resolved || []);
+                                var appliedRows = filterResolvedRowsById(d.resolved || [], d.applied_ids || []);
+                                applyPurposeLookupResultsToUi(appliedRows);
+                                if (appliedRows.length) {
+                                    // Programmatic textarea updates do not fire blur/input listeners; persist immediately.
+                                    clearTimeout(saveTimeout);
+                                    saveCalculatorData({ silent: true });
+                                }
                                 var unresolved = Array.isArray(d.unresolved) ? d.unresolved.length : 0;
+                                var applied = typeof d.applied === 'number' ? d.applied : 0;
+                                var changed = typeof d.updated === 'number' ? d.updated : 0;
+                                var statusText = 'Auto populate finished. Applied to ' + applied + ' rows.';
+                                if (changed !== applied) {
+                                    statusText += ' ' + changed + ' rows had DB value changes.';
+                                }
                                 appendAiChatMessage(
                                     'assistant',
-                                    'Auto populate finished. Updated ' + (d.updated || 0) + ' rows.' + (unresolved ? (' ' + unresolved + ' vendors could not be resolved.') : ''),
+                                    statusText + (unresolved ? (' ' + unresolved + ' vendors could not be resolved.') : ''),
                                     false
                                 );
                                 showSnackbar('Purpose auto-populate completed.', 'success');

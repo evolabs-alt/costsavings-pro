@@ -361,14 +361,16 @@ class VendorService
 
     /**
      * @param array<int, array{id:int, purpose:string}> $updates
-     * @return array{updated:int}
+     * @return array{updated:int,applied:int,applied_ids:array<int,int>}
      */
     public static function updatePurposesForVisibleRows(PDO $pdo, int $orgId, int $userId, string $role, array $updates): array
     {
         if (count($updates) === 0) {
-            return ['updated' => 0];
+            return ['updated' => 0, 'applied' => 0, 'applied_ids' => []];
         }
         $updated = 0;
+        $applied = 0;
+        $appliedIds = [];
         if ($role === 'admin') {
             $stmt = $pdo->prepare(
                 'UPDATE cost_calculator_items
@@ -376,11 +378,33 @@ class VendorService
                  WHERE id = ? AND org_id = ?'
             );
             foreach ($updates as $u) {
-                $stmt->execute([(string) ($u['purpose'] ?? ''), (int) ($u['id'] ?? 0), $orgId]);
+                $rowId = (int) ($u['id'] ?? 0);
+                if ($rowId <= 0) {
+                    continue;
+                }
+                $stmt->execute([(string) ($u['purpose'] ?? ''), $rowId, $orgId]);
                 $updated += $stmt->rowCount();
+                ++$applied;
+                $appliedIds[] = $rowId;
             }
 
-            return ['updated' => $updated];
+            return ['updated' => $updated, 'applied' => $applied, 'applied_ids' => $appliedIds];
+        }
+
+        $allowed = [];
+        $allowedStmt = $pdo->prepare(
+            'SELECT id FROM cost_calculator_items
+             WHERE id = ? AND org_id = ? AND manager_user_id = ?'
+        );
+        foreach ($updates as $u) {
+            $rowId = (int) ($u['id'] ?? 0);
+            if ($rowId <= 0 || isset($allowed[$rowId])) {
+                continue;
+            }
+            $allowedStmt->execute([$rowId, $orgId, $userId]);
+            if ($allowedStmt->fetchColumn()) {
+                $allowed[$rowId] = true;
+            }
         }
 
         $stmt = $pdo->prepare(
@@ -389,11 +413,17 @@ class VendorService
              WHERE id = ? AND org_id = ? AND manager_user_id = ?'
         );
         foreach ($updates as $u) {
-            $stmt->execute([(string) ($u['purpose'] ?? ''), (int) ($u['id'] ?? 0), $orgId, $userId]);
+            $rowId = (int) ($u['id'] ?? 0);
+            if ($rowId <= 0 || !isset($allowed[$rowId])) {
+                continue;
+            }
+            $stmt->execute([(string) ($u['purpose'] ?? ''), $rowId, $orgId, $userId]);
             $updated += $stmt->rowCount();
+            ++$applied;
+            $appliedIds[] = $rowId;
         }
 
-        return ['updated' => $updated];
+        return ['updated' => $updated, 'applied' => $applied, 'applied_ids' => $appliedIds];
     }
 
     public static function normalizeVendorName(string $vendorName): string
