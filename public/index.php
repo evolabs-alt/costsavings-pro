@@ -489,18 +489,21 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         .container-wrapper {
             position: relative;
-            max-width: 700px;
+            width: 100%;
+            max-width: 100%;
             margin: 0 auto;
         }
         
         /* Container for placeholder/cost savings tool */
         .placeholder-container-wrapper {
-            width: min(100%, 1040px);
+            width: 100%;
+            max-width: 100%;
             margin: 0 auto;
         }
         
         .container {
-            max-width: 700px; 
+            width: 100%;
+            max-width: 100%;
             margin: 0 auto; 
             background: linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(252, 250, 255, 0.96) 45%, rgba(248, 244, 255, 0.94) 100%);
             backdrop-filter: blur(12px);
