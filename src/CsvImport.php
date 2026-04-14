@@ -10,7 +10,10 @@ class CsvImport
     private const HEADER_NEEDLE = ',Date,Transaction type';
 
     /**
-     * @return array<int, array{vendor_name:string,cost_per_period:float,frequency:string,annual_cost:float,last_payment_date:?string}>
+     * @return array{
+     *   summary: array<int, array{vendor_name:string,cost_per_period:float,frequency:string,annual_cost:float,last_payment_date:?string}>,
+     *   raw: array<int, array{vendor_name:string,transaction_date:string,amount:float,transaction_type:string,account:string,memo:string}>
+     * }
      */
     public static function parse(string $csvText): array
     {
@@ -23,10 +26,13 @@ class CsvImport
             }
         }
         if ($headerIdx < 0) {
-            return [];
+            return ['summary' => [], 'raw' => []];
         }
+        $headers = str_getcsv($lines[$headerIdx] ?? '');
+        $headerMap = self::buildHeaderMap($headers);
 
         $vendors = [];
+        $rawRows = [];
         $currentVendor = null;
         $rows = [];
 
@@ -75,13 +81,71 @@ class CsvImport
                 continue;
             }
             $rows[] = ['date' => $dt, 'amount' => abs($amt)];
+            $rawRows[] = [
+                'vendor_name' => $currentVendor,
+                'transaction_date' => $dt,
+                'amount' => abs($amt),
+                'transaction_type' => self::csvField(
+                    $parsed,
+                    $headerMap,
+                    ['transaction type', 'type']
+                ),
+                'account' => self::csvField(
+                    $parsed,
+                    $headerMap,
+                    ['account', 'account name']
+                ),
+                'memo' => self::csvField(
+                    $parsed,
+                    $headerMap,
+                    ['memo/description', 'memo', 'description', 'memo desc', 'memo/desc']
+                ),
+            ];
         }
 
         if ($currentVendor !== null && count($rows) > 0) {
             $vendors[] = self::buildVendorRow($currentVendor, $rows);
         }
 
-        return $vendors;
+        return ['summary' => $vendors, 'raw' => $rawRows];
+    }
+
+    /**
+     * @param array<int, string> $headers
+     * @return array<string, int>
+     */
+    private static function buildHeaderMap(array $headers): array
+    {
+        $out = [];
+        foreach ($headers as $idx => $h) {
+            $key = strtolower(trim((string) $h));
+            if ($key !== '') {
+                $out[$key] = $idx;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<int, string> $parsed
+     * @param array<string, int> $headerMap
+     * @param array<int, string> $aliases
+     */
+    private static function csvField(array $parsed, array $headerMap, array $aliases): string
+    {
+        foreach ($aliases as $name) {
+            $key = strtolower(trim($name));
+            if (array_key_exists($key, $headerMap)) {
+                $idx = $headerMap[$key];
+                $val = isset($parsed[$idx]) ? trim((string) $parsed[$idx]) : '';
+                if ($val !== '') {
+                    return $val;
+                }
+            }
+        }
+
+        return '';
     }
 
     /**

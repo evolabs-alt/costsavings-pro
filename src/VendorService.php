@@ -358,4 +358,136 @@ class VendorService
 
         return (bool) $st->fetchColumn();
     }
+
+    /**
+     * @param array<int, array{id:int, purpose:string}> $updates
+     * @return array{updated:int}
+     */
+    public static function updatePurposesForVisibleRows(PDO $pdo, int $orgId, int $userId, string $role, array $updates): array
+    {
+        if (count($updates) === 0) {
+            return ['updated' => 0];
+        }
+        $updated = 0;
+        if ($role === 'admin') {
+            $stmt = $pdo->prepare(
+                'UPDATE cost_calculator_items
+                 SET purpose_of_subscription = ?
+                 WHERE id = ? AND org_id = ?'
+            );
+            foreach ($updates as $u) {
+                $stmt->execute([(string) ($u['purpose'] ?? ''), (int) ($u['id'] ?? 0), $orgId]);
+                $updated += $stmt->rowCount();
+            }
+
+            return ['updated' => $updated];
+        }
+
+        $stmt = $pdo->prepare(
+            'UPDATE cost_calculator_items
+             SET purpose_of_subscription = ?
+             WHERE id = ? AND org_id = ? AND manager_user_id = ?'
+        );
+        foreach ($updates as $u) {
+            $stmt->execute([(string) ($u['purpose'] ?? ''), (int) ($u['id'] ?? 0), $orgId, $userId]);
+            $updated += $stmt->rowCount();
+        }
+
+        return ['updated' => $updated];
+    }
+
+    public static function normalizeVendorName(string $vendorName): string
+    {
+        return mb_strtolower(trim($vendorName), 'UTF-8');
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @return array{success:bool, inserted?:int, error?:string}
+     */
+    public static function appendRawTransactions(
+        PDO $pdo,
+        int $orgId,
+        int $uploadedByUserId,
+        string $uploadBatchId,
+        array $rows
+    ): array {
+        $stmt = $pdo->prepare(
+            'INSERT INTO vendor_raw_transactions
+            (org_id, uploaded_by_user_id, upload_batch_id, vendor_name, vendor_name_normalized, transaction_date, amount, transaction_type, account, memo)
+            VALUES (?,?,?,?,?,?,?,?,?,?)'
+        );
+        $inserted = 0;
+        try {
+            foreach ($rows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $vendorName = trim((string) ($row['vendor_name'] ?? ''));
+                $date = trim((string) ($row['transaction_date'] ?? ''));
+                if ($vendorName === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                    continue;
+                }
+                $stmt->execute([
+                    $orgId,
+                    $uploadedByUserId,
+                    $uploadBatchId,
+                    $vendorName,
+                    self::normalizeVendorName($vendorName),
+                    $date,
+                    (float) ($row['amount'] ?? 0),
+                    trim((string) ($row['transaction_type'] ?? '')),
+                    trim((string) ($row['account'] ?? '')),
+                    trim((string) ($row['memo'] ?? '')),
+                ]);
+                ++$inserted;
+            }
+
+            return ['success' => true, 'inserted' => $inserted];
+        } catch (PDOException $e) {
+            error_log('VendorService::appendRawTransactions: ' . $e->getMessage());
+
+            return ['success' => false, 'error' => 'Raw transaction import failed'];
+        }
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public static function loadRawTransactionsForVisibleVendor(
+        PDO $pdo,
+        int $orgId,
+        int $userId,
+        string $role,
+        string $vendorName
+    ): array {
+        $vendorNorm = self::normalizeVendorName($vendorName);
+        if ($vendorNorm === '') {
+            return [];
+        }
+        if ($role !== 'admin') {
+            $check = $pdo->prepare(
+                "SELECT 1
+                 FROM cost_calculator_items
+                 WHERE org_id = :oid
+                   AND LOWER(TRIM(vendor_name)) = :v
+                   AND (visibility = 'public' OR (visibility = 'confidential' AND manager_user_id = :uid))
+                 LIMIT 1"
+            );
+            $check->execute([':oid' => $orgId, ':v' => $vendorNorm, ':uid' => $userId]);
+            if (!$check->fetchColumn()) {
+                return [];
+            }
+        }
+        $stmt = $pdo->prepare(
+            'SELECT vendor_name, transaction_date, amount, transaction_type, account, memo, upload_batch_id, created_at
+             FROM vendor_raw_transactions
+             WHERE org_id = :oid AND vendor_name_normalized = :v
+             ORDER BY transaction_date DESC, id DESC'
+        );
+        $stmt->execute([':oid' => $orgId, ':v' => $vendorNorm]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return is_array($rows) ? $rows : [];
+    }
 }

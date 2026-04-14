@@ -58,6 +58,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'load_cost_calculator':
                 handleLoadCostCalculator();
                 break;
+            case 'load_vendor_raw_data':
+                handleLoadVendorRawData();
+                break;
             case 'invite_member':
                 handleInviteMember();
                 break;
@@ -69,6 +72,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
             case 'ai_usage_stats':
                 handleAiUsageStats();
+                break;
+            case 'auto_populate_purpose':
+                handleAutoPopulatePurpose();
                 break;
             case 'load_team_members':
                 handleLoadTeamMembers();
@@ -489,7 +495,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         /* Container for placeholder/cost savings tool */
         .placeholder-container-wrapper {
-            max-width: 90%;
+            width: min(100%, 1040px);
             margin: 0 auto;
         }
         
@@ -508,7 +514,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         /* Wider container for placeholder/cost savings tool */
         .placeholder-container-wrapper .container {
-            max-width: 90%;
+            width: 100%;
+            max-width: 100%;
         }
         
         .container::before {
@@ -676,7 +683,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .cost-calculator-grid {
             width: 100%;
-            min-width: 1400px;
+            min-width: 1020px;
             border-collapse: collapse;
             margin: 0;
             background: white;
@@ -689,15 +696,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .cost-calculator-grid th {
-            padding: 12px 8px;
+            padding: 8px 6px;
             text-align: left;
             font-weight: 600;
             border: 1px solid #4a3f6b;
-            font-size: 14px;
+            font-size: 13px;
+            white-space: nowrap;
         }
 
         .cost-calculator-grid td {
-            padding: 8px;
+            padding: 6px;
             border: 1px solid #e0e0e0;
         }
 
@@ -710,10 +718,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .cost-calculator-grid select,
         .cost-calculator-grid textarea {
             width: 100%;
-            padding: 6px;
+            padding: 5px;
             border: 1px solid #ccc;
             border-radius: 4px;
-            font-size: 14px;
+            font-size: 13px;
             box-sizing: border-box;
         }
 
@@ -729,33 +737,114 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .cost-calculator-grid .item-number {
             text-align: center;
             font-weight: 600;
-            width: 60px;
+            width: 52px;
+        }
+
+        .cost-calculator-grid .select-row,
+        .cost-calculator-grid .select-row-cell {
+            width: 38px;
+            text-align: center;
+        }
+
+        .cost-calculator-grid .select-row input[type="checkbox"],
+        .cost-calculator-grid .select-row-cell input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
         }
 
         .cost-calculator-grid .vendor-name {
-            min-width: 200px;
+            min-width: 160px;
+        }
+
+        .cost-calculator-grid .vendor-cell-wrap {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .cost-calculator-grid .vendor-cell-wrap input[type="text"] {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .cost-calculator-grid .vendor-raw-btn {
+            border: 1px solid #d1d5db;
+            background: #fff;
+            color: #4a3f6b;
+            border-radius: 6px;
+            padding: 5px 8px;
+            font-size: 12px;
+            line-height: 1;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .cost-calculator-grid .vendor-raw-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .vendor-raw-results {
+            overflow-x: auto;
+        }
+
+        .vendor-raw-results table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .vendor-raw-results th,
+        .vendor-raw-results td {
+            border-bottom: 1px solid #e5e7eb;
+            padding: 8px 10px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        .vendor-raw-results th {
+            background: #f8fafc;
+            position: sticky;
+            top: 0;
         }
 
         .cost-calculator-grid .cost-per-period {
-            min-width: 120px;
+            min-width: 100px;
         }
 
         .cost-calculator-grid .frequency {
-            min-width: 140px;
+            min-width: 95px;
         }
 
         .cost-calculator-grid .annual-cost {
-            min-width: 120px;
+            min-width: 100px;
             text-align: right;
             font-weight: 600;
         }
 
+        .cost-calculator-grid .manager-col {
+            min-width: 90px;
+        }
+
+        .cost-calculator-grid .visibility-col {
+            min-width: 90px;
+        }
+
         .cost-calculator-grid .cancel-keep {
-            min-width: 100px;
+            min-width: 90px;
+        }
+
+        .cost-calculator-grid .cancel-deadline {
+            min-width: 110px;
+        }
+
+        .cost-calculator-grid .last-pay {
+            min-width: 110px;
         }
 
         .cost-calculator-grid .cancelled-status {
-            min-width: 120px;
+            min-width: 90px;
             text-align: center;
         }
 
@@ -811,12 +900,38 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             border-color: #6b5b95;
         }
 
+        .report-filters .column-toggle-btn {
+            margin-left: auto;
+            border: 1px solid #d1d5db;
+            background: #fff;
+            color: #374151;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .report-filters .column-toggle-btn:hover {
+            border-color: #6b5b95;
+            color: #4a3f6b;
+        }
+
+        .cost-calculator-grid.notes-collapsed {
+            min-width: 880px;
+        }
+
+        .cost-calculator-grid.notes-collapsed .notes {
+            display: none;
+        }
+
         .cost-calculator-grid .notes {
-            min-width: 200px;
+            min-width: 140px;
         }
 
         .cost-calculator-grid .delete-row {
-            width: 50px;
+            width: 44px;
             text-align: center;
         }
 
@@ -837,6 +952,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .cost-calculator-actions {
             margin: 20px 0;
             text-align: center;
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
         }
 
         .add-row-btn {
@@ -852,6 +971,56 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .add-row-btn:hover {
             background: #4a3f6b;
+        }
+
+        .bulk-action-btn {
+            background: #4f46e5;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .bulk-action-btn:hover {
+            background: #4338ca;
+        }
+
+        .bulk-actions-form {
+            display: grid;
+            gap: 12px;
+        }
+
+        .bulk-actions-form label {
+            margin: 0;
+            font-size: 14px;
+            color: #374151;
+            font-weight: 600;
+        }
+
+        .bulk-actions-form .bulk-action-controls {
+            display: grid;
+            gap: 10px;
+        }
+
+        .bulk-actions-form .bulk-actions-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        .bulk-actions-form .bulk-confirm-summary {
+            background: #f8f9fa;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 14px;
+            color: #374151;
+            line-height: 1.45;
         }
 
         .savings-summary {
@@ -912,7 +1081,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
             .cost-calculator-grid {
                 font-size: 12px;
-                min-width: 800px;
+                min-width: 920px;
             }
 
             .cost-calculator-grid th,
@@ -938,29 +1107,44 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 width: 40px;
             }
 
+            .cost-calculator-grid .select-row,
+            .cost-calculator-grid .select-row-cell {
+                width: 34px;
+            }
+
             .cost-calculator-grid .vendor-name {
-                min-width: 150px;
+                min-width: 140px;
             }
 
             .cost-calculator-grid .cost-per-period {
-                min-width: 90px;
+                min-width: 85px;
             }
 
             .cost-calculator-grid .frequency {
-                min-width: 100px;
+                min-width: 90px;
             }
 
             .cost-calculator-grid .annual-cost {
-                min-width: 90px;
+                min-width: 85px;
                 font-size: 11px;
+            }
+
+            .cost-calculator-grid .manager-col,
+            .cost-calculator-grid .visibility-col {
+                min-width: 85px;
             }
 
             .cost-calculator-grid .cancel-keep {
                 min-width: 80px;
             }
 
-            .cost-calculator-grid .cancelled-status {
+            .cost-calculator-grid .cancel-deadline,
+            .cost-calculator-grid .last-pay {
                 min-width: 100px;
+            }
+
+            .cost-calculator-grid .cancelled-status {
+                min-width: 90px;
             }
 
             .report-filters {
@@ -972,8 +1156,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 min-width: 100%;
             }
 
+            .report-filters .column-toggle-btn {
+                margin-left: 0;
+                width: 100%;
+                text-align: center;
+            }
+
             .cost-calculator-grid .notes {
-                min-width: 150px;
+                min-width: 120px;
             }
 
             .cost-calculator-grid .notes textarea {
@@ -995,6 +1185,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             }
 
             .add-row-btn {
+                padding: 8px 16px;
+                font-size: 14px;
+            }
+
+            .bulk-action-btn {
                 padding: 8px 16px;
                 font-size: 14px;
             }
@@ -2798,24 +2993,28 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <option value="pending_cancelled">Pending Cancelled</option>
                         <option value="confirmed_cancelled">Confirmed Cancelled</option>
                     </select>
+                    <button type="button" id="togglePurposeColumnBtn" class="column-toggle-btn" aria-pressed="false">Show Purpose</button>
                 </div>
                 
                 <div class="cost-calculator-table-wrapper">
                     <table class="cost-calculator-grid" id="costCalculatorGrid">
                     <thead>
                         <tr>
+                            <th class="select-row">
+                                <input type="checkbox" id="selectAllVendors" aria-label="Select all vendors">
+                            </th>
                             <th class="item-number">Item #</th>
-                            <th class="vendor-name">Vendor/Contractor Name</th>
-                            <th class="cost-per-period">Cost per Period</th>
-                            <th class="frequency">Frequency</th>
+                            <th class="vendor-name">Vendor</th>
+                            <th class="cost-per-period">Cost</th>
+                            <th class="frequency">Freq</th>
                             <th class="annual-cost">Annual Cost</th>
                             <th class="manager-col">Manager</th>
                             <th class="visibility-col">Visibility</th>
                             <th class="cancel-keep" title="Cancel = cancel this cost">Cancel/Keep</th>
-                            <th class="cancel-deadline">Cancel deadline</th>
-                            <th class="cancelled-status" title="Confirmed cancellation">Confirmed</th>
-                            <th class="last-pay">Last payment</th>
-                            <th class="notes">Purpose of subscription</th>
+                            <th class="cancel-deadline">Deadline</th>
+                            <th class="cancelled-status" title="Confirmed cancellation">Confirmed cancelled</th>
+                            <th class="last-pay">Last Pay</th>
+                            <th class="notes">Purpose</th>
                             <th class="delete-row"></th>
                         </tr>
                     </thead>
@@ -2826,6 +3025,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 
                 <div class="cost-calculator-actions">
                     <button type="button" class="add-row-btn" onclick="addCalculatorRow()">+ Add Row</button>
+                    <button type="button" class="bulk-action-btn" data-open-modal="appModalBulkActions">Bulk Actions</button>
                 </div>
                 
                 <div class="savings-summary">
@@ -2998,6 +3198,137 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             const TEAM_MEMBERS = <?php echo $team_members_json; ?>;
             const IS_ADMIN = <?php echo $is_admin ? 'true' : 'false'; ?>;
             const CURRENT_USER_ID = <?php echo (int) ($_SESSION['user_id'] ?? 0); ?>;
+            let pendingBulkActionData = null;
+
+            function getVendorRowCheckboxes() {
+                return Array.from(document.querySelectorAll('#calculatorRows .row-select-checkbox'));
+            }
+
+            function getSelectedVendorRows() {
+                return getVendorRowCheckboxes()
+                    .filter(function(cb) { return cb.checked; })
+                    .map(function(cb) { return cb.closest('tr'); })
+                    .filter(Boolean);
+            }
+
+            function updateSelectAllCheckboxState() {
+                const selectAll = document.getElementById('selectAllVendors');
+                if (!selectAll) return;
+                const checkboxes = getVendorRowCheckboxes();
+                const selectedCount = checkboxes.filter(function(cb) { return cb.checked; }).length;
+                if (!checkboxes.length) {
+                    selectAll.checked = false;
+                    selectAll.indeterminate = false;
+                    return;
+                }
+                selectAll.checked = selectedCount === checkboxes.length;
+                selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+            }
+
+            function setAllRowSelection(checked) {
+                getVendorRowCheckboxes().forEach(function(cb) {
+                    cb.checked = !!checked;
+                });
+                updateSelectAllCheckboxState();
+            }
+
+            function clearRowSelection() {
+                setAllRowSelection(false);
+            }
+
+            function updateBulkActionFields() {
+                const actionSel = document.getElementById('bulkActionType');
+                const frequencyWrap = document.getElementById('bulkFrequencyWrap');
+                const visibilityWrap = document.getElementById('bulkVisibilityWrap');
+                const managerWrap = document.getElementById('bulkManagerWrap');
+                if (!actionSel || !frequencyWrap || !visibilityWrap || !managerWrap) return;
+                const action = actionSel.value;
+                frequencyWrap.style.display = action === 'frequency' ? '' : 'none';
+                visibilityWrap.style.display = action === 'visibility' ? '' : 'none';
+                managerWrap.style.display = action === 'manager' ? '' : 'none';
+            }
+
+            function getBulkActionPayload() {
+                const actionSel = document.getElementById('bulkActionType');
+                if (!actionSel) return null;
+                const action = actionSel.value;
+                if (!action) return null;
+                if (action === 'frequency') {
+                    const freq = document.getElementById('bulkFrequencyValue');
+                    if (!freq || !freq.value) return null;
+                    return { action: action, value: freq.value, label: 'Update frequency to ' + freq.value };
+                }
+                if (action === 'visibility') {
+                    const vis = document.getElementById('bulkVisibilityValue');
+                    if (!vis || !vis.value) return null;
+                    return { action: action, value: vis.value, label: 'Update visibility to ' + vis.value };
+                }
+                if (action === 'manager') {
+                    const mgr = document.getElementById('bulkManagerValue');
+                    if (!mgr || !mgr.value) return null;
+                    const managerName = mgr.options[mgr.selectedIndex] ? mgr.options[mgr.selectedIndex].text : mgr.value;
+                    return { action: action, value: mgr.value, label: 'Update manager to ' + managerName };
+                }
+                if (action === 'delete') {
+                    return { action: action, value: null, label: 'Delete selected vendor rows' };
+                }
+                return null;
+            }
+
+            function closeBulkModalById(id) {
+                const overlay = id ? document.getElementById(id) : null;
+                if (overlay) closeAppModal(overlay);
+            }
+
+            function openBulkConfirmModal(payload, selectedCount) {
+                const overlay = document.getElementById('appModalBulkConfirm');
+                const body = document.getElementById('bulkConfirmDetails');
+                if (!overlay || !body) return;
+                body.innerHTML = ''
+                    + '<div class="bulk-confirm-summary">'
+                    + '<div><strong>Action:</strong> ' + payload.label + '</div>'
+                    + '<div><strong>Selected records:</strong> ' + selectedCount + '</div>'
+                    + '</div>';
+                pendingBulkActionData = payload;
+                openAppModal(overlay);
+            }
+
+            function applyBulkAction(payload) {
+                if (!payload) return;
+                const selectedRows = getSelectedVendorRows();
+                if (!selectedRows.length) {
+                    showSnackbar('Please select at least one vendor row.', 'error');
+                    return;
+                }
+                clearTimeout(saveTimeout);
+                if (payload.action === 'delete') {
+                    selectedRows.forEach(function(row) { row.remove(); });
+                } else if (payload.action === 'frequency') {
+                    selectedRows.forEach(function(row) {
+                        const frequencySelect = row.querySelector('.frequency-select');
+                        if (frequencySelect) {
+                            frequencySelect.value = payload.value;
+                            calculateAnnualCost({ target: frequencySelect });
+                        }
+                    });
+                } else if (payload.action === 'visibility') {
+                    selectedRows.forEach(function(row) {
+                        const visSel = row.querySelector('.visibility-select');
+                        if (visSel && !visSel.disabled) visSel.value = payload.value;
+                    });
+                } else if (payload.action === 'manager') {
+                    selectedRows.forEach(function(row) {
+                        const mgrSel = row.querySelector('.manager-select');
+                        if (mgrSel && !mgrSel.disabled) mgrSel.value = payload.value;
+                    });
+                }
+                updateRowNumbers();
+                calculateAnnualSavings();
+                calculateConfirmedSavings();
+                clearRowSelection();
+                saveCalculatorData();
+                showSnackbar('Applied bulk action to ' + selectedRows.length + ' vendor record(s).', 'success');
+            }
 
             function managerOptionsHtml(selectedId) {
                 let o = '<option value="">—</option>';
@@ -3017,10 +3348,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 row.setAttribute('data-row-id', rowCount);
                 
                 row.innerHTML = `
+                    <td class="select-row-cell">
+                        <input type="checkbox" class="row-select-checkbox" aria-label="Select vendor row" />
+                    </td>
                     <td class="item-number">${rowCount}</td>
                     <td class="vendor-name">
                         <input type="hidden" class="row-db-id" value="" />
-                        <input type="text" name="vendor[]" placeholder="Enter vendor name" />
+                        <div class="vendor-cell-wrap">
+                            <input type="text" name="vendor[]" placeholder="Enter vendor name" />
+                            <button type="button" class="vendor-raw-btn" disabled title="View imported raw transaction history">Raw</button>
+                        </div>
                     </td>
                     <td class="cost-per-period">
                         <input type="text" name="cost[]" class="cost-input" placeholder="$0.00" data-row="${rowCount}" />
@@ -3076,6 +3413,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 
                 // Attach event listeners (with auto-save)
                 attachRowListenersWithSave(row);
+                updateVendorDrilldownState(row);
+                const rowCheckbox = row.querySelector('.row-select-checkbox');
+                if (rowCheckbox) rowCheckbox.addEventListener('change', updateSelectAllCheckboxState);
 
                 // New rows default to "Keep" — disable Confirmed checkbox immediately
                 syncConfirmedCheckbox(row);
@@ -3167,6 +3507,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 updateRowNumbers();
                 calculateAnnualSavings();
                 calculateConfirmedSavings();
+                updateSelectAllCheckboxState();
                 autoSave(); // Auto-save after deletion
             }
             
@@ -3180,6 +3521,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     inputs.forEach(input => input.setAttribute('data-row', rowId));
                 });
                 rowCount = rows.length;
+                updateSelectAllCheckboxState();
             }
             
             // Format cost input as currency on blur
@@ -3373,6 +3715,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     const lp = lastRow.querySelector('.last-payment-input');
                                     
                                     if (vendorInput) vendorInput.value = item.vendor_name || '';
+                                    updateVendorDrilldownState(lastRow);
                                     if (costInput) costInput.value = item.cost_per_period > 0 ? '$' + parseFloat(item.cost_per_period).toFixed(2) : '';
                                     if (frequencySelect) frequencySelect.value = item.frequency || '';
                                     if (mgr) {
@@ -3416,8 +3759,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             
                             calculateAnnualSavings();
                             calculateConfirmedSavings();
+                            clearRowSelection();
                         } else {
                             addCalculatorRow();
+                            clearRowSelection();
                         }
                     } finally {
                         calculatorLoadInProgress = false;
@@ -3428,6 +3773,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     calculatorLoadInProgress = true;
                     try {
                         addCalculatorRow();
+                        clearRowSelection();
                     } finally {
                         calculatorLoadInProgress = false;
                     }
@@ -3452,6 +3798,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const cancelKeepSelect = row.querySelector('.cancel-keep-select');
                 const cancelledCheckbox = row.querySelector('.cancelled-status-checkbox');
                 const vendorInput = row.querySelector('input[name="vendor[]"]');
+                const rawBtn = row.querySelector('.vendor-raw-btn');
                 const notesTextarea = row.querySelector('textarea.purpose-textarea');
                 const mgrSel = row.querySelector('.manager-select');
                 const visSel = row.querySelector('.visibility-select');
@@ -3501,7 +3848,19 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
                 
                 if (vendorInput) {
-                    vendorInput.addEventListener('blur', autoSave);
+                    const syncVendor = function() { updateVendorDrilldownState(row); };
+                    vendorInput.addEventListener('input', syncVendor);
+                    vendorInput.addEventListener('blur', function() {
+                        syncVendor();
+                        autoSave();
+                    });
+                }
+                if (rawBtn) {
+                    rawBtn.addEventListener('click', function() {
+                        const v = (rawBtn.getAttribute('data-vendor-name') || '').trim();
+                        if (!v) return;
+                        loadVendorRawDataModal(v);
+                    });
                 }
                 
                 if (notesTextarea) {
@@ -3513,6 +3872,20 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 [dlIn, lpIn].forEach(function(el) {
                     if (el) el.addEventListener('change', autoSave);
                 });
+            }
+
+            function updateVendorDrilldownState(row) {
+                if (!row) return;
+                const idEl = row.querySelector('.row-db-id');
+                const vendorInput = row.querySelector('input[name="vendor[]"]');
+                const rawBtn = row.querySelector('.vendor-raw-btn');
+                if (!rawBtn || !vendorInput) return;
+                const idVal = idEl && idEl.value ? parseInt(idEl.value, 10) : 0;
+                const vendorName = vendorInput.value ? vendorInput.value.trim() : '';
+                const enabled = idVal > 0 && vendorName !== '';
+                rawBtn.disabled = !enabled;
+                rawBtn.setAttribute('data-vendor-name', enabled ? vendorName : '');
+                rawBtn.title = enabled ? ('View raw transactions for ' + vendorName) : 'Save/import this row first to view raw data';
             }
             
             // Override attachRowListeners to use the new version with auto-save
@@ -3556,11 +3929,84 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 // Update row numbers after filtering
                 updateRowNumbers();
             }
+
+            function setPurposeColumnState(isVisible) {
+                const grid = document.getElementById('costCalculatorGrid');
+                const toggleBtn = document.getElementById('togglePurposeColumnBtn');
+                if (!grid) return;
+                grid.classList.toggle('notes-collapsed', !isVisible);
+                if (toggleBtn) {
+                    toggleBtn.textContent = isVisible ? 'Hide Purpose' : 'Show Purpose';
+                    toggleBtn.setAttribute('aria-pressed', isVisible ? 'true' : 'false');
+                }
+            }
+
+            function initPurposeColumnToggle() {
+                const toggleBtn = document.getElementById('togglePurposeColumnBtn');
+                if (!toggleBtn) return;
+                const prefKey = 'costCalculatorPurposeVisible';
+                const savedPref = localStorage.getItem(prefKey);
+                const defaultVisible = window.innerWidth > 1100;
+                const isVisible = savedPref === null ? defaultVisible : savedPref === '1';
+                setPurposeColumnState(isVisible);
+
+                toggleBtn.addEventListener('click', function() {
+                    const grid = document.getElementById('costCalculatorGrid');
+                    if (!grid) return;
+                    const nextVisible = grid.classList.contains('notes-collapsed');
+                    setPurposeColumnState(nextVisible);
+                    localStorage.setItem(prefKey, nextVisible ? '1' : '0');
+                });
+            }
             
             // Initialize: Load data on page load; flush debounced saves before refresh/navigation
             document.addEventListener('DOMContentLoaded', function() {
                 initAppModals();
                 initNavSubmenus();
+                initPurposeColumnToggle();
+                const selectAll = document.getElementById('selectAllVendors');
+                if (selectAll) {
+                    selectAll.addEventListener('change', function() {
+                        setAllRowSelection(selectAll.checked);
+                    });
+                }
+                const bulkActionType = document.getElementById('bulkActionType');
+                if (bulkActionType) {
+                    bulkActionType.addEventListener('change', updateBulkActionFields);
+                    updateBulkActionFields();
+                }
+                const bulkApplyBtn = document.getElementById('bulkActionsApplyBtn');
+                if (bulkApplyBtn) {
+                    bulkApplyBtn.addEventListener('click', function() {
+                        const selectedCount = getSelectedVendorRows().length;
+                        if (!selectedCount) {
+                            showSnackbar('Please select at least one vendor row.', 'error');
+                            return;
+                        }
+                        const payload = getBulkActionPayload();
+                        if (!payload) {
+                            showSnackbar('Please choose a bulk action and value.', 'error');
+                            return;
+                        }
+                        closeBulkModalById('appModalBulkActions');
+                        openBulkConfirmModal(payload, selectedCount);
+                    });
+                }
+                const bulkConfirmBtn = document.getElementById('bulkConfirmProceedBtn');
+                if (bulkConfirmBtn) {
+                    bulkConfirmBtn.addEventListener('click', function() {
+                        closeBulkModalById('appModalBulkConfirm');
+                        applyBulkAction(pendingBulkActionData);
+                        pendingBulkActionData = null;
+                    });
+                }
+                const bulkConfirmCancelBtn = document.getElementById('bulkConfirmCancelBtn');
+                if (bulkConfirmCancelBtn) {
+                    bulkConfirmCancelBtn.addEventListener('click', function() {
+                        pendingBulkActionData = null;
+                        closeBulkModalById('appModalBulkConfirm');
+                    });
+                }
                 loadCalculatorData();
                 var csvIn = document.getElementById('csvImportInput');
                 if (csvIn) {
@@ -3574,7 +4020,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             .then(function(r) { return r.json(); })
                             .then(function(d) {
                                 if (d.success) {
-                                    showSnackbar('Imported ' + (d.inserted || 0) + ' vendor(s)', 'success');
+                                    const rawCount = parseInt(d.raw_inserted || 0, 10) || 0;
+                                    showSnackbar('Imported ' + (d.inserted || 0) + ' vendor(s), ' + rawCount + ' raw transactions', 'success');
                                     loadCalculatorData();
                                 } else {
                                     showSnackbar(d.error || 'Import failed', 'error');
@@ -3588,6 +4035,48 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     var d = document.createElement('div');
                     d.textContent = s;
                     return d.innerHTML;
+                }
+                function loadVendorRawDataModal(vendorName) {
+                    var overlay = document.getElementById('appModalVendorRaw');
+                    var title = document.getElementById('appModalVendorRawTitle');
+                    var body = document.getElementById('vendorRawBody');
+                    if (!overlay || !title || !body) return;
+                    title.textContent = 'Raw Data - ' + vendorName;
+                    body.innerHTML = '<p>Loading transaction history...</p>';
+                    openAppModal(overlay);
+                    var fd = new FormData();
+                    fd.append('action', 'load_vendor_raw_data');
+                    fd.append('vendor_name', vendorName);
+                    fetch(window.location.href, { method: 'POST', body: fd })
+                        .then(function(r) { return r.json(); })
+                        .then(function(d) {
+                            if (!d.success) {
+                                body.innerHTML = '<p>' + aiEscapeHtml(d.error || 'Could not load raw data.') + '</p>';
+                                return;
+                            }
+                            var rows = Array.isArray(d.transactions) ? d.transactions : [];
+                            if (!rows.length) {
+                                body.innerHTML = '<p>No raw transactions found for this vendor yet.</p>';
+                                return;
+                            }
+                            var html = '<div class="vendor-raw-results"><table><thead><tr>'
+                                + '<th>Date</th><th>Amount</th><th>Transaction Type</th><th>Account</th><th>Memo/Description</th>'
+                                + '</tr></thead><tbody>';
+                            rows.forEach(function(row) {
+                                var date = aiEscapeHtml(String(row.transaction_date || ''));
+                                var amountNum = parseFloat(row.amount || 0);
+                                var amount = '$' + (isNaN(amountNum) ? '0.00' : amountNum.toFixed(2));
+                                var type = aiEscapeHtml(String(row.transaction_type || ''));
+                                var account = aiEscapeHtml(String(row.account || ''));
+                                var memo = aiEscapeHtml(String(row.memo || ''));
+                                html += '<tr><td>' + date + '</td><td>' + amount + '</td><td>' + type + '</td><td>' + account + '</td><td>' + memo + '</td></tr>';
+                            });
+                            html += '</tbody></table></div>';
+                            body.innerHTML = html;
+                        })
+                        .catch(function() {
+                            body.innerHTML = '<p>Could not load raw data.</p>';
+                        });
                 }
                 function updateAiUsageBar(d) {
                     var bar = document.getElementById('aiUsageBar');
@@ -3618,6 +4107,33 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     var aiBtn = document.getElementById('aiSubmitBtn');
                     if (aiBtn) aiBtn.disabled = !!busy;
                     document.querySelectorAll('.ai-preset').forEach(function(b) { b.disabled = !!busy; });
+                }
+                function collectVisibleVendorRowsForPurposeLookup() {
+                    var rows = [];
+                    document.querySelectorAll('#calculatorRows tr').forEach(function(row) {
+                        var idEl = row.querySelector('.row-db-id');
+                        var vendorInput = row.querySelector('input[name="vendor[]"]');
+                        var idVal = idEl && idEl.value ? parseInt(idEl.value, 10) : 0;
+                        var vendorName = vendorInput ? vendorInput.value.trim() : '';
+                        if (idVal > 0 && vendorName) {
+                            rows.push({ id: idVal, vendor_name: vendorName });
+                        }
+                    });
+                    return rows;
+                }
+                function applyPurposeLookupResultsToUi(resultRows) {
+                    if (!Array.isArray(resultRows)) return;
+                    var byId = {};
+                    resultRows.forEach(function(r) {
+                        if (r && r.id) byId[String(r.id)] = String(r.purpose || '');
+                    });
+                    document.querySelectorAll('#calculatorRows tr').forEach(function(row) {
+                        var idEl = row.querySelector('.row-db-id');
+                        var idVal = idEl && idEl.value ? String(parseInt(idEl.value, 10) || 0) : '';
+                        if (!idVal || !byId[idVal]) return;
+                        var notesTextarea = row.querySelector('textarea.purpose-textarea') || row.querySelector('textarea[name="notes[]"]');
+                        if (notesTextarea) notesTextarea.value = byId[idVal];
+                    });
                 }
                 function fetchAiUsageStats() {
                     var fd = new FormData();
@@ -3673,11 +4189,47 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
                 document.querySelectorAll('.ai-preset').forEach(function(btn) {
                     btn.addEventListener('click', function() {
+                        var preset = btn.getAttribute('data-preset') || '';
                         var label = (btn.textContent || '').trim();
                         appendAiChatMessage('user', label);
+                        if (preset === 'auto_purpose') {
+                            var rows = collectVisibleVendorRowsForPurposeLookup();
+                            if (!rows.length) {
+                                appendAiChatMessage('assistant', 'No saved vendor rows found on screen.', false);
+                                return;
+                            }
+                            var fd2 = new FormData();
+                            fd2.append('action', 'auto_populate_purpose');
+                            fd2.append('rows', JSON.stringify(rows));
+                            setAiUiBusy(true);
+                            fetch(window.location.href, { method: 'POST', body: fd2 })
+                                .then(function(r) { return r.json(); })
+                                .then(function(d) {
+                                    setAiUiBusy(false);
+                                    if (d.success) {
+                                        applyPurposeLookupResultsToUi(d.resolved || []);
+                                        var unresolved = Array.isArray(d.unresolved) ? d.unresolved.length : 0;
+                                        appendAiChatMessage(
+                                            'assistant',
+                                            'Auto populate finished. Updated ' + (d.updated || 0) + ' rows.' + (unresolved ? (' ' + unresolved + ' vendors could not be resolved.') : ''),
+                                            false
+                                        );
+                                        showSnackbar('Purpose auto-populate completed.', 'success');
+                                    } else {
+                                        appendAiChatMessage('assistant', d.error || 'Auto populate failed.', false);
+                                        showSnackbar(d.error || 'Auto populate failed.', 'error');
+                                    }
+                                })
+                                .catch(function() {
+                                    setAiUiBusy(false);
+                                    appendAiChatMessage('assistant', 'Request failed.', false);
+                                    showSnackbar('Auto populate request failed.', 'error');
+                                });
+                            return;
+                        }
                         var fd = new FormData();
                         fd.append('action', 'ai_ask');
-                        fd.append('preset', btn.getAttribute('data-preset') || '');
+                        fd.append('preset', preset);
                         fd.append('question', '');
                         setAiUiBusy(true);
                         fetch(window.location.href, { method: 'POST', body: fd })
@@ -3783,6 +4335,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <button type="button" class="btn-secondary ai-preset" data-preset="lower_tiers">Lower service tiers</button>
                         <button type="button" class="btn-secondary ai-preset" data-preset="duplicates">Duplicate subscriptions</button>
                         <button type="button" class="btn-secondary ai-preset" data-preset="executive">Executive summary suggestions</button>
+                        <button type="button" class="btn-secondary ai-preset" data-preset="auto_purpose">Auto populate purpose</button>
                     </div>
                     <div class="ai-composer">
                         <textarea id="aiQuestion" class="ai-question-input" rows="2" placeholder="Ask a specific question..."></textarea>
@@ -3811,6 +4364,92 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <button type="submit">Save</button>
                     </form>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay" id="appModalBulkActions" role="dialog" aria-modal="true" aria-labelledby="appModalBulkActionsTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalBulkActionsTitle">Bulk Vendor Actions</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <div class="bulk-actions-form">
+                    <label for="bulkActionType">Choose action</label>
+                    <select id="bulkActionType">
+                        <option value="">Select action</option>
+                        <option value="frequency">Update Frequency</option>
+                        <?php if ($is_admin): ?>
+                        <option value="visibility">Update Visibility</option>
+                        <option value="manager">Update Manager</option>
+                        <?php endif; ?>
+                        <option value="delete">Delete Selected Rows</option>
+                    </select>
+                    <div class="bulk-action-controls">
+                        <div id="bulkFrequencyWrap" style="display:none;">
+                            <label for="bulkFrequencyValue">Frequency value</label>
+                            <select id="bulkFrequencyValue">
+                                <option value="">Select frequency</option>
+                                <option value="weekly">Weekly</option>
+                                <option value="monthly">Monthly</option>
+                                <option value="quarterly">Quarterly</option>
+                                <option value="semi_annual">Semi-annual</option>
+                                <option value="annually">Annually</option>
+                            </select>
+                        </div>
+                        <div id="bulkVisibilityWrap" style="display:none;">
+                            <label for="bulkVisibilityValue">Visibility value</label>
+                            <select id="bulkVisibilityValue">
+                                <option value="public">Public</option>
+                                <option value="confidential">Confidential</option>
+                            </select>
+                        </div>
+                        <div id="bulkManagerWrap" style="display:none;">
+                            <label for="bulkManagerValue">Manager value</label>
+                            <select id="bulkManagerValue">
+                                <option value="">Select manager</option>
+                                <?php foreach ($team_members_rows as $tm): ?>
+                                <option value="<?php echo (int) ($tm['id'] ?? 0); ?>">
+                                    <?php echo htmlspecialchars($tm['display_name'] ?? $tm['username'] ?? $tm['email'] ?? ''); ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="bulk-actions-buttons">
+                        <button type="button" class="btn-secondary app-modal-close">Cancel</button>
+                        <button type="button" id="bulkActionsApplyBtn">Review Action</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay" id="appModalBulkConfirm" role="dialog" aria-modal="true" aria-labelledby="appModalBulkConfirmTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalBulkConfirmTitle">Confirm Bulk Action</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <div id="bulkConfirmDetails"></div>
+                <div class="bulk-actions-buttons" style="margin-top:12px;">
+                    <button type="button" class="btn-secondary" id="bulkConfirmCancelBtn">Cancel</button>
+                    <button type="button" id="bulkConfirmProceedBtn">Proceed</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay" id="appModalVendorRaw" role="dialog" aria-modal="true" aria-labelledby="appModalVendorRawTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalVendorRawTitle">Raw Data</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body" id="vendorRawBody">
+                <p>Select a vendor row and click Raw to load transaction history.</p>
             </div>
         </div>
     </div>

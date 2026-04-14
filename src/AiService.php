@@ -205,6 +205,117 @@ class AiService
     }
 
     /**
+     * @param array<int, string> $vendors
+     * @return array{success:bool, results?:array<int, array{vendor:string, aliases:array<int, string>, purpose:string}>, error?:string}
+     */
+    public static function lookupVendorPurposesLive(array $vendors): array
+    {
+        if (!defined('PERPLEXITY_API_KEY') || PERPLEXITY_API_KEY === '') {
+            return ['success' => false, 'error' => 'Live web lookup requires PERPLEXITY_API_KEY.'];
+        }
+        $vendors = array_values(array_filter(array_map(static function ($v) {
+            return trim((string) $v);
+        }, $vendors), static function ($v) {
+            return $v !== '';
+        }));
+        if (count($vendors) === 0) {
+            return ['success' => true, 'results' => []];
+        }
+
+        $payload = [
+            'model' => defined('AI_MODEL') ? AI_MODEL : 'sonar',
+            'temperature' => 0.2,
+            'max_tokens' => defined('AI_MAX_TOKENS') ? max(1200, (int) AI_MAX_TOKENS) : 1800,
+            'messages' => [
+                [
+                    'role' => 'system',
+                    'content' => 'You perform live web research to identify what vendors do. Return strict JSON only.',
+                ],
+                [
+                    'role' => 'user',
+                    'content' => self::buildVendorPurposeLookupPrompt($vendors),
+                ],
+            ],
+        ];
+        $url = defined('PERPLEXITY_API_URL') ? PERPLEXITY_API_URL : 'https://api.perplexity.ai/chat/completions';
+        $out = self::postChatCompletion($url, PERPLEXITY_API_KEY, $payload);
+        if (!$out['ok']) {
+            return ['success' => false, 'error' => 'Live vendor purpose lookup failed.'];
+        }
+
+        $parsed = self::parseVendorPurposeLookupJson((string) ($out['text'] ?? ''));
+        if (!$parsed['success']) {
+            return $parsed;
+        }
+
+        return ['success' => true, 'results' => $parsed['results']];
+    }
+
+    /**
+     * @param array<int, string> $vendors
+     */
+    private static function buildVendorPurposeLookupPrompt(array $vendors): string
+    {
+        return "For each vendor below, do a live web lookup and determine the vendor's top purpose/service.\n"
+            . "Also provide 5 name variants (legal name, product/brand, alternate spellings/case/punctuation variants).\n"
+            . "Respond with STRICT JSON only. No markdown, no prose.\n"
+            . "Output schema:\n"
+            . "{ \"results\": [ { \"vendor\": \"input vendor\", \"aliases\": [\"a1\",\"a2\",\"a3\",\"a4\",\"a5\"], \"purpose\": \"short purpose\" } ] }\n"
+            . "Rules: aliases must be exactly 5 non-empty strings. purpose must be <= 220 chars.\n"
+            . "Vendors:\n- " . implode("\n- ", $vendors);
+    }
+
+    /**
+     * @return array{success:bool, results?:array<int, array{vendor:string, aliases:array<int, string>, purpose:string}>, error?:string}
+     */
+    private static function parseVendorPurposeLookupJson(string $raw): array
+    {
+        $json = trim($raw);
+        if (str_starts_with($json, '```')) {
+            $json = preg_replace('/^```(?:json)?\s*/i', '', $json) ?? $json;
+            $json = preg_replace('/\s*```$/', '', $json) ?? $json;
+            $json = trim($json);
+        }
+        $data = json_decode($json, true);
+        if (!is_array($data) || !isset($data['results']) || !is_array($data['results'])) {
+            return ['success' => false, 'error' => 'Live lookup returned invalid JSON structure.'];
+        }
+        $results = [];
+        foreach ($data['results'] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $vendor = trim((string) ($row['vendor'] ?? ''));
+            $purpose = trim((string) ($row['purpose'] ?? ''));
+            $aliasesRaw = isset($row['aliases']) && is_array($row['aliases']) ? $row['aliases'] : [];
+            $aliases = [];
+            foreach ($aliasesRaw as $a) {
+                $s = trim((string) $a);
+                if ($s !== '') {
+                    $aliases[] = $s;
+                }
+            }
+            if ($vendor === '' || $purpose === '') {
+                continue;
+            }
+            while (count($aliases) < 5) {
+                $aliases[] = $vendor;
+            }
+            $aliases = array_slice($aliases, 0, 5);
+            $results[] = [
+                'vendor' => $vendor,
+                'aliases' => $aliases,
+                'purpose' => substr($purpose, 0, 220),
+            ];
+        }
+        if (count($results) === 0) {
+            return ['success' => false, 'error' => 'Live lookup returned no usable vendor purposes.'];
+        }
+
+        return ['success' => true, 'results' => $results];
+    }
+
+    /**
      * Allow safe HTML from the model; strip scripts and unknown tags. Plain text is wrapped in <p>.
      */
     private static function sanitizeAiHtml(string $html): string

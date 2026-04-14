@@ -5,6 +5,7 @@ require_once __DIR__ . '/pro_log.php';
 use CostSavings\AiService;
 use CostSavings\CsvImport;
 use CostSavings\ExportService;
+use CostSavings\VendorPurposeService;
 use CostSavings\VendorService;
 
 function normalizeUserEmail($email) {
@@ -188,23 +189,17 @@ function handleImportVendorCsv() {
         exit;
     }
     $parsed = CsvImport::parse($raw);
-    if (count($parsed) === 0) {
+    $summaryRows = isset($parsed['summary']) && is_array($parsed['summary']) ? $parsed['summary'] : [];
+    $rawRows = isset($parsed['raw']) && is_array($parsed['raw']) ? $parsed['raw'] : [];
+    if (count($summaryRows) === 0) {
         echo json_encode(['success' => false, 'error' => 'No vendor blocks parsed']);
         exit;
     }
     $pdo = getDBConnection();
     $orgId = (int) $_SESSION['org_id'];
     $uid = (int) $_SESSION['user_id'];
-    $role = $_SESSION['role'] ?? 'member';
-    $email = '';
-    $st = $pdo->prepare('SELECT email FROM users WHERE id = ?');
-    $st->execute([$uid]);
-    $r = $st->fetch(PDO::FETCH_ASSOC);
-    if ($r) {
-        $email = $r['email'];
-    }
     $items = [];
-    foreach ($parsed as $row) {
+    foreach ($summaryRows as $row) {
         $items[] = [
             'vendor_name' => $row['vendor_name'],
             'cost_per_period' => $row['cost_per_period'],
@@ -221,6 +216,18 @@ function handleImportVendorCsv() {
         ];
     }
     $res = VendorService::appendImportedRows($pdo, $orgId, $uid, $items);
+    if (!($res['success'] ?? false)) {
+        echo json_encode($res);
+        exit;
+    }
+    $batchId = bin2hex(random_bytes(12));
+    $rawRes = VendorService::appendRawTransactions($pdo, $orgId, $uid, $batchId, $rawRows);
+    if (!($rawRes['success'] ?? false)) {
+        echo json_encode($rawRes);
+        exit;
+    }
+    $res['raw_inserted'] = (int) ($rawRes['inserted'] ?? 0);
+    $res['upload_batch_id'] = $batchId;
     echo json_encode($res);
     exit;
 }
@@ -313,6 +320,56 @@ function handleAiUsageStats() {
     $pdo = getDBConnection();
     $stats = AiService::getMonthlyUsageStats($pdo, (int) $_SESSION['user_id']);
     echo json_encode(array_merge(['success' => true], $stats));
+    exit;
+}
+
+function handleAutoPopulatePurpose() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Not logged in']);
+        exit;
+    }
+    $rowsRaw = $_POST['rows'] ?? '[]';
+    $rows = is_array($rowsRaw) ? $rowsRaw : json_decode((string) $rowsRaw, true);
+    if (!is_array($rows)) {
+        echo json_encode(['success' => false, 'error' => 'Invalid rows payload']);
+        exit;
+    }
+    $pdo = getDBConnection();
+    $orgId = (int) $_SESSION['org_id'];
+    $userId = (int) $_SESSION['user_id'];
+    $role = (string) ($_SESSION['role'] ?? 'member');
+
+    $resolved = VendorPurposeService::resolveForVisibleRows($pdo, $orgId, $rows);
+    if (!$resolved['success']) {
+        echo json_encode([
+            'success' => false,
+            'error' => (string) ($resolved['error'] ?? 'Purpose lookup failed'),
+            'resolved' => $resolved['resolved'] ?? [],
+            'unresolved' => $resolved['unresolved'] ?? [],
+        ]);
+        exit;
+    }
+
+    $updates = [];
+    foreach (($resolved['resolved'] ?? []) as $r) {
+        if (!is_array($r)) {
+            continue;
+        }
+        $id = (int) ($r['id'] ?? 0);
+        $purpose = trim((string) ($r['purpose'] ?? ''));
+        if ($id <= 0 || $purpose === '') {
+            continue;
+        }
+        $updates[] = ['id' => $id, 'purpose' => $purpose];
+    }
+    $apply = VendorService::updatePurposesForVisibleRows($pdo, $orgId, $userId, $role, $updates);
+    echo json_encode([
+        'success' => true,
+        'updated' => $apply['updated'] ?? 0,
+        'resolved' => $resolved['resolved'] ?? [],
+        'unresolved' => $resolved['unresolved'] ?? [],
+    ]);
     exit;
 }
 
@@ -430,5 +487,32 @@ function handleLoadCostCalculator() {
     );
 
     echo json_encode(['success' => true, 'items' => $items]);
+    exit;
+}
+
+function handleLoadVendorRawData() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'User not logged in', 'transactions' => []]);
+        exit;
+    }
+    $vendorName = trim((string) ($_POST['vendor_name'] ?? ''));
+    if ($vendorName === '') {
+        echo json_encode(['success' => false, 'error' => 'Vendor name is required', 'transactions' => []]);
+        exit;
+    }
+    $pdo = getDBConnection();
+    $rows = VendorService::loadRawTransactionsForVisibleVendor(
+        $pdo,
+        (int) $_SESSION['org_id'],
+        (int) $_SESSION['user_id'],
+        (string) ($_SESSION['role'] ?? 'member'),
+        $vendorName
+    );
+    echo json_encode([
+        'success' => true,
+        'vendor_name' => $vendorName,
+        'transactions' => $rows,
+    ]);
     exit;
 }

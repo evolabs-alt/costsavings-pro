@@ -328,6 +328,66 @@ function migrateCostCalculatorSchema(PDO $pdo) {
     } catch (PDOException $e) {
         error_log('migrateCostCalculatorSchema: ' . $e->getMessage());
     }
+
+    migrateVendorDetailSchema($pdo);
+    migrateVendorRawTransactionSchema($pdo);
+}
+
+/**
+ * @param PDO $pdo
+ */
+function migrateVendorDetailSchema(PDO $pdo): void
+{
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `vendor_detail` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `org_id` INT UNSIGNED NOT NULL,
+            `name_1` VARCHAR(255) NOT NULL,
+            `name_2` VARCHAR(255) NULL,
+            `name_3` VARCHAR(255) NULL,
+            `name_4` VARCHAR(255) NULL,
+            `name_5` VARCHAR(255) NULL,
+            `purpose` TEXT NULL,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY `idx_vendor_detail_org` (`org_id`),
+            KEY `idx_vendor_detail_name_1` (`name_1`),
+            KEY `idx_vendor_detail_name_2` (`name_2`),
+            KEY `idx_vendor_detail_name_3` (`name_3`),
+            KEY `idx_vendor_detail_name_4` (`name_4`),
+            KEY `idx_vendor_detail_name_5` (`name_5`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    } catch (PDOException $e) {
+        error_log('migrateVendorDetailSchema: ' . $e->getMessage());
+    }
+}
+
+/**
+ * @param PDO $pdo
+ */
+function migrateVendorRawTransactionSchema(PDO $pdo): void
+{
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `vendor_raw_transactions` (
+            `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `org_id` INT UNSIGNED NOT NULL,
+            `uploaded_by_user_id` INT UNSIGNED NULL,
+            `upload_batch_id` VARCHAR(64) NOT NULL,
+            `vendor_name` VARCHAR(255) NOT NULL,
+            `vendor_name_normalized` VARCHAR(255) NOT NULL,
+            `transaction_date` DATE NOT NULL,
+            `amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+            `transaction_type` VARCHAR(128) NULL,
+            `account` VARCHAR(255) NULL,
+            `memo` TEXT NULL,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            KEY `idx_vrt_org_vendor` (`org_id`, `vendor_name_normalized`),
+            KEY `idx_vrt_org_date` (`org_id`, `transaction_date`),
+            KEY `idx_vrt_batch` (`upload_batch_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    } catch (PDOException $e) {
+        error_log('migrateVendorRawTransactionSchema: ' . $e->getMessage());
+    }
 }
 
 /**
