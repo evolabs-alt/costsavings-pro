@@ -5,6 +5,7 @@ require_once __DIR__ . '/pro_log.php';
 use CostSavings\AiService;
 use CostSavings\CsvImport;
 use CostSavings\ExportService;
+use CostSavings\ProjectService;
 use CostSavings\VendorPurposeService;
 use CostSavings\VendorService;
 
@@ -77,9 +78,57 @@ function handleLogin() {
     $_SESSION['role'] = $row['role'];
     $_SESSION['username'] = $row['username'] ?? '';
     $_SESSION['user_email'] = normalizeUserEmail($row['email']);
+    $orgId = (int) $row['org_id'];
+    $userId = (int) $row['id'];
+    $role = (string) ($row['role'] ?? 'member');
+    $projectCount = ProjectService::orgProjectCount($pdo, $orgId);
+    $_SESSION['project_onboarding_required'] = ($role === 'admin' && $projectCount === 0);
+    $activeProjectId = ProjectService::resolveActiveProjectId($pdo, $orgId, $userId, $role, null);
+    if ($activeProjectId !== null) {
+        $_SESSION['active_project_id'] = $activeProjectId;
+        ProjectService::backfillNullProjectRows($pdo, $orgId, $activeProjectId);
+    } else {
+        unset($_SESSION['active_project_id']);
+    }
     loadUserResponses($_SESSION['user_email']);
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;
+}
+
+function requireActiveProjectId(PDO $pdo): ?int
+{
+    if (empty($_SESSION['user_id'])) {
+        return null;
+    }
+    $projectId = isset($_SESSION['active_project_id']) ? (int) $_SESSION['active_project_id'] : null;
+    $resolved = ProjectService::resolveActiveProjectId(
+        $pdo,
+        (int) $_SESSION['org_id'],
+        (int) $_SESSION['user_id'],
+        (string) ($_SESSION['role'] ?? 'member'),
+        $projectId
+    );
+    if ($resolved !== null) {
+        $_SESSION['active_project_id'] = $resolved;
+        ProjectService::backfillNullProjectRows($pdo, (int) $_SESSION['org_id'], $resolved);
+    }
+    return $resolved;
+}
+
+function parseMemberIds($raw): array
+{
+    if (is_array($raw)) {
+        return array_values(array_filter(array_map('intval', $raw), function ($v) {
+            return $v > 0;
+        }));
+    }
+    $decoded = json_decode((string) $raw, true);
+    if (!is_array($decoded)) {
+        return [];
+    }
+    return array_values(array_filter(array_map('intval', $decoded), function ($v) {
+        return $v > 0;
+    }));
 }
 
 function handleInviteMember() {
@@ -198,6 +247,12 @@ function handleImportVendorCsv() {
     $pdo = getDBConnection();
     $orgId = (int) $_SESSION['org_id'];
     $uid = (int) $_SESSION['user_id'];
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        echo json_encode(['success' => false, 'error' => 'No active project selected']);
+        exit;
+    }
+    $purposeMap = ProjectService::purposeMapFromProject($pdo, $orgId, $activeProjectId);
     $items = [];
     foreach ($summaryRows as $row) {
         $items[] = [
@@ -207,7 +262,7 @@ function handleImportVendorCsv() {
             'annual_cost' => $row['annual_cost'],
             'cancel_keep' => 'Keep',
             'cancelled_status' => 0,
-            'purpose_of_subscription' => '',
+            'purpose_of_subscription' => $purposeMap[mb_strtolower(trim((string) $row['vendor_name']), 'UTF-8')] ?? '',
             'notes' => '',
             'visibility' => 'confidential',
             'manager_user_id' => $uid,
@@ -215,13 +270,13 @@ function handleImportVendorCsv() {
             'last_payment_date' => $row['last_payment_date'],
         ];
     }
-    $res = VendorService::appendImportedRows($pdo, $orgId, $uid, $items);
+    $res = VendorService::appendImportedRows($pdo, $orgId, $activeProjectId, $uid, $items);
     if (!($res['success'] ?? false)) {
         echo json_encode($res);
         exit;
     }
     $batchId = bin2hex(random_bytes(12));
-    $rawRes = VendorService::appendRawTransactions($pdo, $orgId, $uid, $batchId, $rawRows);
+    $rawRes = VendorService::appendRawTransactions($pdo, $orgId, $activeProjectId, $uid, $batchId, $rawRows);
     if (!($rawRes['success'] ?? false)) {
         echo json_encode($rawRes);
         exit;
@@ -238,10 +293,17 @@ function handleExportVendors() {
         exit;
     }
     $pdo = getDBConnection();
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        header('HTTP/1.0 400 Bad Request');
+        echo 'No active project selected.';
+        exit;
+    }
     $items = VendorService::loadVisibleItems(
         $pdo,
         (int) $_SESSION['user_id'],
         (int) $_SESSION['org_id'],
+        $activeProjectId,
         $_SESSION['role'] ?? 'member'
     );
     $fmt = $_GET['format'] ?? $_POST['format'] ?? 'xlsx';
@@ -289,6 +351,11 @@ function handleAiAsk() {
         exit;
     }
     $pdo = getDBConnection();
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        echo json_encode(['success' => false, 'error' => 'No active project selected']);
+        exit;
+    }
     $q = trim((string) ($_POST['question'] ?? ''));
     $preset = isset($_POST['preset']) ? (string) $_POST['preset'] : null;
     if ($preset === '') {
@@ -302,6 +369,7 @@ function handleAiAsk() {
         $pdo,
         (int) $_SESSION['user_id'],
         (int) $_SESSION['org_id'],
+        $activeProjectId,
         $_SESSION['role'] ?? 'member'
     );
     $question = $q !== '' ? $q : (AiService::PRESETS[$preset] ?? 'Summarize vendor spend.');
@@ -339,6 +407,11 @@ function handleAutoPopulatePurpose() {
     $orgId = (int) $_SESSION['org_id'];
     $userId = (int) $_SESSION['user_id'];
     $role = (string) ($_SESSION['role'] ?? 'member');
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        echo json_encode(['success' => false, 'error' => 'No active project selected']);
+        exit;
+    }
 
     $resolved = VendorPurposeService::resolveForVisibleRows($pdo, $orgId, $rows);
     if (!$resolved['success']) {
@@ -363,7 +436,7 @@ function handleAutoPopulatePurpose() {
         }
         $updates[] = ['id' => $id, 'purpose' => $purpose];
     }
-    $apply = VendorService::updatePurposesForVisibleRows($pdo, $orgId, $userId, $role, $updates);
+    $apply = VendorService::updatePurposesForVisibleRows($pdo, $orgId, $activeProjectId, $userId, $role, $updates);
     echo json_encode([
         'success' => true,
         'updated' => $apply['updated'] ?? 0,
@@ -462,11 +535,16 @@ function handleSaveCostCalculator() {
     $orgId = (int) $_SESSION['org_id'];
     $uid = (int) $_SESSION['user_id'];
     $role = $_SESSION['role'] ?? 'member';
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        echo json_encode(['success' => false, 'error' => 'No active project selected']);
+        exit;
+    }
 
     if ($role === 'admin') {
-        $result = VendorService::saveAdmin($pdo, $orgId, $uid, $items);
+        $result = VendorService::saveAdmin($pdo, $orgId, $activeProjectId, $uid, $items);
     } else {
-        $result = VendorService::saveMember($pdo, $orgId, $uid, $items);
+        $result = VendorService::saveMember($pdo, $orgId, $activeProjectId, $uid, $items);
     }
     echo json_encode($result);
     exit;
@@ -481,10 +559,16 @@ function handleLoadCostCalculator() {
     }
 
     $pdo = getDBConnection();
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        echo json_encode(['success' => true, 'items' => []]);
+        exit;
+    }
     $items = VendorService::loadVisibleItems(
         $pdo,
         (int) $_SESSION['user_id'],
         (int) $_SESSION['org_id'],
+        $activeProjectId,
         $_SESSION['role'] ?? 'member'
     );
 
@@ -504,9 +588,15 @@ function handleLoadVendorRawData() {
         exit;
     }
     $pdo = getDBConnection();
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        echo json_encode(['success' => false, 'error' => 'No active project selected', 'transactions' => []]);
+        exit;
+    }
     $rows = VendorService::loadRawTransactionsForVisibleVendor(
         $pdo,
         (int) $_SESSION['org_id'],
+        $activeProjectId,
         (int) $_SESSION['user_id'],
         (string) ($_SESSION['role'] ?? 'member'),
         $vendorName
@@ -516,5 +606,100 @@ function handleLoadVendorRawData() {
         'vendor_name' => $vendorName,
         'transactions' => $rows,
     ]);
+    exit;
+}
+
+function handleProjectList() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'projects' => []]);
+        exit;
+    }
+    $pdo = getDBConnection();
+    $projects = ProjectService::listForUser(
+        $pdo,
+        (int) $_SESSION['org_id'],
+        (int) $_SESSION['user_id'],
+        (string) ($_SESSION['role'] ?? 'member')
+    );
+    $activeProjectId = requireActiveProjectId($pdo);
+    echo json_encode([
+        'success' => true,
+        'projects' => $projects,
+        'active_project_id' => $activeProjectId,
+        'onboarding_required' => !empty($_SESSION['project_onboarding_required']),
+    ]);
+    exit;
+}
+
+function handleProjectSetActive() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Not logged in']);
+        exit;
+    }
+    $projectId = (int) ($_POST['project_id'] ?? 0);
+    $pdo = getDBConnection();
+    if (!ProjectService::canAccessProject(
+        $pdo,
+        $projectId,
+        (int) $_SESSION['org_id'],
+        (int) $_SESSION['user_id'],
+        (string) ($_SESSION['role'] ?? 'member')
+    )) {
+        echo json_encode(['success' => false, 'error' => 'You do not have access to this project.']);
+        exit;
+    }
+    $_SESSION['active_project_id'] = $projectId;
+    echo json_encode(['success' => true, 'active_project_id' => $projectId]);
+    exit;
+}
+
+function handleProjectCreate() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id']) || (string) ($_SESSION['role'] ?? '') !== 'admin') {
+        echo json_encode(['success' => false, 'error' => 'Only admins can create projects.']);
+        exit;
+    }
+    $projectName = trim((string) ($_POST['project_name'] ?? ''));
+    $startDate = trim((string) ($_POST['start_date'] ?? ''));
+    if ($startDate === '') {
+        $startDate = date('Y-m-d');
+    }
+    $endDate = trim((string) ($_POST['end_date'] ?? ''));
+    $memberIds = parseMemberIds($_POST['member_ids'] ?? []);
+    $copyFromActive = isset($_POST['copy_from_active']) && (string) $_POST['copy_from_active'] === '1';
+    $sourceProjectId = isset($_POST['source_project_id']) ? (int) $_POST['source_project_id'] : 0;
+
+    $pdo = getDBConnection();
+    $orgId = (int) $_SESSION['org_id'];
+    $userId = (int) $_SESSION['user_id'];
+    $create = ProjectService::createProject(
+        $pdo,
+        $orgId,
+        $userId,
+        $projectName,
+        $startDate,
+        $endDate === '' ? null : $endDate,
+        $memberIds
+    );
+    if (!($create['success'] ?? false)) {
+        echo json_encode($create);
+        exit;
+    }
+    $newProjectId = (int) $create['project_id'];
+
+    if ($copyFromActive) {
+        if ($sourceProjectId <= 0) {
+            $sourceProjectId = isset($_SESSION['active_project_id']) ? (int) $_SESSION['active_project_id'] : 0;
+        }
+        if ($sourceProjectId > 0) {
+            ProjectService::copyProjectData($pdo, $orgId, $sourceProjectId, $newProjectId, $userId);
+        }
+    }
+
+    $_SESSION['active_project_id'] = $newProjectId;
+    $_SESSION['project_onboarding_required'] = false;
+    echo json_encode(['success' => true, 'project_id' => $newProjectId]);
     exit;
 }

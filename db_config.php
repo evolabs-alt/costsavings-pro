@@ -259,11 +259,51 @@ function migrateSchema(PDO $pdo) {
             CONSTRAINT `fk_mrs_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+        migrateProjectSchema($pdo);
         migrateCostCalculatorSchema($pdo);
         seedInitialAdminIfNeeded($pdo);
         $migrated = true;
     } catch (PDOException $e) {
         error_log('migrateSchema error: ' . $e->getMessage());
+    }
+}
+
+/**
+ * @param PDO $pdo
+ */
+function migrateProjectSchema(PDO $pdo): void
+{
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `projects` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `org_id` INT UNSIGNED NOT NULL,
+            `name` VARCHAR(255) NOT NULL,
+            `start_date` DATE NOT NULL,
+            `end_date` DATE NULL,
+            `created_by` INT UNSIGNED NOT NULL,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY `uk_projects_org_name` (`org_id`, `name`),
+            KEY `idx_projects_org` (`org_id`),
+            KEY `idx_projects_creator` (`created_by`),
+            CONSTRAINT `fk_projects_org` FOREIGN KEY (`org_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_projects_creator` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `project_members` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `project_id` INT UNSIGNED NOT NULL,
+            `user_id` INT UNSIGNED NOT NULL,
+            `assigned_by` INT UNSIGNED NOT NULL,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uk_project_members` (`project_id`, `user_id`),
+            KEY `idx_project_members_user` (`user_id`),
+            CONSTRAINT `fk_project_members_project` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_project_members_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_project_members_assigned_by` FOREIGN KEY (`assigned_by`) REFERENCES `users` (`id`) ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    } catch (PDOException $e) {
+        error_log('migrateProjectSchema: ' . $e->getMessage());
     }
 }
 
@@ -303,6 +343,7 @@ function migrateCostCalculatorSchema(PDO $pdo) {
 
     try {
         $addCol($pdo, 'org_id', '`org_id` INT UNSIGNED NOT NULL DEFAULT 1');
+        $addCol($pdo, 'project_id', '`project_id` INT UNSIGNED NULL');
         $addCol($pdo, 'user_id', '`user_id` INT UNSIGNED NULL');
         $addCol($pdo, 'manager_user_id', '`manager_user_id` INT UNSIGNED NULL');
         $addCol($pdo, 'visibility', "`visibility` ENUM('public','confidential') NOT NULL DEFAULT 'public'");
@@ -325,6 +366,11 @@ function migrateCostCalculatorSchema(PDO $pdo) {
             WHERE cci.user_id IS NULL");
 
         $pdo->exec("UPDATE `cost_calculator_items` SET `manager_user_id` = `user_id` WHERE `manager_user_id` IS NULL AND `user_id` IS NOT NULL");
+        try {
+            $pdo->exec('CREATE INDEX `idx_cc_project` ON `cost_calculator_items` (`project_id`)');
+        } catch (PDOException $e) {
+            // ignore duplicate index attempts
+        }
     } catch (PDOException $e) {
         error_log('migrateCostCalculatorSchema: ' . $e->getMessage());
     }
@@ -371,6 +417,7 @@ function migrateVendorRawTransactionSchema(PDO $pdo): void
         $pdo->exec("CREATE TABLE IF NOT EXISTS `vendor_raw_transactions` (
             `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             `org_id` INT UNSIGNED NOT NULL,
+            `project_id` INT UNSIGNED NULL,
             `uploaded_by_user_id` INT UNSIGNED NULL,
             `upload_batch_id` VARCHAR(64) NOT NULL,
             `vendor_name` VARCHAR(255) NOT NULL,
@@ -381,10 +428,14 @@ function migrateVendorRawTransactionSchema(PDO $pdo): void
             `account` VARCHAR(255) NULL,
             `memo` TEXT NULL,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            KEY `idx_vrt_org_vendor` (`org_id`, `vendor_name_normalized`),
-            KEY `idx_vrt_org_date` (`org_id`, `transaction_date`),
+            KEY `idx_vrt_org_vendor` (`org_id`, `project_id`, `vendor_name_normalized`),
+            KEY `idx_vrt_org_date` (`org_id`, `project_id`, `transaction_date`),
             KEY `idx_vrt_batch` (`upload_batch_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        $st = $pdo->query("SHOW COLUMNS FROM `vendor_raw_transactions` LIKE 'project_id'");
+        if (!$st->fetch()) {
+            $pdo->exec('ALTER TABLE `vendor_raw_transactions` ADD COLUMN `project_id` INT UNSIGNED NULL AFTER `org_id`');
+        }
     } catch (PDOException $e) {
         error_log('migrateVendorRawTransactionSchema: ' . $e->getMessage());
     }

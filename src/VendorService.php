@@ -27,18 +27,18 @@ class VendorService
     /**
      * @return array<int, array<string, mixed>>
      */
-    public static function loadVisibleItems(PDO $pdo, int $userId, int $orgId, string $role): array
+    public static function loadVisibleItems(PDO $pdo, int $userId, int $orgId, int $projectId, string $role): array
     {
         if ($role === 'admin') {
-            $sql = 'SELECT * FROM cost_calculator_items WHERE org_id = :oid ORDER BY id ASC';
+            $sql = 'SELECT * FROM cost_calculator_items WHERE org_id = :oid AND project_id = :pid ORDER BY id ASC';
             $stmt = $pdo->prepare($sql);
-            $stmt->execute([':oid' => $orgId]);
+            $stmt->execute([':oid' => $orgId, ':pid' => $projectId]);
         } else {
-            $sql = 'SELECT * FROM cost_calculator_items WHERE org_id = :oid AND (
+            $sql = 'SELECT * FROM cost_calculator_items WHERE org_id = :oid AND project_id = :pid AND (
                 visibility = \'public\' OR (visibility = \'confidential\' AND manager_user_id = :uid)
             ) ORDER BY id ASC';
             $stmt = $pdo->prepare($sql);
-            $stmt->execute([':oid' => $orgId, ':uid' => $userId]);
+            $stmt->execute([':oid' => $orgId, ':pid' => $projectId, ':uid' => $userId]);
         }
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $out = [];
@@ -98,7 +98,7 @@ class VendorService
      * @param array<int, array<string, mixed>> $items
      * @return array{success:bool, error?:string, cancelKeep?:string}
      */
-    public static function saveAdmin(PDO $pdo, int $orgId, int $adminUserId, array $items): array
+    public static function saveAdmin(PDO $pdo, int $orgId, int $projectId, int $adminUserId, array $items): array
     {
         $v = self::validateItems($items);
         if (!$v['success']) {
@@ -107,12 +107,12 @@ class VendorService
 
         $pdo->beginTransaction();
         try {
-            $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE org_id = ?');
-            $del->execute([$orgId]);
+            $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE org_id = ? AND project_id = ?');
+            $del->execute([$orgId, $projectId]);
 
             $ins = $pdo->prepare(
-                'INSERT INTO cost_calculator_items (org_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
 
             $email = self::getUserEmail($pdo, $adminUserId);
@@ -138,6 +138,7 @@ class VendorService
 
                 $ins->execute([
                     $orgId,
+                    $projectId,
                     $adminUserId,
                     $email,
                     $mgr,
@@ -169,7 +170,7 @@ class VendorService
      * @param array<int, array<string, mixed>> $items
      * @return array{success:bool, error?:string, cancelKeep?:string}
      */
-    public static function saveMember(PDO $pdo, int $orgId, int $userId, array $items): array
+    public static function saveMember(PDO $pdo, int $orgId, int $projectId, int $userId, array $items): array
     {
         $v = self::validateItems($items);
         if (!$v['success']) {
@@ -181,9 +182,9 @@ class VendorService
             $email = self::getUserEmail($pdo, $userId);
 
             $existing = $pdo->prepare(
-                'SELECT id FROM cost_calculator_items WHERE org_id = ? AND manager_user_id = ?'
+                'SELECT id FROM cost_calculator_items WHERE org_id = ? AND project_id = ? AND manager_user_id = ?'
             );
-            $existing->execute([$orgId, $userId]);
+            $existing->execute([$orgId, $projectId, $userId]);
             $allowedIds = [];
             while ($r = $existing->fetch(PDO::FETCH_ASSOC)) {
                 $allowedIds[(int) $r['id']] = true;
@@ -194,12 +195,12 @@ class VendorService
 
             $upd = $pdo->prepare(
                 'UPDATE cost_calculator_items SET vendor_name=?, cost_per_period=?, frequency=?, annual_cost=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?, user_email=?, user_id=?
-                 WHERE id=? AND org_id=? AND manager_user_id=?'
+                 WHERE id=? AND org_id=? AND project_id=? AND manager_user_id=?'
             );
 
             $ins = $pdo->prepare(
-                'INSERT INTO cost_calculator_items (org_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
 
             foreach ($items as $item) {
@@ -234,11 +235,13 @@ class VendorService
                         $userId,
                         $rowId,
                         $orgId,
+                        $projectId,
                         $userId,
                     ]);
                 } else {
                     $ins->execute([
                         $orgId,
+                        $projectId,
                         $userId,
                         $email,
                         $userId,
@@ -258,8 +261,8 @@ class VendorService
 
             foreach (array_keys($allowedIds) as $aid) {
                 if (!isset($payloadIds[$aid])) {
-                    $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE id = ? AND org_id = ? AND manager_user_id = ?');
-                    $del->execute([$aid, $orgId, $userId]);
+                    $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE id = ? AND org_id = ? AND project_id = ? AND manager_user_id = ?');
+                    $del->execute([$aid, $orgId, $projectId, $userId]);
                 }
             }
 
@@ -302,12 +305,12 @@ class VendorService
      * @param array<int, array<string, mixed>> $items
      * @return array{success:bool, inserted?:int, error?:string}
      */
-    public static function appendImportedRows(PDO $pdo, int $orgId, int $userId, array $items): array
+    public static function appendImportedRows(PDO $pdo, int $orgId, int $projectId, int $userId, array $items): array
     {
         $email = self::getUserEmail($pdo, $userId);
         $ins = $pdo->prepare(
-            'INSERT INTO cost_calculator_items (org_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+            'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         $n = 0;
         try {
@@ -326,6 +329,7 @@ class VendorService
                 $lastPay = self::normDate($item['last_payment_date'] ?? null);
                 $ins->execute([
                     $orgId,
+                    $projectId,
                     $userId,
                     $email,
                     $mgr,
@@ -363,7 +367,7 @@ class VendorService
      * @param array<int, array{id:int, purpose:string}> $updates
      * @return array{updated:int,applied:int,applied_ids:array<int,int>}
      */
-    public static function updatePurposesForVisibleRows(PDO $pdo, int $orgId, int $userId, string $role, array $updates): array
+    public static function updatePurposesForVisibleRows(PDO $pdo, int $orgId, int $projectId, int $userId, string $role, array $updates): array
     {
         if (count($updates) === 0) {
             return ['updated' => 0, 'applied' => 0, 'applied_ids' => []];
@@ -375,14 +379,14 @@ class VendorService
             $stmt = $pdo->prepare(
                 'UPDATE cost_calculator_items
                  SET purpose_of_subscription = ?
-                 WHERE id = ? AND org_id = ?'
+                 WHERE id = ? AND org_id = ? AND project_id = ?'
             );
             foreach ($updates as $u) {
                 $rowId = (int) ($u['id'] ?? 0);
                 if ($rowId <= 0) {
                     continue;
                 }
-                $stmt->execute([(string) ($u['purpose'] ?? ''), $rowId, $orgId]);
+                $stmt->execute([(string) ($u['purpose'] ?? ''), $rowId, $orgId, $projectId]);
                 $updated += $stmt->rowCount();
                 ++$applied;
                 $appliedIds[] = $rowId;
@@ -394,14 +398,14 @@ class VendorService
         $allowed = [];
         $allowedStmt = $pdo->prepare(
             'SELECT id FROM cost_calculator_items
-             WHERE id = ? AND org_id = ? AND manager_user_id = ?'
+             WHERE id = ? AND org_id = ? AND project_id = ? AND manager_user_id = ?'
         );
         foreach ($updates as $u) {
             $rowId = (int) ($u['id'] ?? 0);
             if ($rowId <= 0 || isset($allowed[$rowId])) {
                 continue;
             }
-            $allowedStmt->execute([$rowId, $orgId, $userId]);
+            $allowedStmt->execute([$rowId, $orgId, $projectId, $userId]);
             if ($allowedStmt->fetchColumn()) {
                 $allowed[$rowId] = true;
             }
@@ -410,14 +414,14 @@ class VendorService
         $stmt = $pdo->prepare(
             'UPDATE cost_calculator_items
              SET purpose_of_subscription = ?
-             WHERE id = ? AND org_id = ? AND manager_user_id = ?'
+             WHERE id = ? AND org_id = ? AND project_id = ? AND manager_user_id = ?'
         );
         foreach ($updates as $u) {
             $rowId = (int) ($u['id'] ?? 0);
             if ($rowId <= 0 || !isset($allowed[$rowId])) {
                 continue;
             }
-            $stmt->execute([(string) ($u['purpose'] ?? ''), $rowId, $orgId, $userId]);
+            $stmt->execute([(string) ($u['purpose'] ?? ''), $rowId, $orgId, $projectId, $userId]);
             $updated += $stmt->rowCount();
             ++$applied;
             $appliedIds[] = $rowId;
@@ -438,14 +442,15 @@ class VendorService
     public static function appendRawTransactions(
         PDO $pdo,
         int $orgId,
+        int $projectId,
         int $uploadedByUserId,
         string $uploadBatchId,
         array $rows
     ): array {
         $stmt = $pdo->prepare(
             'INSERT INTO vendor_raw_transactions
-            (org_id, uploaded_by_user_id, upload_batch_id, vendor_name, vendor_name_normalized, transaction_date, amount, transaction_type, account, memo)
-            VALUES (?,?,?,?,?,?,?,?,?,?)'
+            (org_id, project_id, uploaded_by_user_id, upload_batch_id, vendor_name, vendor_name_normalized, transaction_date, amount, transaction_type, account, memo)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)'
         );
         $inserted = 0;
         try {
@@ -460,6 +465,7 @@ class VendorService
                 }
                 $stmt->execute([
                     $orgId,
+                    $projectId,
                     $uploadedByUserId,
                     $uploadBatchId,
                     $vendorName,
@@ -487,6 +493,7 @@ class VendorService
     public static function loadRawTransactionsForVisibleVendor(
         PDO $pdo,
         int $orgId,
+        int $projectId,
         int $userId,
         string $role,
         string $vendorName
@@ -500,11 +507,12 @@ class VendorService
                 "SELECT 1
                  FROM cost_calculator_items
                  WHERE org_id = :oid
+                   AND project_id = :pid
                    AND LOWER(TRIM(vendor_name)) = :v
                    AND (visibility = 'public' OR (visibility = 'confidential' AND manager_user_id = :uid))
                  LIMIT 1"
             );
-            $check->execute([':oid' => $orgId, ':v' => $vendorNorm, ':uid' => $userId]);
+            $check->execute([':oid' => $orgId, ':pid' => $projectId, ':v' => $vendorNorm, ':uid' => $userId]);
             if (!$check->fetchColumn()) {
                 return [];
             }
@@ -512,10 +520,10 @@ class VendorService
         $stmt = $pdo->prepare(
             'SELECT vendor_name, transaction_date, amount, transaction_type, account, memo, upload_batch_id, created_at
              FROM vendor_raw_transactions
-             WHERE org_id = :oid AND vendor_name_normalized = :v
+             WHERE org_id = :oid AND project_id = :pid AND vendor_name_normalized = :v
              ORDER BY transaction_date DESC, id DESC'
         );
-        $stmt->execute([':oid' => $orgId, ':v' => $vendorNorm]);
+        $stmt->execute([':oid' => $orgId, ':pid' => $projectId, ':v' => $vendorNorm]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         return is_array($rows) ? $rows : [];

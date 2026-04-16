@@ -88,6 +88,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'save_reminder_settings':
                 handleSaveReminderSettings();
                 break;
+            case 'project_list':
+                handleProjectList();
+                break;
+            case 'project_create':
+                handleProjectCreate();
+                break;
+            case 'project_set_active':
+                handleProjectSetActive();
+                break;
         }
     }
 }
@@ -2965,6 +2974,20 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage</button></li>
                             </ul>
                         </li>
+                        <li class="app-nav-item has-submenu" id="appProjectNavItem">
+                            <button type="button" class="app-nav-link" id="appProjectMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appProjectSubmenu">Project</button>
+                            <ul class="app-submenu" id="appProjectSubmenu" role="menu" aria-label="Project actions">
+                                <?php if ($is_admin): ?>
+                                <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appCreateProjectBtn" data-open-modal="appModalProjectWizard">Create New Project</button></li>
+                                <?php endif; ?>
+                                <li role="none">
+                                    <label class="app-submenu-item" style="display:block;">
+                                        <span style="display:block;margin-bottom:6px;">Switch Project</span>
+                                        <select id="projectSwitcherSelect" style="width:100%;"></select>
+                                    </label>
+                                </li>
+                            </ul>
+                        </li>
                         <li class="app-nav-item has-submenu" id="appDataNavItem">
                             <button type="button" class="app-nav-link" id="appDataMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appDataSubmenu">Data</button>
                             <ul class="app-submenu" id="appDataSubmenu" role="menu" aria-label="Data actions">
@@ -3050,6 +3073,72 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             
             <script>
             let rowCount = 0;
+            let currentActiveProjectId = null;
+            const isAdminUser = <?php echo $is_admin ? 'true' : 'false'; ?>;
+            const autoStartProjectWizard = <?php echo !empty($_SESSION['project_onboarding_required']) ? 'true' : 'false'; ?>;
+
+            function postJson(data) {
+                return fetch(window.location.href, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                }).then(function(r) { return r.json(); });
+            }
+
+            function loadProjectsIntoMenu() {
+                return postJson({ action: 'project_list' })
+                    .then(function(d) {
+                        if (!d || !d.success) return;
+                        const sel = document.getElementById('projectSwitcherSelect');
+                        if (!sel) return;
+                        sel.innerHTML = '';
+                        (d.projects || []).forEach(function(p) {
+                            const opt = document.createElement('option');
+                            opt.value = String(p.id);
+                            opt.textContent = p.name;
+                            if (parseInt(p.id, 10) === parseInt(d.active_project_id || 0, 10)) {
+                                opt.selected = true;
+                            }
+                            sel.appendChild(opt);
+                        });
+                        currentActiveProjectId = parseInt(d.active_project_id || 0, 10) || null;
+                    })
+                    .catch(function() {});
+            }
+
+            function submitProjectWizardForm() {
+                const form = document.getElementById('projectWizardForm');
+                if (!form) return;
+                const memberSel = document.getElementById('projectWizardMembers');
+                const memberIds = [];
+                if (memberSel) {
+                    Array.from(memberSel.selectedOptions || []).forEach(function(opt) {
+                        memberIds.push(parseInt(opt.value, 10));
+                    });
+                }
+                const payload = {
+                    action: 'project_create',
+                    project_name: (document.getElementById('projectWizardName') || {}).value || '',
+                    start_date: (document.getElementById('projectWizardStartDate') || {}).value || '',
+                    end_date: (document.getElementById('projectWizardEndDate') || {}).value || '',
+                    member_ids: memberIds,
+                    copy_from_active: ((document.getElementById('projectWizardCopyFromActive') || {}).checked ? 1 : 0),
+                    source_project_id: currentActiveProjectId || 0,
+                };
+                postJson(payload)
+                    .then(function(d) {
+                        if (!d || !d.success) {
+                            showSnackbar((d && d.error) || 'Could not create project.', 'error');
+                            return;
+                        }
+                        showSnackbar("You're done! Project created.", 'success');
+                        closeAppModal('appModalProjectWizard');
+                        loadProjectsIntoMenu().then(function() { loadCalculatorData(); });
+                    })
+                    .catch(function() {
+                        showSnackbar('Could not create project.', 'error');
+                    });
+            }
             function resetAppModalPosition(modal) {
                 if (!modal) return;
                 modal.style.position = '';
@@ -4015,7 +4104,42 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 initAppModals();
                 initNavSubmenus();
                 initPurposeColumnToggle();
+                loadProjectsIntoMenu().then(function() {
+                    if (autoStartProjectWizard && isAdminUser) {
+                        openAppModal('appModalProjectWizard');
+                    }
+                });
                 syncBulkManagerOptions();
+                const projectSwitcher = document.getElementById('projectSwitcherSelect');
+                if (projectSwitcher) {
+                    projectSwitcher.addEventListener('change', function() {
+                        const nextProjectId = parseInt(this.value, 10) || 0;
+                        if (!nextProjectId) return;
+                        postJson({ action: 'project_set_active', project_id: nextProjectId })
+                            .then(function(d) {
+                                if (!d || !d.success) {
+                                    showSnackbar((d && d.error) || 'Could not switch project.', 'error');
+                                    return;
+                                }
+                                currentActiveProjectId = nextProjectId;
+                                loadCalculatorData();
+                            })
+                            .catch(function() {
+                                showSnackbar('Could not switch project.', 'error');
+                            });
+                    });
+                }
+                const projectWizardForm = document.getElementById('projectWizardForm');
+                if (projectWizardForm) {
+                    const startDateInput = document.getElementById('projectWizardStartDate');
+                    if (startDateInput && !startDateInput.value) {
+                        startDateInput.value = new Date().toISOString().slice(0, 10);
+                    }
+                    projectWizardForm.addEventListener('submit', function(e) {
+                        e.preventDefault();
+                        submitProjectWizardForm();
+                    });
+                }
                 const selectAll = document.getElementById('selectAllVendors');
                 if (selectAll) {
                     selectAll.addEventListener('change', function() {
@@ -4422,6 +4546,50 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         </tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay" id="appModalProjectWizard" role="dialog" aria-modal="true" aria-labelledby="appModalProjectWizardTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalProjectWizardTitle">Create New Project</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <form id="projectWizardForm" style="display:grid;gap:10px;">
+                    <label>Project name
+                        <input type="text" id="projectWizardName" required maxlength="255" placeholder="Example: FY2026 Savings">
+                    </label>
+                    <label>Start date
+                        <input type="date" id="projectWizardStartDate" required>
+                    </label>
+                    <label>End date
+                        <input type="date" id="projectWizardEndDate">
+                    </label>
+                    <label>
+                        <input type="checkbox" id="projectWizardUploadDataHint">
+                        I will upload data after creating this project.
+                    </label>
+                    <?php if ($is_admin): ?>
+                    <label>
+                        <input type="checkbox" id="projectWizardCopyFromActive">
+                        Copy data from current active project.
+                    </label>
+                    <?php endif; ?>
+                    <label>Assign members
+                        <select id="projectWizardMembers" multiple size="6">
+                            <?php foreach ($team_members_rows as $tm): ?>
+                            <option value="<?php echo (int) ($tm['id'] ?? 0); ?>"><?php echo htmlspecialchars(($tm['display_name'] ?? $tm['username'] ?? 'Member') . ' (' . ($tm['email'] ?? '') . ')'); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <p style="margin:0;color:#4b5563;font-size:13px;">Select one or more members. Users not assigned will not be able to access this project.</p>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                        <button type="button" class="btn-secondary app-modal-close">Cancel</button>
+                        <button type="submit">You're done!</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
