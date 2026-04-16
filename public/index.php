@@ -3107,6 +3107,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             sel.appendChild(opt);
                         });
                         currentActiveProjectId = parseInt(d.active_project_id || 0, 10) || null;
+                        const hasNoProjects = !Array.isArray(d.projects) || d.projects.length === 0;
+                        if (isAdminUser && (d.onboarding_required || hasNoProjects)) {
+                            openAppModal('appModalProjectWizard');
+                        }
                     })
                     .catch(function() {});
             }
