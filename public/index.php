@@ -398,6 +398,10 @@ try {
 $current_view = 'login';
 $is_logged_in = !empty($_SESSION['user_id']) || !empty($_SESSION['user_email']);
 if ($is_logged_in) {
+    if (!empty($_SESSION['project_onboarding_required']) && (($_SESSION['role'] ?? '') === 'admin')) {
+        unset($_SESSION['awaiting_role']);
+        $current_view = 'placeholder';
+    } else {
     if (empty($_SESSION['user_role'])) {
         $email = $_SESSION['user_email'] ?? '';
         if ($email !== '') {
@@ -412,6 +416,7 @@ if ($is_logged_in) {
         $current_view = 'login';
     } else {
         $current_view = 'placeholder';
+    }
     }
 }
 
