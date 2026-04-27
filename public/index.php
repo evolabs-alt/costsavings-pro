@@ -3321,7 +3321,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         <?php elseif ($current_view === 'placeholder'): ?>
             <div class="content-padding">
-                <h1>Cost Savings Pro Tool</h1>
+                <h1 id="costSavingsTitle">Cost Savings Pro Tool - Project: <span id="activeProjectNameLabel">No project selected</span></h1>
                 <p class="subtitle" style="margin-bottom:16px;">Signed in as <?php echo htmlspecialchars($_SESSION['username'] ?? $_SESSION['user_email'] ?? ''); ?>
                     <?php if ($is_admin): ?> (Admin)<?php endif; ?></p>
 
@@ -3466,12 +3466,30 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             sel.appendChild(opt);
                         });
                         currentActiveProjectId = parseInt(d.active_project_id || 0, 10) || null;
+                        updateActiveProjectHeader(sel);
                         const hasNoProjects = !Array.isArray(d.projects) || d.projects.length === 0;
                         if (isAdminUser && (d.onboarding_required || hasNoProjects)) {
                             openAppModal('appModalProjectWizard');
                         }
                     })
                     .catch(function() {});
+            }
+
+            function updateActiveProjectHeader(projectSource) {
+                const label = document.getElementById('activeProjectNameLabel');
+                if (!label) return;
+
+                let projectName = '';
+                if (typeof projectSource === 'string') {
+                    projectName = projectSource;
+                } else if (projectSource && typeof projectSource === 'object' && 'selectedIndex' in projectSource) {
+                    const idx = projectSource.selectedIndex;
+                    const opt = idx >= 0 ? projectSource.options[idx] : null;
+                    projectName = opt ? String(opt.text || '') : '';
+                }
+
+                projectName = projectName.trim();
+                label.textContent = projectName !== '' ? projectName : 'No project selected';
             }
 
             function submitProjectWizardForm() {
@@ -4530,6 +4548,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     return;
                                 }
                                 currentActiveProjectId = nextProjectId;
+                                updateActiveProjectHeader(selectedName);
                                 loadCalculatorData();
                                 showSnackbar('Switched to ' + selectedName, 'success');
                             })
