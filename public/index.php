@@ -61,6 +61,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'load_vendor_raw_data':
                 handleLoadVendorRawData();
                 break;
+            case 'load_vendor_chat_messages':
+                handleLoadVendorChatMessages();
+                break;
+            case 'add_vendor_chat_message':
+                handleAddVendorChatMessage();
+                break;
             case 'invite_member':
                 handleInviteMember();
                 break;
@@ -424,14 +430,18 @@ $is_admin = ($is_logged_in && ($_SESSION['role'] ?? '') === 'admin');
 
 $deadline_reminders_org = true;
 $deadline_reminders_user = true;
+$notification_webhook_url = '';
 if ($is_logged_in && !empty($_SESSION['org_id'])) {
     try {
         $pdoView = getDBConnection();
-        $st = $pdoView->prepare('SELECT deadline_reminders_enabled FROM organizations WHERE id = ?');
+        $st = $pdoView->prepare('SELECT deadline_reminders_enabled, notification_webhook_url FROM organizations WHERE id = ?');
         $st->execute([(int) $_SESSION['org_id']]);
         $or = $st->fetch(PDO::FETCH_ASSOC);
         if ($or && isset($or['deadline_reminders_enabled'])) {
             $deadline_reminders_org = (bool) $or['deadline_reminders_enabled'];
+        }
+        if ($or && isset($or['notification_webhook_url'])) {
+            $notification_webhook_url = trim((string) $or['notification_webhook_url']);
         }
         if (!empty($_SESSION['user_id'])) {
             $st2 = $pdoView->prepare('SELECT deadline_reminders_enabled FROM users WHERE id = ?');
@@ -802,6 +812,60 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             cursor: not-allowed;
         }
 
+        .cost-calculator-grid .vendor-chat-col {
+            width: 64px;
+            min-width: 64px;
+            text-align: center;
+        }
+
+        .cost-calculator-grid .vendor-chat-btn {
+            width: 34px;
+            height: 34px;
+            border: 1px solid #d1d5db;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #ffffff 0%, #f3f4f6 100%);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+        }
+
+        .cost-calculator-grid .vendor-chat-btn:hover:not(:disabled) {
+            transform: translateY(-1px);
+            border-color: #8b78be;
+            box-shadow: 0 6px 16px rgba(75, 63, 107, 0.22);
+        }
+
+        .cost-calculator-grid .vendor-chat-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .cost-calculator-grid .vendor-chat-glyph {
+            position: relative;
+            width: 15px;
+            height: 11px;
+            border: 2px solid #6b5b95;
+            border-radius: 7px;
+            background: #fff;
+            display: inline-block;
+        }
+
+        .cost-calculator-grid .vendor-chat-glyph::before {
+            content: '';
+            position: absolute;
+            bottom: -5px;
+            left: 2px;
+            width: 5px;
+            height: 5px;
+            border-left: 2px solid #6b5b95;
+            border-bottom: 2px solid #6b5b95;
+            background: #fff;
+            transform: skewX(-24deg);
+        }
+
         .vendor-raw-results {
             overflow-x: auto;
         }
@@ -852,50 +916,87 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             min-width: 90px;
         }
 
-        .cost-calculator-grid .cancel-keep {
-            min-width: 90px;
+        .cost-calculator-grid .row-status {
+            min-width: 150px;
         }
 
-        .cost-calculator-grid .cancel-keep .cancelled-status-inline {
-            margin-top: 6px;
+        .cost-calculator-grid .row-status .row-status-top {
             display: flex;
             align-items: center;
+            gap: 6px;
+        }
+
+        .cost-calculator-grid .row-status .row-status-select {
+            width: 100%;
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .cost-calculator-grid .cancel-guidance-btn {
+            width: 28px;
+            height: 28px;
+            border: 1px solid #d7dce6;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            display: inline-flex;
+            align-items: center;
             justify-content: center;
-            gap: 4px;
-            font-size: 11px;
-            color: #6b7280;
-            font-weight: 500;
+            cursor: pointer;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+            flex: 0 0 auto;
         }
 
-        .cost-calculator-grid .cancel-keep .cancelled-status-inline input[type="checkbox"] {
+        .cost-calculator-grid .cancel-guidance-btn:hover {
+            transform: translateY(-1px);
+            border-color: #f59e0b;
+            box-shadow: 0 6px 12px rgba(245, 158, 11, 0.22);
+        }
+
+        .cost-calculator-grid .cancel-guidance-btn[hidden] {
+            display: none;
+        }
+
+        .cost-calculator-grid .cancel-guidance-glyph {
+            position: relative;
             width: 14px;
-            height: 14px;
-            cursor: pointer;
+            height: 12px;
+            border: 2px solid #f59e0b;
+            border-radius: 2px;
+            transform: rotate(-2deg);
         }
 
-        .cost-calculator-grid .cancel-keep .cancelled-status-inline input[type="checkbox"]:disabled {
-            cursor: not-allowed;
-            opacity: 0.35;
+        .cost-calculator-grid .cancel-guidance-glyph::before {
+            content: '';
+            position: absolute;
+            left: 2px;
+            right: 2px;
+            top: 2px;
+            height: 2px;
+            background: #f59e0b;
+            box-shadow: 0 3px 0 #f59e0b, 0 6px 0 #f59e0b;
         }
 
-        .cost-calculator-grid .cancel-deadline {
-            min-width: 110px;
+        .cost-calculator-grid .cancel-guidance-glyph::after {
+            content: '';
+            position: absolute;
+            right: -3px;
+            top: -3px;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #ef4444;
+            border: 1px solid #fff;
         }
 
-        .cost-calculator-grid .cancelled-status {
-            min-width: 90px;
-            text-align: center;
+        .cost-calculator-grid .row-status .cancel-deadline-input {
+            display: block;
+            width: 100%;
+            margin-top: 4px;
+            box-sizing: border-box;
         }
 
-        .cost-calculator-grid .cancelled-status input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-        }
-
-        .cost-calculator-grid .cancelled-status input[type="checkbox"]:disabled {
-            cursor: not-allowed;
-            opacity: 0.35;
+        .cost-calculator-grid .row-status .cancel-deadline-input[hidden] {
+            display: none;
         }
 
         /* Filter dropdown styles */
@@ -1169,12 +1270,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 min-width: 85px;
             }
 
-            .cost-calculator-grid .cancel-keep {
-                min-width: 80px;
-            }
-
-            .cost-calculator-grid .cancel-deadline {
-                min-width: 100px;
+            .cost-calculator-grid .row-status {
+                min-width: 130px;
             }
 
             .report-filters {
@@ -2181,6 +2278,229 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             cursor: not-allowed;
         }
 
+        .vendor-chat-shell {
+            display: grid;
+            gap: 12px;
+            min-height: 420px;
+        }
+
+        .vendor-chat-meta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #f5f3ff 0%, #eef2ff 100%);
+            color: #4a3f6b;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .vendor-chat-meta-badge {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #6b5b95;
+            position: relative;
+            flex: 0 0 24px;
+        }
+
+        .vendor-chat-meta-badge::before {
+            content: '';
+            position: absolute;
+            top: 7px;
+            left: 5px;
+            width: 12px;
+            height: 8px;
+            border: 2px solid #fff;
+            border-radius: 6px;
+            box-sizing: border-box;
+        }
+
+        .vendor-chat-meta-badge::after {
+            content: '';
+            position: absolute;
+            top: 14px;
+            left: 8px;
+            width: 4px;
+            height: 4px;
+            border-left: 2px solid #fff;
+            border-bottom: 2px solid #fff;
+            transform: skewX(-20deg);
+        }
+
+        .vendor-chat-log {
+            min-height: 250px;
+            max-height: 390px;
+            overflow-y: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            background: radial-gradient(circle at top right, #f7f5ff 0%, #f8fafc 52%, #f1f5f9 100%);
+            padding: 12px;
+        }
+
+        .vendor-chat-row {
+            display: flex;
+            margin-bottom: 12px;
+        }
+
+        .vendor-chat-row.is-self {
+            justify-content: flex-end;
+        }
+
+        .vendor-chat-row.is-other {
+            justify-content: flex-start;
+        }
+
+        .vendor-chat-bubble {
+            max-width: min(78%, 560px);
+            border-radius: 14px;
+            padding: 10px 12px;
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .vendor-chat-row.is-self .vendor-chat-bubble {
+            background: linear-gradient(135deg, #6b5b95 0%, #4a3f6b 100%);
+            color: #fff;
+            border-bottom-right-radius: 4px;
+        }
+
+        .vendor-chat-row.is-other .vendor-chat-bubble {
+            background: #fff;
+            color: #1f2937;
+            border: 1px solid #e5e7eb;
+            border-bottom-left-radius: 4px;
+        }
+
+        .vendor-chat-author {
+            font-size: 12px;
+            font-weight: 700;
+            margin-bottom: 3px;
+        }
+
+        .vendor-chat-time {
+            font-size: 11px;
+            margin-top: 6px;
+            opacity: 0.78;
+        }
+
+        .vendor-chat-empty {
+            min-height: 226px;
+            border: 1px dashed #c4b5fd;
+            border-radius: 12px;
+            background: #faf5ff;
+            display: grid;
+            place-items: center;
+            text-align: center;
+            color: #5b4e7d;
+            font-size: 14px;
+            padding: 20px;
+            line-height: 1.45;
+        }
+
+        .vendor-chat-composer {
+            display: grid;
+            gap: 8px;
+        }
+
+        .vendor-chat-input {
+            width: 100%;
+            min-height: 76px;
+            max-height: 160px;
+            resize: vertical;
+            border: 1px solid #d1d5db;
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+
+        .vendor-chat-input:focus {
+            outline: none;
+            border-color: #6b5b95;
+            box-shadow: 0 0 0 2px rgba(107, 91, 149, 0.18);
+        }
+
+        .vendor-chat-composer-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .vendor-chat-hint {
+            font-size: 12px;
+            color: #64748b;
+        }
+
+        .vendor-chat-send-btn {
+            min-width: 120px;
+            border: none;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #6b5b95 0%, #4a3f6b 100%);
+            color: #fff;
+            padding: 9px 14px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .vendor-chat-send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .vendor-cancel-ai-shell {
+            display: grid;
+            gap: 12px;
+            min-height: 260px;
+        }
+
+        .vendor-cancel-ai-context {
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 10px 12px;
+            background: linear-gradient(135deg, #fffbeb 0%, #f8fafc 100%);
+            color: #78350f;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .vendor-cancel-ai-content {
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            background: #fff;
+            min-height: 180px;
+            max-height: 420px;
+            overflow-y: auto;
+            padding: 12px;
+            line-height: 1.55;
+            color: #1f2937;
+        }
+
+        .vendor-cancel-ai-content p {
+            margin: 0 0 10px 0;
+        }
+
+        .vendor-cancel-ai-content p:last-child {
+            margin-bottom: 0;
+        }
+
+        .vendor-cancel-ai-content ul,
+        .vendor-cancel-ai-content ol {
+            margin: 0 0 10px 20px;
+            padding: 0;
+        }
+
+        .vendor-cancel-ai-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
         .question-limit-notice {
             font-size: 12px;
             color: #666;
@@ -2381,6 +2701,43 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             background: #f1ebfd;
             color: #352a55;
             outline: none;
+        }
+
+        .app-submenu-label {
+            display: block;
+            margin: 0 0 6px 0;
+            font-size: 12px;
+            font-weight: 600;
+            color: #4a3f6b;
+        }
+
+        .app-submenu-select {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 100%;
+            min-height: 34px;
+            padding: 6px 30px 6px 10px;
+            border: 1px solid #c7b5e4;
+            border-radius: 8px;
+            background-color: #fff;
+            background-image:
+                linear-gradient(45deg, transparent 50%, #5b4a84 50%),
+                linear-gradient(135deg, #5b4a84 50%, transparent 50%);
+            background-position:
+                calc(100% - 16px) calc(50% - 2px),
+                calc(100% - 11px) calc(50% - 2px);
+            background-size: 5px 5px, 5px 5px;
+            background-repeat: no-repeat;
+            color: #352a55;
+            font-size: 13px;
+            line-height: 1.2;
+            cursor: pointer;
+        }
+
+        .app-submenu-select:focus {
+            outline: none;
+            border-color: #7b62b4;
+            box-shadow: 0 0 0 3px rgba(123, 98, 180, 0.18);
         }
 
         .app-modal-overlay {
@@ -2986,9 +3343,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appCreateProjectBtn" data-open-modal="appModalProjectWizard">Create New Project</button></li>
                                 <?php endif; ?>
                                 <li role="none">
-                                    <label class="app-submenu-item" style="display:block;">
-                                        <span style="display:block;margin-bottom:6px;">Switch Project</span>
-                                        <select id="projectSwitcherSelect" style="width:100%;"></select>
+                                    <label class="app-submenu-item" for="projectSwitcherSelect">
+                                        <span class="app-submenu-label">Switch Project</span>
+                                        <select id="projectSwitcherSelect" class="app-submenu-select"></select>
                                     </label>
                                 </li>
                             </ul>
@@ -3028,9 +3385,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <label for="reportFilter">Report Filters:</label>
                     <select id="reportFilter" onchange="filterTableRows(this.value)">
                         <option value="all">All</option>
+                        <option value="pending">Pending</option>
+                        <option value="unknown">Unknown</option>
                         <option value="keep">Keep</option>
-                        <option value="pending_cancelled">Pending Cancelled</option>
-                        <option value="confirmed_cancelled">Confirmed Cancelled</option>
+                        <option value="mark_for_cancellation">Mark for Cancellation</option>
+                        <option value="cancelled">Cancelled</option>
                     </select>
                     <button type="button" class="bulk-action-btn" data-open-modal="appModalBulkActions">Bulk Actions</button>
                     <button type="button" id="togglePurposeColumnBtn" class="column-toggle-btn" aria-pressed="false">Show Purpose</button>
@@ -3050,9 +3409,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <th class="annual-cost">Annual Cost</th>
                             <th class="manager-col">Manager</th>
                             <th class="visibility-col">Visibility</th>
-                            <th class="cancel-keep" title="Cancel = cancel this cost">Cancel/Keep</th>
-                            <th class="cancel-deadline">Deadline</th>
+                            <th class="row-status" title="Vendor status: Pending, Unknown, Keep, Mark for Cancellation, or Cancelled">Status</th>
                             <th class="notes">Purpose</th>
+                            <th class="vendor-chat-col">Chat</th>
                         </tr>
                     </thead>
                     <tbody id="calculatorRows">
@@ -3174,6 +3533,19 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 resetAppModalPosition(modal);
                 overlay.classList.remove('is-open');
                 overlay.setAttribute('aria-hidden', 'true');
+                if (overlay.id === 'appModalVendorChat') {
+                    activeVendorChatItemId = 0;
+                    activeVendorChatVendorName = '';
+                    vendorChatLastSignature = '';
+                    if (vendorChatPollTimer) {
+                        clearInterval(vendorChatPollTimer);
+                        vendorChatPollTimer = null;
+                    }
+                }
+                if (overlay.id === 'appModalCancelGuidance') {
+                    activeCancelGuidanceItemId = 0;
+                    activeCancelGuidanceVendorName = '';
+                }
                 if (!document.querySelector('.app-modal-overlay.is-open')) {
                     document.body.style.overflow = '';
                 }
@@ -3352,6 +3724,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             const IS_ADMIN = <?php echo $is_admin ? 'true' : 'false'; ?>;
             const CURRENT_USER_ID = <?php echo (int) ($_SESSION['user_id'] ?? 0); ?>;
             let pendingBulkActionData = null;
+            let activeVendorChatItemId = 0;
+            let activeVendorChatVendorName = '';
+            let vendorChatPollTimer = null;
+            let vendorChatRequestInFlight = false;
+            let vendorChatLastSignature = '';
+            let activeCancelGuidanceItemId = 0;
+            let activeCancelGuidanceVendorName = '';
 
             function getVendorRowCheckboxes() {
                 return Array.from(document.querySelectorAll('#calculatorRows .row-select-checkbox'));
@@ -3529,6 +3908,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <option value="quarterly">Quarterly</option>
                             <option value="semi_annual">Semi-annual</option>
                             <option value="annually">Annually</option>
+                            <option value="one_off">One-off</option>
                         </select>
                     </td>
                     <td class="annual-cost">
@@ -3545,22 +3925,34 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <option value="confidential">Confidential</option>
                         </select>
                     </td>
-                    <td class="cancel-keep">
-                        <select name="cancel_keep[]" class="cancel-keep-select" data-row="${rowCount}">
-                            <option value="Keep">Keep</option>
-                            <option value="Cancel">Cancel</option>
-                        </select>
-                        <label class="cancelled-status-inline" title="Confirmed cancellation">
-                            <input type="checkbox" name="cancelled_status[]" class="cancelled-status-checkbox" data-row="${rowCount}" />
-                            <span>Confirmed</span>
-                        </label>
-                    </td>
-                    <td class="cancel-deadline">
-                        <input type="date" class="cancel-deadline-input" data-row="${rowCount}" />
+                    <td class="row-status">
+                        <div class="row-status-top">
+                            <select name="status[]" class="row-status-select" data-row="${rowCount}">
+                                <option value="pending">Pending</option>
+                                <option value="unknown">Unknown</option>
+                                <option value="keep">Keep</option>
+                                <option value="mark_for_cancellation">Mark for Cancellation</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                            <button type="button" class="cancel-guidance-btn" aria-label="Show cancellation guidance" title="Show AI cancellation guidance for this vendor" hidden>
+                                <span class="cancel-guidance-glyph" aria-hidden="true"></span>
+                            </button>
+                        </div>
+                        <input type="date"
+                               class="cancel-deadline-input row-status-deadline"
+                               data-row="${rowCount}"
+                               aria-label="Cancellation deadline"
+                               title="Cancellation deadline"
+                               hidden />
                     </td>
                     <td class="notes">
                         <textarea name="notes[]" class="purpose-textarea" rows="2" placeholder="Purpose of subscription"></textarea>
                         <input type="hidden" class="last-payment-input" data-row="${rowCount}" />
+                    </td>
+                    <td class="vendor-chat-col">
+                        <button type="button" class="vendor-chat-btn" disabled title="Save this row first to enable chat" aria-label="Open vendor chat">
+                            <span class="vendor-chat-glyph" aria-hidden="true"></span>
+                        </button>
                     </td>
                 `;
                 
@@ -3569,27 +3961,26 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 // Attach event listeners (with auto-save)
                 attachRowListenersWithSave(row);
                 updateVendorDrilldownState(row);
+                syncRowDeadlineVisibility(row);
+                syncRowCancellationGuidanceVisibility(row);
                 const rowCheckbox = row.querySelector('.row-select-checkbox');
                 if (rowCheckbox) rowCheckbox.addEventListener('change', updateSelectAllCheckboxState);
 
-                // New rows default to "Keep" — disable Confirmed checkbox immediately
-                syncConfirmedCheckbox(row);
-                
-                // Update row numbers
                 updateRowNumbers();
             }
             
             function attachRowListeners(row) {
                 const costInput = row.querySelector('.cost-input');
                 const frequencySelect = row.querySelector('.frequency-select');
-                const cancelKeepSelect = row.querySelector('.cancel-keep-select');
-                const cancelledStatusCheckbox = row.querySelector('.cancelled-status-checkbox');
-                
+                const statusSelect = row.querySelector('.row-status-select');
+
                 costInput.addEventListener('input', calculateAnnualCost);
                 frequencySelect.addEventListener('change', calculateAnnualCost);
-                cancelKeepSelect.addEventListener('change', calculateAnnualSavings);
-                if (cancelledStatusCheckbox) {
-                    cancelledStatusCheckbox.addEventListener('change', calculateConfirmedSavings);
+                if (statusSelect) {
+                    statusSelect.addEventListener('change', function() {
+                        calculateAnnualSavings();
+                        calculateConfirmedSavings();
+                    });
                 }
             }
             
@@ -3609,6 +4000,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     case 'quarterly': multiplier = 4; break;
                     case 'semi_annual': multiplier = 2; break;
                     case 'annually': multiplier = 1; break;
+                    case 'one_off': multiplier = 1; break;
                 }
                 
                 const annualCost = cost * multiplier;
@@ -3620,35 +4012,35 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             function calculateAnnualSavings() {
                 const rows = document.querySelectorAll('#calculatorRows tr');
                 let totalSavings = 0;
-                
+
                 rows.forEach(row => {
-                    const cancelKeep = row.querySelector('.cancel-keep-select').value;
+                    const status = getRowStatus(row);
                     const annualCostText = row.querySelector('.annual-cost-display').textContent;
                     const annualCost = parseFloat(annualCostText.replace(/[^0-9.-]/g, '')) || 0;
-                    
-                    if (cancelKeep === 'Cancel') {
+
+                    if (status === 'mark_for_cancellation') {
                         totalSavings += annualCost;
                     }
                 });
-                
+
                 document.getElementById('potentialSavings').textContent = formatCurrency(totalSavings);
-                calculateConfirmedSavings(); // Recalculate confirmed savings when potential changes
+                calculateConfirmedSavings();
             }
 
             function calculateConfirmedSavings() {
                 const rows = document.querySelectorAll('#calculatorRows tr');
                 let totalConfirmedSavings = 0;
-                
+
                 rows.forEach(row => {
-                    const cancelledCheckbox = row.querySelector('.cancelled-status-checkbox');
+                    const status = getRowStatus(row);
                     const annualCostText = row.querySelector('.annual-cost-display').textContent;
                     const annualCost = parseFloat(annualCostText.replace(/[^0-9.-]/g, '')) || 0;
-                    
-                    if (cancelledCheckbox && cancelledCheckbox.checked) {
+
+                    if (status === 'cancelled') {
                         totalConfirmedSavings += annualCost;
                     }
                 });
-                
+
                 document.getElementById('confirmedSavings').textContent = formatCurrency(totalConfirmedSavings);
             }
             
@@ -3683,7 +4075,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
             }, true);
             
-            // Auto-save function (debounced — fast refresh could miss this; see flushSaveOnLeave + immediate save on Cancel/Keep)
+            // Auto-save function (debounced — fast refresh could miss this; see flushSaveOnLeave + immediate save on Status change)
             let saveTimeout;
             /** True while repopulating rows from the server — avoids save races (partial DELETE/INSERT) from synthetic events. */
             let calculatorLoadInProgress = false;
@@ -3713,27 +4105,44 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 return saveQueue;
             }
             
-            function getCancelKeepFromRow(row) {
-                const sel = row.querySelector('select.cancel-keep-select');
-                if (!sel) {
-                    return 'Keep';
-                }
-                let v = (sel.value !== undefined && sel.value !== null && sel.value !== '') ? String(sel.value).trim() : '';
-                if (v !== 'Keep' && v !== 'Cancel') {
-                    const idx = sel.selectedIndex;
-                    if (idx >= 0 && sel.options[idx]) {
-                        const opt = sel.options[idx];
-                        const ov = String(opt.value || '').trim();
-                        if (ov === 'Cancel' || ov === 'Keep') {
-                            v = ov;
-                        } else {
-                            const t = String(opt.text || opt.textContent || '').trim().toLowerCase();
-                            if (t === 'cancel') v = 'Cancel';
-                            else if (t === 'keep') v = 'Keep';
-                        }
-                    }
-                }
-                return (v === 'Cancel') ? 'Cancel' : 'Keep';
+            const VALID_ROW_STATUSES = ['pending', 'unknown', 'keep', 'mark_for_cancellation', 'cancelled'];
+
+            function normalizeStatusToken(value) {
+                if (value === undefined || value === null) return 'pending';
+                let s = String(value).trim().toLowerCase().replace(/[\s-]+/g, '_');
+                if (VALID_ROW_STATUSES.indexOf(s) !== -1) return s;
+                if (s === '1') return 'keep';
+                if (s === '0' || s === 'cancel' || s === 'mark') return 'mark_for_cancellation';
+                if (s === 'confirmed_cancelled' || s === 'cancelled_confirmed') return 'cancelled';
+                return 'pending';
+            }
+
+            function getRowStatus(row) {
+                const sel = row.querySelector('select.row-status-select');
+                if (!sel) return 'pending';
+                return normalizeStatusToken(sel.value);
+            }
+
+            function syncRowDeadlineVisibility(row) {
+                if (!row) return;
+                const dl = row.querySelector('.cancel-deadline-input');
+                if (!dl) return;
+                dl.hidden = (getRowStatus(row) !== 'mark_for_cancellation');
+            }
+
+            function syncRowCancellationGuidanceVisibility(row) {
+                if (!row) return;
+                const btn = row.querySelector('.cancel-guidance-btn');
+                if (!btn) return;
+                btn.hidden = (getRowStatus(row) !== 'mark_for_cancellation');
+            }
+
+            function statusToLegacyCancelKeep(status) {
+                return (status === 'mark_for_cancellation' || status === 'cancelled') ? 'Cancel' : 'Keep';
+            }
+
+            function statusToLegacyCancelledStatus(status) {
+                return status === 'cancelled' ? 1 : 0;
             }
             
             function performSaveCalculatorData(keepalive, silent) {
@@ -3744,7 +4153,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     const vendorInput = row.querySelector('input[name="vendor[]"]');
                     const costInput = row.querySelector('.cost-input');
                     const frequencySelect = row.querySelector('.frequency-select');
-                    const cancelledCheckbox = row.querySelector('.cancelled-status-checkbox');
                     const notesTextarea = row.querySelector('textarea.purpose-textarea') || row.querySelector('textarea[name="notes[]"]');
                     const annualCostDisplay = row.querySelector('.annual-cost-display');
                     const rowIdEl = row.querySelector('.row-db-id');
@@ -3752,12 +4160,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     const visSel = row.querySelector('.visibility-select');
                     const deadlineIn = row.querySelector('.cancel-deadline-input');
                     const lastPayIn = row.querySelector('.last-payment-input');
-                    
+
                     const vendorName = vendorInput ? vendorInput.value.trim() : '';
                     const costPerPeriod = costInput ? parseFloat(costInput.value.replace(/[^0-9.-]/g, '')) || 0 : 0;
                     const frequency = frequencySelect ? frequencySelect.value : '';
-                    const cancelKeep = getCancelKeepFromRow(row);
-                    const cancelledStatus = cancelledCheckbox ? cancelledCheckbox.checked : false;
+                    const status = getRowStatus(row);
+                    const cancelKeep = statusToLegacyCancelKeep(status);
+                    const cancelledStatusInt = statusToLegacyCancelledStatus(status);
                     const notes = notesTextarea ? notesTextarea.value.trim() : '';
                     const annualCost = annualCostDisplay ? parseFloat(annualCostDisplay.textContent.replace(/[^0-9.-]/g, '')) || 0 : 0;
                     const idVal = rowIdEl && rowIdEl.value ? parseInt(rowIdEl.value, 10) : null;
@@ -3765,16 +4174,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     const visibility = visSel ? visSel.value : 'public';
                     const cancelDl = deadlineIn && deadlineIn.value ? deadlineIn.value : '';
                     const lastPay = lastPayIn && lastPayIn.value ? lastPayIn.value : '';
-                    
-                    if (vendorName || costPerPeriod > 0 || cancelKeep !== 'Keep' || cancelledStatus || notes || idVal) {
+
+                    if (vendorName || costPerPeriod > 0 || status !== 'pending' || notes || idVal) {
                         const o = {
                             vendor_name: vendorName,
                             cost_per_period: costPerPeriod,
                             frequency: frequency,
                             annual_cost: annualCost,
+                            status: status,
                             cancel_keep: cancelKeep,
                             cancelKeep: cancelKeep,
-                            cancelled_status: cancelledStatus ? 1 : 0,
+                            cancelled_status: cancelledStatusInt,
                             notes: notes,
                             purpose_of_subscription: notes,
                             visibility: visibility,
@@ -3841,7 +4251,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             document.getElementById('calculatorRows').innerHTML = '';
                             rowCount = 0;
                             
-                            // Load saved items (do not dispatch change on cancel/keep — that triggered immediate saves mid-load and corrupted rows)
+                            // Load saved items (do not dispatch change on the status select — that triggered immediate saves mid-load and corrupted rows)
                             data.items.forEach(item => {
                                 addCalculatorRow();
                                 const lastRow = document.querySelector('#calculatorRows tr:last-child');
@@ -3851,8 +4261,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     const vendorInput = lastRow.querySelector('input[name="vendor[]"]');
                                     const costInput = lastRow.querySelector('.cost-input');
                                     const frequencySelect = lastRow.querySelector('.frequency-select');
-                                    const cancelKeepSelect = lastRow.querySelector('.cancel-keep-select');
-                                    const cancelledCheckbox = lastRow.querySelector('.cancelled-status-checkbox');
+                                    const statusSelect = lastRow.querySelector('.row-status-select');
                                     const notesTextarea = lastRow.querySelector('textarea.purpose-textarea');
                                     const mgr = lastRow.querySelector('.manager-select');
                                     const vis = lastRow.querySelector('.visibility-select');
@@ -3877,22 +4286,30 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                         lp.value = d;
                                     }
                                     
-                                    if (cancelKeepSelect) {
-                                        const savedValue = item.cancel_keep ? item.cancel_keep.toString().trim() : 'Keep';
-                                        cancelKeepSelect.value = savedValue;
-                                        if (cancelKeepSelect.value !== savedValue) {
-                                            const options = Array.from(cancelKeepSelect.options);
-                                            const matchingOption = options.find(opt => opt.value === savedValue || opt.value.toLowerCase() === savedValue.toLowerCase());
-                                            if (matchingOption) {
-                                                cancelKeepSelect.value = matchingOption.value;
+                                    if (statusSelect) {
+                                        let resolved = 'pending';
+                                        if (item.status) {
+                                            resolved = normalizeStatusToken(item.status);
+                                        } else {
+                                            // Backward-compat: derive from legacy fields if server didn't send `status`.
+                                            const legacyCk = item.cancel_keep ? String(item.cancel_keep).trim() : 'Keep';
+                                            const legacyConfirmed = (item.cancelled_status == 1 || item.cancelled_status === true);
+                                            if (legacyConfirmed) {
+                                                resolved = 'cancelled';
+                                            } else if (legacyCk === 'Cancel' || legacyCk === '0') {
+                                                resolved = 'mark_for_cancellation';
                                             } else {
-                                                cancelKeepSelect.value = 'Keep';
+                                                resolved = 'keep';
                                             }
                                         }
+                                        statusSelect.value = resolved;
+                                        if (statusSelect.value !== resolved) {
+                                            statusSelect.value = 'pending';
+                                        }
                                     }
-                                    
-                                    syncConfirmedCheckbox(lastRow);
-                                    if (cancelledCheckbox) cancelledCheckbox.checked = (item.cancelled_status == 1 || item.cancelled_status === true);
+                                    syncRowDeadlineVisibility(lastRow);
+                                    syncRowCancellationGuidanceVisibility(lastRow);
+
                                     if (notesTextarea) notesTextarea.value = item.purpose_of_subscription || item.notes || '';
                                     
                                     if (costInput && frequencySelect) {
@@ -3925,23 +4342,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 });
             }
             
-            // Update event listeners to trigger auto-save
-            function syncConfirmedCheckbox(row) {
-                const cancelKeepSelect = row.querySelector('.cancel-keep-select');
-                const cancelledCheckbox = row.querySelector('.cancelled-status-checkbox');
-                if (!cancelKeepSelect || !cancelledCheckbox) return;
-                const isKeep = cancelKeepSelect.value === 'Keep';
-                cancelledCheckbox.disabled = isKeep;
-                if (isKeep) {
-                    cancelledCheckbox.checked = false;
-                }
-            }
-
             function attachRowListenersWithSave(row) {
                 const costInput = row.querySelector('.cost-input');
                 const frequencySelect = row.querySelector('.frequency-select');
-                const cancelKeepSelect = row.querySelector('.cancel-keep-select');
-                const cancelledCheckbox = row.querySelector('.cancelled-status-checkbox');
+                const statusSelect = row.querySelector('.row-status-select');
                 const vendorInput = row.querySelector('input[name="vendor[]"]');
                 const rawBtn = row.querySelector('.vendor-raw-btn');
                 const notesTextarea = row.querySelector('textarea.purpose-textarea');
@@ -3949,7 +4353,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const visSel = row.querySelector('.visibility-select');
                 const dlIn = row.querySelector('.cancel-deadline-input');
                 const lpIn = row.querySelector('.last-payment-input');
-                
+
                 if (costInput) {
                     costInput.addEventListener('input', function(e) {
                         calculateAnnualCost(e);
@@ -3957,34 +4361,30 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     });
                     costInput.addEventListener('blur', autoSave);
                 }
-                
+
                 if (frequencySelect) {
                     frequencySelect.addEventListener('change', function(e) {
                         calculateAnnualCost(e);
                         autoSave();
                     });
                 }
-                
-                if (cancelKeepSelect) {
-                    cancelKeepSelect.addEventListener('change', function(e) {
-                        syncConfirmedCheckbox(row);
-                        calculateAnnualSavings();
-                        clearTimeout(saveTimeout);
-                        saveCalculatorData();
-                        // Update filter if active
-                        const filterSelect = document.getElementById('reportFilter');
-                        if (filterSelect) {
-                            filterTableRows(filterSelect.value);
+
+                if (statusSelect) {
+                    statusSelect.addEventListener('change', function() {
+                        syncRowDeadlineVisibility(row);
+                        syncRowCancellationGuidanceVisibility(row);
+                        const newStatus = getRowStatus(row);
+                        if (newStatus === 'mark_for_cancellation' && dlIn && !dlIn.value) {
+                            // Server requires a deadline for Mark for Cancellation; nudge the user.
+                            try { dlIn.focus(); } catch (_) {}
+                            if (typeof showSnackbar === 'function') {
+                                showSnackbar('A cancellation deadline is required for Mark for Cancellation.', 'info');
+                            }
                         }
-                    });
-                }
-                
-                if (cancelledCheckbox) {
-                    cancelledCheckbox.addEventListener('change', function(e) {
+                        calculateAnnualSavings();
                         calculateConfirmedSavings();
                         clearTimeout(saveTimeout);
                         saveCalculatorData();
-                        // Update filter if active
                         const filterSelect = document.getElementById('reportFilter');
                         if (filterSelect) {
                             filterTableRows(filterSelect.value);
@@ -4027,6 +4427,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const idEl = row.querySelector('.row-db-id');
                 const vendorInput = row.querySelector('input[name="vendor[]"]');
                 const rawBtn = row.querySelector('.vendor-raw-btn');
+                const chatBtn = row.querySelector('.vendor-chat-btn');
+                const cancelGuideBtn = row.querySelector('.cancel-guidance-btn');
                 if (!rawBtn || !vendorInput) return;
                 const idVal = idEl && idEl.value ? parseInt(idEl.value, 10) : 0;
                 const vendorName = vendorInput.value ? vendorInput.value.trim() : '';
@@ -4035,6 +4437,19 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 rawBtn.disabled = false;
                 rawBtn.setAttribute('data-vendor-name', enabled ? vendorName : '');
                 rawBtn.title = enabled ? ('View raw transactions for ' + vendorName) : 'Enter a vendor name first';
+                if (chatBtn) {
+                    const canChat = idVal > 0;
+                    chatBtn.disabled = !canChat;
+                    chatBtn.setAttribute('data-vendor-item-id', canChat ? String(idVal) : '');
+                    chatBtn.setAttribute('data-vendor-name', enabled ? vendorName : '');
+                    chatBtn.title = canChat
+                        ? ('Open vendor chat for ' + (vendorName || 'this vendor'))
+                        : 'Save this row first to enable chat';
+                }
+                if (cancelGuideBtn) {
+                    cancelGuideBtn.setAttribute('data-vendor-item-id', idVal > 0 ? String(idVal) : '');
+                    cancelGuideBtn.setAttribute('data-vendor-name', enabled ? vendorName : '');
+                }
             }
             
             // Override attachRowListeners to use the new version with auto-save
@@ -4044,38 +4459,20 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             // Filter table rows based on selected filter
             function filterTableRows(filterValue) {
                 const rows = document.querySelectorAll('#calculatorRows tr');
+                const filter = String(filterValue || 'all');
                 rows.forEach(row => {
-                    const cancelKeepSelect = row.querySelector('.cancel-keep-select');
-                    const cancelledCheckbox = row.querySelector('.cancelled-status-checkbox');
-                    
+                    const status = getRowStatus(row);
                     let showRow = false;
-                    
-                    switch(filterValue) {
-                        case 'all':
-                            showRow = true;
-                            break;
-                        case 'keep':
-                            if (cancelKeepSelect && cancelKeepSelect.value === 'Keep') {
-                                showRow = true;
-                            }
-                            break;
-                        case 'pending_cancelled':
-                            if (cancelKeepSelect && cancelKeepSelect.value === 'Cancel' && 
-                                cancelledCheckbox && !cancelledCheckbox.checked) {
-                                showRow = true;
-                            }
-                            break;
-                        case 'confirmed_cancelled':
-                            if (cancelledCheckbox && cancelledCheckbox.checked) {
-                                showRow = true;
-                            }
-                            break;
+
+                    if (filter === 'all') {
+                        showRow = true;
+                    } else if (VALID_ROW_STATUSES.indexOf(filter) !== -1) {
+                        showRow = (status === filter);
                     }
-                    
+
                     row.style.display = showRow ? '' : 'none';
                 });
-                
-                // Update row numbers after filtering
+
                 updateRowNumbers();
             }
 
@@ -4121,9 +4518,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 syncBulkManagerOptions();
                 const projectSwitcher = document.getElementById('projectSwitcherSelect');
                 if (projectSwitcher) {
-                    projectSwitcher.addEventListener('change', function() {
+                    const handleProjectSwitch = function() {
                         const nextProjectId = parseInt(this.value, 10) || 0;
                         if (!nextProjectId) return;
+                        if (currentActiveProjectId && nextProjectId === currentActiveProjectId) return;
+                        const selectedName = this.options[this.selectedIndex] ? this.options[this.selectedIndex].text : 'project';
                         postJson({ action: 'project_set_active', project_id: nextProjectId })
                             .then(function(d) {
                                 if (!d || !d.success) {
@@ -4132,11 +4531,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 }
                                 currentActiveProjectId = nextProjectId;
                                 loadCalculatorData();
+                                showSnackbar('Switched to ' + selectedName, 'success');
                             })
                             .catch(function() {
                                 showSnackbar('Could not switch project.', 'error');
                             });
-                    });
+                    };
+                    // Some browsers commit selection on input; others on change.
+                    projectSwitcher.addEventListener('input', handleProjectSwitch);
+                    projectSwitcher.addEventListener('change', handleProjectSwitch);
                 }
                 const projectWizardForm = document.getElementById('projectWizardForm');
                 if (projectWizardForm) {
@@ -4196,15 +4599,30 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 if (calculatorRowsEl) {
                     calculatorRowsEl.addEventListener('click', function(e) {
                         const rawBtn = e.target.closest('.vendor-raw-btn');
-                        if (!rawBtn) return;
-                        const row = rawBtn.closest('tr');
-                        const vendorInput = row ? row.querySelector('input[name="vendor[]"]') : null;
-                        const vendorName = ((rawBtn.getAttribute('data-vendor-name') || '').trim() || (vendorInput ? vendorInput.value.trim() : ''));
-                        if (!vendorName) {
-                            showSnackbar('Enter a vendor name first.', 'error');
+                        if (rawBtn) {
+                            const row = rawBtn.closest('tr');
+                            const vendorInput = row ? row.querySelector('input[name="vendor[]"]') : null;
+                            const vendorName = ((rawBtn.getAttribute('data-vendor-name') || '').trim() || (vendorInput ? vendorInput.value.trim() : ''));
+                            if (!vendorName) {
+                                showSnackbar('Enter a vendor name first.', 'error');
+                                return;
+                            }
+                            loadVendorRawDataModal(vendorName);
                             return;
                         }
-                        loadVendorRawDataModal(vendorName);
+                        const chatBtn = e.target.closest('.vendor-chat-btn');
+                        if (chatBtn) {
+                            const row = chatBtn.closest('tr');
+                            if (!row) return;
+                            openVendorChatModalForRow(row);
+                            return;
+                        }
+                        const cancelGuideBtn = e.target.closest('.cancel-guidance-btn');
+                        if (cancelGuideBtn) {
+                            const row = cancelGuideBtn.closest('tr');
+                            if (!row) return;
+                            openCancelGuidanceModalForRow(row);
+                        }
                     });
                 }
                 loadCalculatorData();
@@ -4235,6 +4653,305 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     var d = document.createElement('div');
                     d.textContent = s;
                     return d.innerHTML;
+                }
+                function formatVendorChatTimestamp(rawValue) {
+                    var raw = String(rawValue || '').trim();
+                    if (!raw) return '';
+                    var normalized = raw.indexOf('T') !== -1 ? raw : raw.replace(' ', 'T');
+                    var dt = new Date(normalized);
+                    if (isNaN(dt.getTime())) return raw;
+                    return dt.toLocaleString([], {
+                        year: 'numeric',
+                        month: 'short',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                    });
+                }
+                function appendVendorChatMessage(msg) {
+                    var log = document.getElementById('vendorChatLog');
+                    if (!log || !msg) return;
+                    var row = document.createElement('div');
+                    var mine = parseInt(msg.user_id || 0, 10) === CURRENT_USER_ID;
+                    row.className = 'vendor-chat-row ' + (mine ? 'is-self' : 'is-other');
+                    var bubble = document.createElement('div');
+                    bubble.className = 'vendor-chat-bubble';
+                    var author = document.createElement('div');
+                    author.className = 'vendor-chat-author';
+                    author.textContent = String(msg.username || 'User');
+                    var body = document.createElement('div');
+                    body.className = 'vendor-chat-text';
+                    body.textContent = String(msg.message || '');
+                    var stamp = document.createElement('div');
+                    stamp.className = 'vendor-chat-time';
+                    stamp.textContent = formatVendorChatTimestamp(msg.created_at);
+                    bubble.appendChild(author);
+                    bubble.appendChild(body);
+                    bubble.appendChild(stamp);
+                    row.appendChild(bubble);
+                    log.appendChild(row);
+                }
+                function renderVendorChatMessages(messages) {
+                    var log = document.getElementById('vendorChatLog');
+                    if (!log) return;
+                    log.innerHTML = '';
+                    if (!Array.isArray(messages) || !messages.length) {
+                        var empty = document.createElement('div');
+                        empty.className = 'vendor-chat-empty';
+                        empty.textContent = 'No notes yet for this vendor. Start the conversation by adding the first note.';
+                        log.appendChild(empty);
+                        return;
+                    }
+                    messages.forEach(function(msg) { appendVendorChatMessage(msg); });
+                    log.scrollTop = log.scrollHeight;
+                }
+                function setVendorChatBusy(busy) {
+                    var sendBtn = document.getElementById('vendorChatSendBtn');
+                    var input = document.getElementById('vendorChatInput');
+                    if (sendBtn) sendBtn.disabled = !!busy;
+                    if (input) input.disabled = !!busy;
+                }
+                function isVendorChatModalOpen() {
+                    var overlay = document.getElementById('appModalVendorChat');
+                    return !!(overlay && overlay.classList.contains('is-open'));
+                }
+                function stopVendorChatPolling() {
+                    if (vendorChatPollTimer) {
+                        clearInterval(vendorChatPollTimer);
+                        vendorChatPollTimer = null;
+                    }
+                }
+                function startVendorChatPolling() {
+                    stopVendorChatPolling();
+                    if (!activeVendorChatItemId) return;
+                    vendorChatPollTimer = window.setInterval(function() {
+                        if (!activeVendorChatItemId || !isVendorChatModalOpen()) {
+                            stopVendorChatPolling();
+                            return;
+                        }
+                        if (vendorChatRequestInFlight) return;
+                        loadVendorChatMessages(activeVendorChatItemId, { silent: true, preserveScroll: true });
+                    }, 10000);
+                }
+                function loadVendorChatMessages(vendorItemId, options) {
+                    options = options || {};
+                    var title = document.getElementById('appModalVendorChatTitle');
+                    var log = document.getElementById('vendorChatLog');
+                    if (!vendorItemId || !log) return;
+                    var isSilent = !!options.silent;
+                    var preserveScroll = !!options.preserveScroll;
+                    if (!isSilent) {
+                        log.innerHTML = '<div class="vendor-chat-empty">Loading chat history...</div>';
+                    }
+                    var previousTop = log.scrollTop;
+                    var wasNearBottom = (log.scrollHeight - log.scrollTop - log.clientHeight) < 24;
+                    vendorChatRequestInFlight = true;
+                    var fd = new FormData();
+                    fd.append('action', 'load_vendor_chat_messages');
+                    fd.append('vendor_item_id', String(vendorItemId));
+                    fetch(window.location.href, { method: 'POST', body: fd })
+                        .then(function(r) { return r.json(); })
+                        .then(function(d) {
+                            vendorChatRequestInFlight = false;
+                            if (!d || !d.success) {
+                                if (!isSilent) {
+                                    renderVendorChatMessages([]);
+                                    showSnackbar((d && d.error) || 'Could not load vendor chat.', 'error');
+                                }
+                                return;
+                            }
+                            if (!isVendorChatModalOpen() || activeVendorChatItemId !== vendorItemId) {
+                                return;
+                            }
+                            if (title && d.vendor_name) {
+                                title.textContent = 'Vendor Chat - ' + d.vendor_name;
+                            }
+                            var messages = Array.isArray(d.messages) ? d.messages : [];
+                            var signature = messages.map(function(m) {
+                                return String(m.id || '') + '|' + String(m.created_at || '');
+                            }).join(',');
+                            if (signature === vendorChatLastSignature) {
+                                return;
+                            }
+                            vendorChatLastSignature = signature;
+                            renderVendorChatMessages(messages);
+                            if (preserveScroll && !wasNearBottom) {
+                                log.scrollTop = previousTop;
+                            }
+                        })
+                        .catch(function() {
+                            vendorChatRequestInFlight = false;
+                            if (!isSilent) {
+                                renderVendorChatMessages([]);
+                                showSnackbar('Could not load vendor chat.', 'error');
+                            }
+                        });
+                }
+                function openVendorChatModalForRow(row) {
+                    if (!row) return;
+                    var idEl = row.querySelector('.row-db-id');
+                    var vendorInput = row.querySelector('input[name="vendor[]"]');
+                    var vendorItemId = idEl && idEl.value ? parseInt(idEl.value, 10) : 0;
+                    var vendorName = vendorInput ? vendorInput.value.trim() : '';
+                    if (!vendorItemId) {
+                        showSnackbar('Save this vendor row first, then open chat.', 'info');
+                        return;
+                    }
+                    var overlay = document.getElementById('appModalVendorChat');
+                    var title = document.getElementById('appModalVendorChatTitle');
+                    var context = document.getElementById('vendorChatContextName');
+                    var input = document.getElementById('vendorChatInput');
+                    if (!overlay) return;
+                    activeVendorChatItemId = vendorItemId;
+                    activeVendorChatVendorName = vendorName || '';
+                    if (title) title.textContent = 'Vendor Chat - ' + (vendorName || ('Row #' + vendorItemId));
+                    if (context) context.textContent = vendorName || ('Vendor item #' + vendorItemId);
+                    if (input) input.value = '';
+                    vendorChatLastSignature = '';
+                    openAppModal(overlay);
+                    loadVendorChatMessages(vendorItemId);
+                    startVendorChatPolling();
+                    if (input) input.focus();
+                }
+                function sendVendorChatMessage() {
+                    var input = document.getElementById('vendorChatInput');
+                    if (!input) return;
+                    var text = input.value.trim();
+                    if (!activeVendorChatItemId) {
+                        showSnackbar('No vendor row selected for chat.', 'error');
+                        return;
+                    }
+                    if (!text) {
+                        showSnackbar('Enter a message before sending.', 'error');
+                        return;
+                    }
+                    setVendorChatBusy(true);
+                    var fd = new FormData();
+                    fd.append('action', 'add_vendor_chat_message');
+                    fd.append('vendor_item_id', String(activeVendorChatItemId));
+                    fd.append('message', text);
+                    fetch(window.location.href, { method: 'POST', body: fd })
+                        .then(function(r) { return r.json(); })
+                        .then(function(d) {
+                            setVendorChatBusy(false);
+                            if (!d || !d.success) {
+                                showSnackbar((d && d.error) || 'Could not send chat message.', 'error');
+                                return;
+                            }
+                            input.value = '';
+                            if (d.vendor_name) {
+                                activeVendorChatVendorName = String(d.vendor_name);
+                                var title = document.getElementById('appModalVendorChatTitle');
+                                var context = document.getElementById('vendorChatContextName');
+                                if (title) title.textContent = 'Vendor Chat - ' + activeVendorChatVendorName;
+                                if (context) context.textContent = activeVendorChatVendorName;
+                            }
+                            if (d.message) {
+                                var log = document.getElementById('vendorChatLog');
+                                if (log && log.querySelector('.vendor-chat-empty')) {
+                                    log.innerHTML = '';
+                                }
+                                appendVendorChatMessage(d.message);
+                                vendorChatLastSignature = '';
+                                log = document.getElementById('vendorChatLog');
+                                if (log) log.scrollTop = log.scrollHeight;
+                            } else {
+                                loadVendorChatMessages(activeVendorChatItemId);
+                            }
+                        })
+                        .catch(function() {
+                            setVendorChatBusy(false);
+                            showSnackbar('Could not send chat message.', 'error');
+                        });
+                }
+                var vendorChatSendBtn = document.getElementById('vendorChatSendBtn');
+                if (vendorChatSendBtn) {
+                    vendorChatSendBtn.addEventListener('click', function() {
+                        sendVendorChatMessage();
+                    });
+                }
+                var vendorChatInput = document.getElementById('vendorChatInput');
+                if (vendorChatInput) {
+                    vendorChatInput.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            sendVendorChatMessage();
+                        }
+                    });
+                }
+                function setCancelGuidanceLoading(messageHtml) {
+                    var body = document.getElementById('cancelGuidanceBody');
+                    var retryBtn = document.getElementById('cancelGuidanceRetryBtn');
+                    if (body) body.innerHTML = messageHtml;
+                    if (retryBtn) retryBtn.disabled = true;
+                }
+                function setCancelGuidanceReady(html) {
+                    var body = document.getElementById('cancelGuidanceBody');
+                    var retryBtn = document.getElementById('cancelGuidanceRetryBtn');
+                    if (body) body.innerHTML = html;
+                    if (retryBtn) retryBtn.disabled = false;
+                }
+                function fetchCancelGuidanceForActiveRow() {
+                    if (!activeCancelGuidanceItemId) {
+                        setCancelGuidanceReady('<p>No vendor row selected.</p>');
+                        return;
+                    }
+                    setCancelGuidanceLoading('<p>Generating AI cancellation guidance...</p>');
+                    var fd = new FormData();
+                    fd.append('action', 'ai_ask');
+                    fd.append('preset', 'cancel_steps');
+                    fd.append('question', '');
+                    fd.append('focus_item_id', String(activeCancelGuidanceItemId));
+                    fetch(window.location.href, { method: 'POST', body: fd })
+                        .then(function(r) { return r.json(); })
+                        .then(function(d) {
+                            updateAiUsageBar(d || {});
+                            if (!d || !d.success) {
+                                var msg = '<p>' + aiEscapeHtml((d && d.error) || 'Could not load cancellation guidance.') + '</p>';
+                                setCancelGuidanceReady(msg);
+                                showSnackbar((d && d.error) || 'Could not load cancellation guidance.', 'error');
+                                return;
+                            }
+                            setCancelGuidanceReady(d.reply || '<p>No guidance returned.</p>');
+                        })
+                        .catch(function() {
+                            setCancelGuidanceReady('<p>Could not load cancellation guidance.</p>');
+                            showSnackbar('Could not load cancellation guidance.', 'error');
+                        });
+                }
+                function openCancelGuidanceModalForRow(row) {
+                    if (!row) return;
+                    var status = getRowStatus(row);
+                    if (status !== 'mark_for_cancellation') {
+                        showSnackbar('Guidance is only available for Mark for Cancellation.', 'info');
+                        return;
+                    }
+                    var idEl = row.querySelector('.row-db-id');
+                    var vendorInput = row.querySelector('input[name="vendor[]"]');
+                    var vendorItemId = idEl && idEl.value ? parseInt(idEl.value, 10) : 0;
+                    var vendorName = vendorInput ? vendorInput.value.trim() : '';
+                    if (!vendorItemId) {
+                        showSnackbar('Save this vendor row first to get cancellation guidance.', 'info');
+                        return;
+                    }
+                    var overlay = document.getElementById('appModalCancelGuidance');
+                    var title = document.getElementById('appModalCancelGuidanceTitle');
+                    var context = document.getElementById('cancelGuidanceContext');
+                    if (!overlay) return;
+                    activeCancelGuidanceItemId = vendorItemId;
+                    activeCancelGuidanceVendorName = vendorName || '';
+                    if (title) title.textContent = 'Cancellation Guidance - ' + (vendorName || ('Vendor #' + vendorItemId));
+                    if (context) context.textContent = vendorName
+                        ? ('Vendor: ' + vendorName)
+                        : ('Vendor item #' + vendorItemId);
+                    openAppModal(overlay);
+                    fetchCancelGuidanceForActiveRow();
+                }
+                var cancelGuidanceRetryBtn = document.getElementById('cancelGuidanceRetryBtn');
+                if (cancelGuidanceRetryBtn) {
+                    cancelGuidanceRetryBtn.addEventListener('click', function() {
+                        fetchCancelGuidanceForActiveRow();
+                    });
                 }
                 function loadVendorRawDataModal(vendorName) {
                     var overlay = document.getElementById('appModalVendorRaw');
@@ -4392,7 +5109,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 var unresolved = Array.isArray(d.unresolved) ? d.unresolved.length : 0;
                                 var applied = typeof d.applied === 'number' ? d.applied : 0;
                                 var changed = typeof d.updated === 'number' ? d.updated : 0;
+                                var resolvedList = Array.isArray(d.resolved) ? d.resolved : [];
+                                var unknownCount = resolvedList.filter(function(r) {
+                                    return r && r.source === 'fallback_unknown';
+                                }).length;
                                 var statusText = 'Auto populate finished. Applied to ' + applied + ' rows.';
+                                if (unknownCount) {
+                                    statusText += ' ' + unknownCount + ' marked as Unknown.';
+                                }
                                 if (changed !== applied) {
                                     statusText += ' ' + changed + ' rows had DB value changes.';
                                 }
@@ -4637,13 +5361,27 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             </div>
             <div class="app-modal-body">
                 <div class="settings-block">
-                    <form method="POST" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
+                    <form method="POST" style="display:grid;gap:10px;">
                         <input type="hidden" name="action" value="save_reminder_settings">
                         <?php if ($is_admin): ?>
                         <label><input type="checkbox" name="deadline_reminders_enabled" value="1" <?php echo $deadline_reminders_org ? 'checked' : ''; ?>> Org: deadline email assistant</label>
+                        <label style="display:grid;gap:6px;font-size:14px;">
+                            <span>Webhook for notifications</span>
+                            <input
+                                type="url"
+                                name="notification_webhook_url"
+                                value="<?php echo htmlspecialchars($notification_webhook_url); ?>"
+                                placeholder="https://your-endpoint.example/webhook"
+                                style="min-width:320px;"
+                            >
+                            <small style="color:#6b7280;line-height:1.45;">
+                                Sends vendor and project details when a vendor is marked for cancellation.
+                                Example endpoints: Slack Incoming Webhook URL, Asana automation webhook endpoint, Notion automation webhook URL, Evernote integration webhook URL.
+                            </small>
+                        </label>
                         <?php endif; ?>
                         <label style="font-size:14px;"><input type="checkbox" name="user_deadline_reminders" value="1" <?php echo $deadline_reminders_user ? 'checked' : ''; ?>> My deadline reminders</label>
-                        <button type="submit">Save</button>
+                        <div><button type="submit">Save</button></div>
                     </form>
                 </div>
             </div>
@@ -4678,6 +5416,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 <option value="quarterly">Quarterly</option>
                                 <option value="semi_annual">Semi-annual</option>
                                 <option value="annually">Annually</option>
+                                <option value="one_off">One-off</option>
                             </select>
                         </div>
                         <div id="bulkVisibilityWrap" style="display:none;">
@@ -4712,6 +5451,51 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <div class="bulk-actions-buttons" style="margin-top:12px;">
                     <button type="button" class="btn-secondary" id="bulkConfirmCancelBtn">Cancel</button>
                     <button type="button" id="bulkConfirmProceedBtn">Proceed</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay" id="appModalVendorChat" role="dialog" aria-modal="true" aria-labelledby="appModalVendorChatTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalVendorChatTitle">Vendor Chat</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <div class="vendor-chat-shell">
+                    <div class="vendor-chat-meta">
+                        <span class="vendor-chat-meta-badge" aria-hidden="true"></span>
+                        <span id="vendorChatContextName">Select a vendor row to view notes.</span>
+                    </div>
+                    <div id="vendorChatLog" class="vendor-chat-log" aria-live="polite"></div>
+                    <div class="vendor-chat-composer">
+                        <textarea id="vendorChatInput" class="vendor-chat-input" maxlength="2000" placeholder="Write a note for this vendor. Press Enter to send, Shift+Enter for a new line."></textarea>
+                        <div class="vendor-chat-composer-actions">
+                            <span class="vendor-chat-hint">Shared notes include author and timestamp.</span>
+                            <button type="button" id="vendorChatSendBtn" class="vendor-chat-send-btn">Send Note</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay" id="appModalCancelGuidance" role="dialog" aria-modal="true" aria-labelledby="appModalCancelGuidanceTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalCancelGuidanceTitle">Cancellation Guidance</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <div class="vendor-cancel-ai-shell">
+                    <div id="cancelGuidanceContext" class="vendor-cancel-ai-context">Select a vendor row marked for cancellation.</div>
+                    <div id="cancelGuidanceBody" class="vendor-cancel-ai-content" aria-live="polite">
+                        <p>AI cancellation guidance will appear here.</p>
+                    </div>
+                    <div class="vendor-cancel-ai-actions">
+                        <button type="button" id="cancelGuidanceRetryBtn" class="btn-secondary">Refresh Guidance</button>
+                    </div>
                 </div>
             </div>
         </div>

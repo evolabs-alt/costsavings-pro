@@ -199,8 +199,8 @@ class ProjectService
         }
         $email = self::userEmail($pdo, $actingUserId);
         $sql = 'INSERT INTO cost_calculator_items
-            (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
-            SELECT org_id, :to_project_id, :acting_user_id, :acting_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date
+            (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
+            SELECT org_id, :to_project_id, :acting_user_id, :acting_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date
             FROM cost_calculator_items
             WHERE org_id = :org_id AND project_id = :from_project_id';
         try {

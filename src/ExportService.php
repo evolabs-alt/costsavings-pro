@@ -19,17 +19,19 @@ class ExportService
         $sh = $ss->getActiveSheet();
         $sh->setTitle('Vendors');
         $rows = [[
-            'Vendor', 'Cost per period', 'Frequency', 'Annual cost', 'Cancel/Keep', 'Confirmed',
+            'Vendor', 'Cost per period', 'Frequency', 'Annual cost', 'Status',
             'Visibility', 'Manager ID', 'Purpose', 'Cancel deadline', 'Last payment',
         ]];
         foreach ($items as $it) {
+            $status = isset($it['status']) && $it['status'] !== ''
+                ? VendorService::normalizeStatus($it['status'])
+                : VendorService::resolveStatusFromItem(is_array($it) ? $it : []);
             $rows[] = [
                 $it['vendor_name'] ?? '',
                 $it['cost_per_period'] ?? 0,
                 $it['frequency'] ?? '',
                 $it['annual_cost'] ?? 0,
-                $it['cancel_keep'] ?? '',
-                !empty($it['cancelled_status']) ? 'Yes' : 'No',
+                VendorService::statusLabel($status),
                 $it['visibility'] ?? '',
                 $it['manager_user_id'] ?? '',
                 $it['purpose_of_subscription'] ?? $it['notes'] ?? '',
@@ -53,16 +55,19 @@ class ExportService
     {
         $html = '<html><head><meta charset="UTF-8"><style>body{font-family:DejaVu Sans,sans-serif;font-size:10px;} table{border-collapse:collapse;width:100%;} th,td{border:1px solid #333;padding:4px;}</style></head><body>';
         $html .= '<h2>Vendor list</h2><table><thead><tr>';
-        foreach (['Vendor', 'Annual', 'Frequency', 'Keep/Cancel', 'Purpose'] as $h) {
+        foreach (['Vendor', 'Annual', 'Frequency', 'Status', 'Purpose'] as $h) {
             $html .= '<th>' . htmlspecialchars($h) . '</th>';
         }
         $html .= '</tr></thead><tbody>';
         foreach ($items as $it) {
+            $status = isset($it['status']) && $it['status'] !== ''
+                ? VendorService::normalizeStatus($it['status'])
+                : VendorService::resolveStatusFromItem(is_array($it) ? $it : []);
             $html .= '<tr>';
             $html .= '<td>' . htmlspecialchars((string) ($it['vendor_name'] ?? '')) . '</td>';
             $html .= '<td>' . htmlspecialchars((string) ($it['annual_cost'] ?? '')) . '</td>';
             $html .= '<td>' . htmlspecialchars((string) ($it['frequency'] ?? '')) . '</td>';
-            $html .= '<td>' . htmlspecialchars((string) ($it['cancel_keep'] ?? '')) . '</td>';
+            $html .= '<td>' . htmlspecialchars(VendorService::statusLabel($status)) . '</td>';
             $p = $it['purpose_of_subscription'] ?? $it['notes'] ?? '';
             $html .= '<td>' . htmlspecialchars((string) $p) . '</td>';
             $html .= '</tr>';
@@ -83,11 +88,12 @@ class ExportService
         foreach ($items as $it) {
             $a = (float) ($it['annual_cost'] ?? 0);
             $totalAnnual += $a;
-            $ck = $it['cancel_keep'] ?? 'Keep';
-            if ($ck === 'Cancel') {
+            $status = isset($it['status']) && $it['status'] !== ''
+                ? VendorService::normalizeStatus($it['status'])
+                : VendorService::resolveStatusFromItem(is_array($it) ? $it : []);
+            if ($status === VendorService::STATUS_MARK) {
                 $pendingCancel += $a;
-            }
-            if (!empty($it['cancelled_status'])) {
+            } elseif ($status === VendorService::STATUS_CANCELLED) {
                 $confirmed += $a;
             }
         }
@@ -95,7 +101,7 @@ class ExportService
         $html = '<html><head><meta charset="UTF-8"><style>body{font-family:DejaVu Sans,sans-serif;font-size:11px;line-height:1.4;} h1{color:#238FBE;}</style></head><body>';
         $html .= '<h1>Executive summary</h1>';
         $html .= '<p><strong>Total annualized spend (visible vendors):</strong> $' . number_format($totalAnnual, 2) . '</p>';
-        $html .= '<p><strong>Potential annual savings (marked Cancel, not yet confirmed):</strong> $' . number_format($pendingCancel, 2) . '</p>';
+        $html .= '<p><strong>Potential annual savings (Mark for Cancellation, not yet confirmed):</strong> $' . number_format($pendingCancel, 2) . '</p>';
         $html .= '<p><strong>Confirmed annual savings:</strong> $' . number_format($confirmed, 2) . '</p>';
         $html .= '<p>Review vendor rows for overlap, duplicate subscriptions, and right-sizing opportunities.</p>';
         $html .= '</body></html>';

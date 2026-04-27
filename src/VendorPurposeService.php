@@ -8,6 +8,13 @@ use PDOException;
 class VendorPurposeService
 {
     /**
+     * Number of vendor names sent to the live AI lookup per request. Smaller
+     * chunks improve resilience (per-call latency, partial failure blast
+     * radius) at the cost of more AI calls overall.
+     */
+    private const LIVE_LOOKUP_CHUNK_SIZE = 10;
+
+    /**
      * @param array<int, array{id:int, vendor_name:string}> $rows
      * @return array{success:bool, resolved:array<int, array{id:int, vendor_name:string, purpose:string, source:string}>, unresolved:array<int, array{id:int, vendor_name:string}>, error?:string}
      */
@@ -55,7 +62,7 @@ class VendorPurposeService
         $lookupNames = array_values(array_unique($lookupNames));
         $byCanonical = [];
         $lookupErrors = [];
-        foreach (array_chunk($lookupNames, 25) as $chunk) {
+        foreach (array_chunk($lookupNames, self::LIVE_LOOKUP_CHUNK_SIZE) as $chunk) {
             $ai = AiService::lookupVendorPurposesLive($chunk);
             if (!$ai['success']) {
                 $lookupErrors[] = (string) ($ai['error'] ?? 'Purpose lookup failed.');
@@ -115,6 +122,49 @@ class VendorPurposeService
             if (!isset($resolvedKeys[(int) $u['id']])) {
                 $left[] = $u;
             }
+        }
+
+        // Backstop: rows the AI couldn't resolve and that have no manually
+        // entered purpose get a synthetic "Unknown" purpose so the row isn't
+        // left blank. Rows with an existing purpose are preserved untouched
+        // and remain in the unresolved list. We deliberately do NOT cache
+        // "Unknown" in vendor_detail so subsequent runs re-attempt the AI
+        // lookup.
+        if (count($left) > 0) {
+            $idList = [];
+            foreach ($left as $u) {
+                $rid = (int) ($u['id'] ?? 0);
+                if ($rid > 0) {
+                    $idList[] = $rid;
+                }
+            }
+            $existing = [];
+            if (count($idList) > 0) {
+                $placeholders = implode(',', array_fill(0, count($idList), '?'));
+                $sql = "SELECT id, COALESCE(purpose_of_subscription, '') AS p
+                        FROM cost_calculator_items
+                        WHERE org_id = ? AND id IN ($placeholders)";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute(array_merge([$orgId], $idList));
+                while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                    $existing[(int) $row['id']] = trim((string) ($row['p'] ?? ''));
+                }
+            }
+            $stillLeft = [];
+            foreach ($left as $u) {
+                $rid = (int) ($u['id'] ?? 0);
+                if ($rid > 0 && ($existing[$rid] ?? '') === '') {
+                    $resolved[] = [
+                        'id' => $rid,
+                        'vendor_name' => (string) ($u['vendor_name'] ?? ''),
+                        'purpose' => 'Unknown',
+                        'source' => 'fallback_unknown',
+                    ];
+                } else {
+                    $stillLeft[] = $u;
+                }
+            }
+            $left = $stillLeft;
         }
 
         if (count($left) > 0 && count($lookupErrors) > 0) {

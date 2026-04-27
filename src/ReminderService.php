@@ -29,8 +29,13 @@ class ReminderService
                     FROM cost_calculator_items cci
                     LEFT JOIN users u ON u.id = cci.manager_user_id
                     WHERE cci.org_id = ?
-                      AND cci.cancel_keep IN ('0','Cancel')
-                      AND (cci.cancelled_status = 0 OR cci.cancelled_status IS NULL)
+                      AND (
+                        cci.status = 'mark_for_cancellation'
+                        OR (
+                          cci.cancel_keep IN ('0','Cancel')
+                          AND (cci.cancelled_status = 0 OR cci.cancelled_status IS NULL)
+                        )
+                      )
                       AND cci.cancellation_deadline IS NOT NULL";
             $st = $pdo->prepare($sql);
             $st->execute([$oid]);
@@ -141,8 +146,13 @@ class ReminderService
             $rows = $q->fetchAll(PDO::FETCH_ASSOC);
             $lines = [];
             foreach ($rows as $row) {
-                $ck = VendorService::normalizeCancelKeep($row['cancel_keep'] ?? 'Keep');
-                if ($ck !== 'Keep') {
+                $status = VendorService::resolveStatusFromRow($row);
+                // Only include items the user is keeping (or has not classified).
+                if (!in_array($status, [
+                    VendorService::STATUS_KEEP,
+                    VendorService::STATUS_PENDING,
+                    VendorService::STATUS_UNKNOWN,
+                ], true)) {
                     continue;
                 }
                 $next = self::estimateNextRenewal($row);
@@ -200,6 +210,9 @@ class ReminderService
                 return $base->modify('+6 months');
             case 'annually':
                 return $base->modify('+1 year');
+            case 'one_off':
+                // One-off purchases do not recur, so there is no next renewal.
+                return null;
             default:
                 return $base->modify('+1 month');
         }

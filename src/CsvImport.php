@@ -188,8 +188,10 @@ class CsvImport
      */
     private static function inferFrequency(array $gaps): string
     {
+        // Vendors with only a single observed transaction are treated as
+        // one-off purchases rather than guessing a recurring cadence.
         if (count($gaps) === 0) {
-            return 'monthly';
+            return 'one_off';
         }
         sort($gaps);
         $med = self::median($gaps);
@@ -221,6 +223,8 @@ class CsvImport
             case 'semi_annual':
                 return 2;
             case 'annually':
+                return 1;
+            case 'one_off':
                 return 1;
             default:
                 return 12;

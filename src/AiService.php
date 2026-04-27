@@ -16,6 +16,7 @@ class AiService
         'lower_tiers' => 'Are there lower tiers of the same service that might fit based on how the vendor is being used (keep list)?',
         'duplicates' => 'Could the user be subscribed to more than one account from the same vendor (duplicate purchases)?',
         'executive' => 'Give a concise executive summary of cost optimization suggestions a savvy CFO would consider for the vendor data provided.',
+        'cancel_steps' => 'Provide a practical cancellation playbook for this vendor: exact preparation checklist, account artifacts to save, cancellation path options, negotiation fallback, and post-cancellation validation steps.',
     ];
 
     /**
@@ -25,13 +26,17 @@ class AiService
     {
         $lines = [];
         foreach ($vendorContext as $v) {
+            $vArr = is_array($v) ? $v : [];
+            $statusToken = isset($vArr['status']) && $vArr['status'] !== ''
+                ? VendorService::normalizeStatus($vArr['status'])
+                : VendorService::resolveStatusFromItem($vArr);
             $lines[] = sprintf(
-                '- %s | annual ~$%s | %s | %s | purpose: %s',
-                $v['vendor_name'] ?? '',
-                number_format((float) ($v['annual_cost'] ?? 0), 2),
-                $v['frequency'] ?? '',
-                $v['cancel_keep'] ?? '',
-                substr((string) ($v['purpose_of_subscription'] ?? $v['notes'] ?? ''), 0, 500)
+                '- %s | annual ~$%s | %s | status: %s | purpose: %s',
+                $vArr['vendor_name'] ?? '',
+                number_format((float) ($vArr['annual_cost'] ?? 0), 2),
+                $vArr['frequency'] ?? '',
+                VendorService::statusLabel($statusToken),
+                substr((string) ($vArr['purpose_of_subscription'] ?? $vArr['notes'] ?? ''), 0, 500)
             );
         }
         $ctx = implode("\n", $lines);

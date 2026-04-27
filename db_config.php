@@ -154,12 +154,18 @@ function migrateSchema(PDO $pdo) {
             `name` VARCHAR(255) NOT NULL DEFAULT 'Organization',
             `max_users` TINYINT UNSIGNED NOT NULL DEFAULT 10,
             `deadline_reminders_enabled` TINYINT(1) NOT NULL DEFAULT 1,
+            `notification_webhook_url` VARCHAR(1024) NULL,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
         $pdo->exec("INSERT INTO `organizations` (`id`, `name`, `max_users`) VALUES (1, 'Default Organization', 10)
             ON DUPLICATE KEY UPDATE `name` = VALUES(`name`)");
+
+        $orgWebhookCol = $pdo->query("SHOW COLUMNS FROM `organizations` LIKE 'notification_webhook_url'")->fetch();
+        if (!$orgWebhookCol) {
+            $pdo->exec('ALTER TABLE `organizations` ADD COLUMN `notification_webhook_url` VARCHAR(1024) NULL AFTER `deadline_reminders_enabled`');
+        }
 
         $hasUserId = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'id'")->fetch();
         if (!$hasUserId) {
@@ -323,6 +329,7 @@ function migrateCostCalculatorSchema(PDO $pdo) {
         `annual_cost` DECIMAL(12, 2) DEFAULT 0.00,
         `cancel_keep` VARCHAR(10) DEFAULT 'Keep',
         `cancelled_status` TINYINT(1) DEFAULT 0,
+        `status` ENUM('pending','unknown','keep','mark_for_cancellation','cancelled') NOT NULL DEFAULT 'pending',
         `visibility` ENUM('public','confidential') NOT NULL DEFAULT 'public',
         `purpose_of_subscription` TEXT NULL,
         `cancellation_deadline` DATE NULL,
@@ -349,6 +356,27 @@ function migrateCostCalculatorSchema(PDO $pdo) {
         $addCol($pdo, 'visibility', "`visibility` ENUM('public','confidential') NOT NULL DEFAULT 'public'");
         $addCol($pdo, 'cancellation_deadline', '`cancellation_deadline` DATE NULL');
         $addCol($pdo, 'last_payment_date', '`last_payment_date` DATE NULL');
+        $addCol(
+            $pdo,
+            'status',
+            "`status` ENUM('pending','unknown','keep','mark_for_cancellation','cancelled') NOT NULL DEFAULT 'pending'"
+        );
+
+        // Backfill status from legacy cancel_keep/cancelled_status pair for rows
+        // that still hold the default 'pending' value (idempotent).
+        $pdo->exec("UPDATE `cost_calculator_items`
+            SET `status` = CASE
+                WHEN (`cancel_keep` IN ('0','Cancel')) AND `cancelled_status` = 1 THEN 'cancelled'
+                WHEN (`cancel_keep` IN ('0','Cancel')) THEN 'mark_for_cancellation'
+                ELSE 'keep'
+            END
+            WHERE `status` IS NULL OR `status` = '' OR `status` = 'pending'");
+
+        try {
+            $pdo->exec('CREATE INDEX `idx_cc_status` ON `cost_calculator_items` (`status`)');
+        } catch (PDOException $e) {
+            // ignore duplicate index attempts
+        }
 
         $notesCol = $pdo->query("SHOW COLUMNS FROM `cost_calculator_items` LIKE 'notes'")->fetch();
         $purposeCol = $pdo->query("SHOW COLUMNS FROM `cost_calculator_items` LIKE 'purpose_of_subscription'")->fetch();
@@ -377,6 +405,7 @@ function migrateCostCalculatorSchema(PDO $pdo) {
 
     migrateVendorDetailSchema($pdo);
     migrateVendorRawTransactionSchema($pdo);
+    migrateVendorChatSchema($pdo);
 }
 
 /**
@@ -438,6 +467,30 @@ function migrateVendorRawTransactionSchema(PDO $pdo): void
         }
     } catch (PDOException $e) {
         error_log('migrateVendorRawTransactionSchema: ' . $e->getMessage());
+    }
+}
+
+/**
+ * @param PDO $pdo
+ */
+function migrateVendorChatSchema(PDO $pdo): void
+{
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `vendor_item_chat_messages` (
+            `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `org_id` INT UNSIGNED NOT NULL,
+            `project_id` INT UNSIGNED NOT NULL,
+            `vendor_item_id` INT NOT NULL,
+            `user_id` INT UNSIGNED NOT NULL,
+            `username_snapshot` VARCHAR(255) NOT NULL,
+            `message` TEXT NOT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY `idx_vicm_vendor_created` (`vendor_item_id`, `created_at`),
+            KEY `idx_vicm_scope_vendor_created` (`org_id`, `project_id`, `vendor_item_id`, `created_at`),
+            KEY `idx_vicm_user` (`user_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    } catch (PDOException $e) {
+        error_log('migrateVendorChatSchema: ' . $e->getMessage());
     }
 }
 

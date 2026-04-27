@@ -7,6 +7,146 @@ use PDOException;
 
 class VendorService
 {
+    public const STATUS_PENDING = 'pending';
+    public const STATUS_UNKNOWN = 'unknown';
+    public const STATUS_KEEP = 'keep';
+    public const STATUS_MARK = 'mark_for_cancellation';
+    public const STATUS_CANCELLED = 'cancelled';
+
+    /**
+     * @return array<int, string>
+     */
+    public static function allStatuses(): array
+    {
+        return [
+            self::STATUS_PENDING,
+            self::STATUS_UNKNOWN,
+            self::STATUS_KEEP,
+            self::STATUS_MARK,
+            self::STATUS_CANCELLED,
+        ];
+    }
+
+    /**
+     * Normalize an arbitrary status-ish input (canonical token, legacy
+     * cancel_keep value, or human label) to one of the canonical tokens.
+     * Defaults to 'pending' for missing/unknown input.
+     */
+    public static function normalizeStatus($value): string
+    {
+        if ($value === null || $value === '') {
+            return self::STATUS_PENDING;
+        }
+        $s = strtolower(trim((string) $value));
+        $s = str_replace([' ', '-'], '_', $s);
+        switch ($s) {
+            case self::STATUS_PENDING:
+                return self::STATUS_PENDING;
+            case self::STATUS_UNKNOWN:
+                return self::STATUS_UNKNOWN;
+            case self::STATUS_KEEP:
+            case '1':
+                return self::STATUS_KEEP;
+            case self::STATUS_MARK:
+            case 'mark':
+            case 'cancel':
+            case 'mark_cancellation':
+            case 'mark_for_cancel':
+            case '0':
+                return self::STATUS_MARK;
+            case self::STATUS_CANCELLED:
+            case 'cancelled_confirmed':
+            case 'confirmed_cancelled':
+                return self::STATUS_CANCELLED;
+        }
+        return self::STATUS_PENDING;
+    }
+
+    /**
+     * Convert canonical status to the legacy (cancel_keep, cancelled_status)
+     * pair so older readers (reminders, exports) stay correct.
+     *
+     * @return array{cancel_keep:string, cancelled_status:int}
+     */
+    public static function statusToLegacy(string $status): array
+    {
+        $s = self::normalizeStatus($status);
+        if ($s === self::STATUS_CANCELLED) {
+            return ['cancel_keep' => 'Cancel', 'cancelled_status' => 1];
+        }
+        if ($s === self::STATUS_MARK) {
+            return ['cancel_keep' => 'Cancel', 'cancelled_status' => 0];
+        }
+        return ['cancel_keep' => 'Keep', 'cancelled_status' => 0];
+    }
+
+    /**
+     * Resolve the canonical status for a stored row. Prefers the new column
+     * and falls back to the legacy pair if `status` is missing/blank.
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function resolveStatusFromRow(array $row): string
+    {
+        $raw = $row['status'] ?? null;
+        if ($raw !== null && $raw !== '') {
+            return self::normalizeStatus($raw);
+        }
+        $ck = self::normalizeCancelKeep($row['cancel_keep'] ?? 'Keep');
+        $confirmed = isset($row['cancelled_status']) ? (int) $row['cancelled_status'] : 0;
+        if ($ck === 'Cancel' && $confirmed === 1) {
+            return self::STATUS_CANCELLED;
+        }
+        if ($ck === 'Cancel') {
+            return self::STATUS_MARK;
+        }
+        return self::STATUS_KEEP;
+    }
+
+    /**
+     * Resolve the canonical status from an inbound payload item which may
+     * carry either the new `status` field or the legacy pair.
+     *
+     * @param array<string, mixed> $item
+     */
+    public static function resolveStatusFromItem(array $item): string
+    {
+        if (isset($item['status']) && $item['status'] !== '') {
+            return self::normalizeStatus($item['status']);
+        }
+        $ck = self::normalizeCancelKeep($item['cancel_keep'] ?? 'Keep');
+        $confirmed = isset($item['cancelled_status']) ? (int) $item['cancelled_status'] : 0;
+        if ($ck === 'Cancel' && $confirmed === 1) {
+            return self::STATUS_CANCELLED;
+        }
+        if ($ck === 'Cancel') {
+            return self::STATUS_MARK;
+        }
+        // No explicit status and legacy says Keep — treat as 'keep' for
+        // existing/edited rows; new rows should arrive with status='pending'.
+        return self::STATUS_KEEP;
+    }
+
+    /**
+     * Human-readable label for a status (used in exports / AI prompts).
+     */
+    public static function statusLabel(string $status): string
+    {
+        switch (self::normalizeStatus($status)) {
+            case self::STATUS_PENDING:
+                return 'Pending';
+            case self::STATUS_UNKNOWN:
+                return 'Unknown';
+            case self::STATUS_KEEP:
+                return 'Keep';
+            case self::STATUS_MARK:
+                return 'Mark for Cancellation';
+            case self::STATUS_CANCELLED:
+                return 'Cancelled';
+        }
+        return 'Pending';
+    }
+
     public static function normalizeCancelKeep($value): string
     {
         if ($value === null || $value === '') {
@@ -55,7 +195,8 @@ class VendorService
      */
     public static function rowToItem(array $row): array
     {
-        $ck = self::normalizeCancelKeep($row['cancel_keep'] ?? 'Keep');
+        $status = self::resolveStatusFromRow($row);
+        $legacy = self::statusToLegacy($status);
         $purpose = $row['purpose_of_subscription'] ?? ($row['notes'] ?? '');
 
         return [
@@ -64,8 +205,10 @@ class VendorService
             'cost_per_period' => (float) $row['cost_per_period'],
             'frequency' => $row['frequency'],
             'annual_cost' => (float) $row['annual_cost'],
-            'cancel_keep' => $ck,
-            'cancelled_status' => isset($row['cancelled_status']) ? (int) $row['cancelled_status'] : 0,
+            'status' => $status,
+            'status_label' => self::statusLabel($status),
+            'cancel_keep' => $legacy['cancel_keep'],
+            'cancelled_status' => $legacy['cancelled_status'],
             'notes' => $purpose,
             'purpose_of_subscription' => $purpose,
             'visibility' => $row['visibility'] ?? 'public',
@@ -83,11 +226,17 @@ class VendorService
     public static function validateItems(array $items): array
     {
         foreach ($items as $item) {
-            $ck = self::normalizeCancelKeep($item['cancel_keep'] ?? 'Keep');
+            if (!is_array($item)) {
+                continue;
+            }
+            $status = self::resolveStatusFromItem($item);
             $deadline = trim((string) ($item['cancellation_deadline'] ?? ''));
 
-            if ($ck === 'Cancel' && $deadline === '') {
-                return ['success' => false, 'error' => 'Cancellation deadline is required when Cancel is selected.'];
+            if ($status === self::STATUS_MARK && $deadline === '') {
+                return [
+                    'success' => false,
+                    'error' => 'Cancellation deadline is required when status is Mark for Cancellation.',
+                ];
             }
         }
 
@@ -107,12 +256,24 @@ class VendorService
 
         $pdo->beginTransaction();
         try {
-            $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE org_id = ? AND project_id = ?');
-            $del->execute([$orgId, $projectId]);
+            $existing = $pdo->prepare(
+                'SELECT id FROM cost_calculator_items WHERE org_id = ? AND project_id = ?'
+            );
+            $existing->execute([$orgId, $projectId]);
+            $allowedIds = [];
+            while ($r = $existing->fetch(PDO::FETCH_ASSOC)) {
+                $allowedIds[(int) $r['id']] = true;
+            }
+
+            $payloadIds = [];
 
             $ins = $pdo->prepare(
-                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+            );
+            $upd = $pdo->prepare(
+                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, vendor_name=?, cost_per_period=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?
+                 WHERE id=? AND org_id=? AND project_id=?'
             );
 
             $email = self::getUserEmail($pdo, $adminUserId);
@@ -122,8 +283,9 @@ class VendorService
                 if (!is_array($item)) {
                     continue;
                 }
-                $ck = self::normalizeCancelKeep($item['cancel_keep'] ?? 'Keep');
-                $cc .= '-' . $ck;
+                $status = self::resolveStatusFromItem($item);
+                $legacy = self::statusToLegacy($status);
+                $cc .= '-' . $legacy['cancel_keep'];
                 $purpose = $item['purpose_of_subscription'] ?? $item['notes'] ?? '';
                 $vis = ($item['visibility'] ?? 'public') === 'confidential' ? 'confidential' : 'public';
                 $mgr = isset($item['manager_user_id']) ? (int) $item['manager_user_id'] : null;
@@ -135,24 +297,62 @@ class VendorService
                 }
                 $deadline = self::normDate($item['cancellation_deadline'] ?? null);
                 $lastPay = self::normDate($item['last_payment_date'] ?? null);
+                $rowId = isset($item['id']) ? (int) $item['id'] : 0;
 
-                $ins->execute([
-                    $orgId,
-                    $projectId,
-                    $adminUserId,
-                    $email,
-                    $mgr,
-                    $item['vendor_name'] ?? '',
-                    (float) ($item['cost_per_period'] ?? 0),
-                    $item['frequency'] ?? '',
-                    (float) ($item['annual_cost'] ?? 0),
-                    self::cancelKeepToDb($ck),
-                    isset($item['cancelled_status']) ? (int) $item['cancelled_status'] : 0,
-                    $vis,
-                    $purpose,
-                    $deadline,
-                    $lastPay,
-                ]);
+                if ($rowId > 0 && isset($allowedIds[$rowId])) {
+                    $payloadIds[$rowId] = true;
+                    $upd->execute([
+                        $adminUserId,
+                        $email,
+                        $mgr,
+                        $item['vendor_name'] ?? '',
+                        (float) ($item['cost_per_period'] ?? 0),
+                        $item['frequency'] ?? '',
+                        (float) ($item['annual_cost'] ?? 0),
+                        $status,
+                        self::cancelKeepToDb($legacy['cancel_keep']),
+                        $legacy['cancelled_status'],
+                        $vis,
+                        $purpose,
+                        $deadline,
+                        $lastPay,
+                        $rowId,
+                        $orgId,
+                        $projectId,
+                    ]);
+                } else {
+                    $ins->execute([
+                        $orgId,
+                        $projectId,
+                        $adminUserId,
+                        $email,
+                        $mgr,
+                        $item['vendor_name'] ?? '',
+                        (float) ($item['cost_per_period'] ?? 0),
+                        $item['frequency'] ?? '',
+                        (float) ($item['annual_cost'] ?? 0),
+                        $status,
+                        self::cancelKeepToDb($legacy['cancel_keep']),
+                        $legacy['cancelled_status'],
+                        $vis,
+                        $purpose,
+                        $deadline,
+                        $lastPay,
+                    ]);
+                    $newId = (int) $pdo->lastInsertId();
+                    if ($newId > 0) {
+                        $payloadIds[$newId] = true;
+                    }
+                }
+            }
+
+            if (count($allowedIds) > 0) {
+                $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE id = ? AND org_id = ? AND project_id = ?');
+                foreach ($allowedIds as $id => $_unused) {
+                    if (!isset($payloadIds[$id])) {
+                        $del->execute([(int) $id, $orgId, $projectId]);
+                    }
+                }
             }
 
             $pdo->commit();
@@ -194,21 +394,22 @@ class VendorService
             $cc = '';
 
             $upd = $pdo->prepare(
-                'UPDATE cost_calculator_items SET vendor_name=?, cost_per_period=?, frequency=?, annual_cost=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?, user_email=?, user_id=?
+                'UPDATE cost_calculator_items SET vendor_name=?, cost_per_period=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?, user_email=?, user_id=?
                  WHERE id=? AND org_id=? AND project_id=? AND manager_user_id=?'
             );
 
             $ins = $pdo->prepare(
-                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
 
             foreach ($items as $item) {
                 if (!is_array($item)) {
                     continue;
                 }
-                $ck = self::normalizeCancelKeep($item['cancel_keep'] ?? 'Keep');
-                $cc .= '-' . $ck;
+                $status = self::resolveStatusFromItem($item);
+                $legacy = self::statusToLegacy($status);
+                $cc .= '-' . $legacy['cancel_keep'];
                 $purpose = $item['purpose_of_subscription'] ?? $item['notes'] ?? '';
                 $vis = ($item['visibility'] ?? 'public') === 'confidential' ? 'confidential' : 'public';
                 $deadline = self::normDate($item['cancellation_deadline'] ?? null);
@@ -225,8 +426,9 @@ class VendorService
                         (float) ($item['cost_per_period'] ?? 0),
                         $item['frequency'] ?? '',
                         (float) ($item['annual_cost'] ?? 0),
-                        self::cancelKeepToDb($ck),
-                        isset($item['cancelled_status']) ? (int) $item['cancelled_status'] : 0,
+                        $status,
+                        self::cancelKeepToDb($legacy['cancel_keep']),
+                        $legacy['cancelled_status'],
                         $vis,
                         $purpose,
                         $deadline,
@@ -249,8 +451,9 @@ class VendorService
                         (float) ($item['cost_per_period'] ?? 0),
                         $item['frequency'] ?? '',
                         (float) ($item['annual_cost'] ?? 0),
-                        self::cancelKeepToDb($ck),
-                        isset($item['cancelled_status']) ? (int) $item['cancelled_status'] : 0,
+                        $status,
+                        self::cancelKeepToDb($legacy['cancel_keep']),
+                        $legacy['cancelled_status'],
                         $vis,
                         $purpose,
                         $deadline,
@@ -309,8 +512,8 @@ class VendorService
     {
         $email = self::getUserEmail($pdo, $userId);
         $ins = $pdo->prepare(
-            'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+            'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         $n = 0;
         try {
@@ -318,7 +521,11 @@ class VendorService
                 if (!is_array($item)) {
                     continue;
                 }
-                $ck = self::normalizeCancelKeep($item['cancel_keep'] ?? 'Keep');
+                // Imports default to 'pending' unless caller specifies otherwise.
+                $status = isset($item['status']) && $item['status'] !== ''
+                    ? self::normalizeStatus($item['status'])
+                    : self::STATUS_PENDING;
+                $legacy = self::statusToLegacy($status);
                 $purpose = $item['purpose_of_subscription'] ?? $item['notes'] ?? '';
                 $vis = ($item['visibility'] ?? 'public') === 'confidential' ? 'confidential' : 'public';
                 $mgr = isset($item['manager_user_id']) ? (int) $item['manager_user_id'] : $userId;
@@ -337,8 +544,9 @@ class VendorService
                     (float) ($item['cost_per_period'] ?? 0),
                     $item['frequency'] ?? '',
                     (float) ($item['annual_cost'] ?? 0),
-                    self::cancelKeepToDb($ck),
-                    isset($item['cancelled_status']) ? (int) $item['cancelled_status'] : 0,
+                    $status,
+                    self::cancelKeepToDb($legacy['cancel_keep']),
+                    $legacy['cancelled_status'],
                     $vis,
                     $purpose,
                     $deadline,

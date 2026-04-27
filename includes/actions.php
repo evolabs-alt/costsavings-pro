@@ -6,6 +6,7 @@ use CostSavings\AiService;
 use CostSavings\CsvImport;
 use CostSavings\ExportService;
 use CostSavings\ProjectService;
+use CostSavings\VendorChatService;
 use CostSavings\VendorPurposeService;
 use CostSavings\VendorService;
 
@@ -53,6 +54,97 @@ function logInviteEvent(string $event, array $context = []): void {
     }
     error_log('[invite] ' . $event . ' ' . json_encode($safe));
     proLog('[invite] ' . $event, $safe);
+}
+
+function normalizeWebhookUrl($raw): string
+{
+    return trim((string) $raw);
+}
+
+function loadOrganizationWebhookUrl(PDO $pdo, int $orgId): string
+{
+    try {
+        $st = $pdo->prepare('SELECT notification_webhook_url FROM organizations WHERE id = ?');
+        $st->execute([$orgId]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            return '';
+        }
+        return trim((string) ($row['notification_webhook_url'] ?? ''));
+    } catch (PDOException $e) {
+        error_log('loadOrganizationWebhookUrl: ' . $e->getMessage());
+        return '';
+    }
+}
+
+function resolveProjectName(PDO $pdo, int $orgId, int $projectId): string
+{
+    try {
+        $st = $pdo->prepare('SELECT name FROM projects WHERE id = ? AND org_id = ? LIMIT 1');
+        $st->execute([$projectId, $orgId]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if ($row && isset($row['name'])) {
+            return trim((string) $row['name']);
+        }
+    } catch (PDOException $e) {
+        error_log('resolveProjectName: ' . $e->getMessage());
+    }
+
+    return 'Project #' . $projectId;
+}
+
+function postWebhookJson(string $url, array $payload): bool
+{
+    $body = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if ($body === false) {
+        error_log('postWebhookJson: failed to encode payload');
+        return false;
+    }
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        if ($ch === false) {
+            return false;
+        }
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_POSTFIELDS => $body,
+            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_TIMEOUT => 4,
+        ]);
+        curl_exec($ch);
+        $errNo = curl_errno($ch);
+        $http = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+        if ($errNo !== 0) {
+            error_log('postWebhookJson curl error: ' . $err);
+            return false;
+        }
+        if ($http >= 400 || $http === 0) {
+            error_log('postWebhookJson HTTP status: ' . $http);
+            return false;
+        }
+        return true;
+    }
+
+    $ctx = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/json\r\n",
+            'content' => $body,
+            'timeout' => 4,
+            'ignore_errors' => true,
+        ],
+    ]);
+    $res = @file_get_contents($url, false, $ctx);
+    if ($res === false) {
+        error_log('postWebhookJson stream request failed');
+        return false;
+    }
+    return true;
 }
 
 function handleLogin() {
@@ -260,6 +352,7 @@ function handleImportVendorCsv() {
             'cost_per_period' => $row['cost_per_period'],
             'frequency' => $row['frequency'],
             'annual_cost' => $row['annual_cost'],
+            'status' => 'pending',
             'cancel_keep' => 'Keep',
             'cancelled_status' => 0,
             'purpose_of_subscription' => $purposeMap[mb_strtolower(trim((string) $row['vendor_name']), 'UTF-8')] ?? '',
@@ -358,6 +451,7 @@ function handleAiAsk() {
     }
     $q = trim((string) ($_POST['question'] ?? ''));
     $preset = isset($_POST['preset']) ? (string) $_POST['preset'] : null;
+    $focusItemId = isset($_POST['focus_item_id']) ? (int) $_POST['focus_item_id'] : 0;
     if ($preset === '') {
         $preset = null;
     }
@@ -372,6 +466,16 @@ function handleAiAsk() {
         $activeProjectId,
         $_SESSION['role'] ?? 'member'
     );
+    if ($focusItemId > 0) {
+        $focused = array_values(array_filter($items, static function ($item) use ($focusItemId) {
+            return is_array($item) && (int) ($item['id'] ?? 0) === $focusItemId;
+        }));
+        if (!$focused) {
+            echo json_encode(['success' => false, 'error' => 'Selected vendor row is not available to your account.']);
+            exit;
+        }
+        $items = $focused;
+    }
     $question = $q !== '' ? $q : (AiService::PRESETS[$preset] ?? 'Summarize vendor spend.');
     $prompt = AiService::buildPrompt($question, $preset, $items);
     $out = AiService::ask($pdo, (int) $_SESSION['user_id'], $prompt);
@@ -499,8 +603,14 @@ function handleSaveReminderSettings() {
 
     if ($isAdmin) {
         $orgOn = isset($_POST['deadline_reminders_enabled']) && $_POST['deadline_reminders_enabled'] === '1';
-        $stOrg = $pdo->prepare('UPDATE organizations SET deadline_reminders_enabled = ? WHERE id = ?');
-        $stOrg->execute([$orgOn ? 1 : 0, (int) $_SESSION['org_id']]);
+        $webhookUrl = normalizeWebhookUrl($_POST['notification_webhook_url'] ?? '');
+        if ($webhookUrl !== '' && !filter_var($webhookUrl, FILTER_VALIDATE_URL)) {
+            $_SESSION['error'] = 'Please enter a valid webhook URL.';
+            header('Location: ' . $_SERVER['PHP_SELF']);
+            exit;
+        }
+        $stOrg = $pdo->prepare('UPDATE organizations SET deadline_reminders_enabled = ?, notification_webhook_url = ? WHERE id = ?');
+        $stOrg->execute([$orgOn ? 1 : 0, ($webhookUrl !== '' ? $webhookUrl : null), (int) $_SESSION['org_id']]);
     }
 
     $userOn = isset($_POST['user_deadline_reminders']) && $_POST['user_deadline_reminders'] === '1';
@@ -541,10 +651,78 @@ function handleSaveCostCalculator() {
         exit;
     }
 
+    $webhookUrl = loadOrganizationWebhookUrl($pdo, $orgId);
+    $previousStatusById = [];
+    $previousStatusByVendor = [];
+    if ($webhookUrl !== '') {
+        $beforeItems = VendorService::loadVisibleItems($pdo, $uid, $orgId, $activeProjectId, (string) $role);
+        foreach ($beforeItems as $it) {
+            if (!is_array($it)) {
+                continue;
+            }
+            $oldStatus = VendorService::resolveStatusFromItem($it);
+            $oldId = isset($it['id']) ? (int) $it['id'] : 0;
+            if ($oldId > 0) {
+                $previousStatusById[$oldId] = $oldStatus;
+            }
+            $oldVendorKey = strtolower(trim((string) ($it['vendor_name'] ?? '')));
+            if ($oldVendorKey !== '') {
+                if (!isset($previousStatusByVendor[$oldVendorKey]) || $oldStatus === VendorService::STATUS_MARK) {
+                    $previousStatusByVendor[$oldVendorKey] = $oldStatus;
+                }
+            }
+        }
+    }
+
     if ($role === 'admin') {
         $result = VendorService::saveAdmin($pdo, $orgId, $activeProjectId, $uid, $items);
     } else {
         $result = VendorService::saveMember($pdo, $orgId, $activeProjectId, $uid, $items);
+    }
+
+    if (($result['success'] ?? false) && $webhookUrl !== '') {
+        $projectName = resolveProjectName($pdo, $orgId, $activeProjectId);
+        $sentKeys = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $newStatus = VendorService::resolveStatusFromItem($item);
+            if ($newStatus !== VendorService::STATUS_MARK) {
+                continue;
+            }
+
+            $rowId = isset($item['id']) ? (int) $item['id'] : 0;
+            $vendorName = trim((string) ($item['vendor_name'] ?? ''));
+            $vendorKey = strtolower($vendorName);
+
+            $prevStatus = null;
+            if ($rowId > 0 && isset($previousStatusById[$rowId])) {
+                $prevStatus = $previousStatusById[$rowId];
+            } elseif ($vendorKey !== '' && isset($previousStatusByVendor[$vendorKey])) {
+                $prevStatus = $previousStatusByVendor[$vendorKey];
+            }
+            if ($prevStatus === VendorService::STATUS_MARK) {
+                continue;
+            }
+
+            $uniqueKey = ($rowId > 0 ? ('id:' . $rowId) : ('vendor:' . $vendorKey));
+            if (isset($sentKeys[$uniqueKey])) {
+                continue;
+            }
+            $sentKeys[$uniqueKey] = true;
+
+            $payload = [
+                'event' => 'vendor_mark_for_cancellation',
+                'project_name' => $projectName,
+                'vendor_name' => $vendorName,
+                'vendor_item_id' => ($rowId > 0 ? $rowId : null),
+                'status' => $newStatus,
+                'triggered_at' => date('c'),
+                'org_id' => $orgId,
+            ];
+            postWebhookJson($webhookUrl, $payload);
+        }
     }
     echo json_encode($result);
     exit;
@@ -606,6 +784,82 @@ function handleLoadVendorRawData() {
         'vendor_name' => $vendorName,
         'transactions' => $rows,
     ]);
+    exit;
+}
+
+function handleLoadVendorChatMessages() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'User not logged in', 'messages' => []]);
+        exit;
+    }
+
+    $vendorItemId = (int) ($_POST['vendor_item_id'] ?? 0);
+    if ($vendorItemId <= 0) {
+        echo json_encode(['success' => false, 'error' => 'Vendor row id is required', 'messages' => []]);
+        exit;
+    }
+
+    $pdo = getDBConnection();
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        echo json_encode(['success' => false, 'error' => 'No active project selected', 'messages' => []]);
+        exit;
+    }
+
+    $result = VendorChatService::loadMessages(
+        $pdo,
+        (int) $_SESSION['org_id'],
+        $activeProjectId,
+        $vendorItemId,
+        (int) $_SESSION['user_id'],
+        (string) ($_SESSION['role'] ?? 'member')
+    );
+    echo json_encode($result);
+    exit;
+}
+
+function handleAddVendorChatMessage() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'User not logged in']);
+        exit;
+    }
+
+    $vendorItemId = (int) ($_POST['vendor_item_id'] ?? 0);
+    $message = trim((string) ($_POST['message'] ?? ''));
+    if ($vendorItemId <= 0) {
+        echo json_encode(['success' => false, 'error' => 'Vendor row id is required']);
+        exit;
+    }
+    if ($message === '') {
+        echo json_encode(['success' => false, 'error' => 'Message is required']);
+        exit;
+    }
+
+    $pdo = getDBConnection();
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        echo json_encode(['success' => false, 'error' => 'No active project selected']);
+        exit;
+    }
+
+    $username = trim((string) ($_SESSION['username'] ?? ''));
+    if ($username === '') {
+        $username = trim((string) ($_SESSION['user_email'] ?? ''));
+    }
+
+    $result = VendorChatService::addMessage(
+        $pdo,
+        (int) $_SESSION['org_id'],
+        $activeProjectId,
+        $vendorItemId,
+        (int) $_SESSION['user_id'],
+        $username,
+        $message,
+        (string) ($_SESSION['role'] ?? 'member')
+    );
+    echo json_encode($result);
     exit;
 }
 
