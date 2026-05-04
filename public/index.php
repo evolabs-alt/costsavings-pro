@@ -523,7 +523,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         body { 
             font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; 
-            background: linear-gradient(160deg, var(--color-bg) 0%, #edf5fa 55%, #e4f2f8 100%);
+            background: linear-gradient(0deg, rgba(7,110,147,1) 0%, rgba(8,54,96,1) 100%);
             margin: 0;
             padding: 20px 20px;
             min-height: 100vh;
