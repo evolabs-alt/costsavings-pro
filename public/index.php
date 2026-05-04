@@ -2652,7 +2652,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             margin: 0 0 18px 0;
             border: 1px solid var(--color-border);
             border-radius: 10px;
-            background: linear-gradient(135deg, #ffffff, #f6fbff);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(247, 250, 252, 0.96) 100%);
             box-shadow: 0 6px 18px rgba(11, 88, 163, 0.08);
             display: flex;
             justify-content: center;
