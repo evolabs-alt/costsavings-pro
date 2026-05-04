@@ -821,16 +821,24 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             background: #fff;
             color: #4a3f6b;
             border-radius: 6px;
-            padding: 5px 8px;
-            font-size: 12px;
+            width: 30px;
+            height: 30px;
+            padding: 0;
             line-height: 1;
             cursor: pointer;
-            white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .cost-calculator-grid .vendor-raw-btn:disabled {
             opacity: 0.45;
             cursor: not-allowed;
+        }
+
+        .cost-calculator-grid .vendor-raw-icon {
+            font-size: 18px;
+            color: var(--color-primary-hover);
         }
 
         .cost-calculator-grid .vendor-chat-col {
@@ -3233,6 +3241,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             color: var(--color-primary-hover);
         }
 
+        .cost-calculator-grid .vendor-raw-btn:hover:not(:disabled) .vendor-raw-icon {
+            color: var(--color-primary);
+        }
+
         .cost-calculator-grid .vendor-chat-btn:hover:not(:disabled) {
             border-color: var(--color-secondary);
             box-shadow: 0 6px 16px rgba(11, 88, 163, 0.22);
@@ -4068,7 +4080,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <input type="hidden" class="row-db-id" value="" />
                         <div class="vendor-cell-wrap">
                             <input type="text" name="vendor[]" placeholder="Enter vendor name" />
-                            <button type="button" class="vendor-raw-btn" disabled title="View imported raw transaction history">Raw</button>
+                            <button type="button" class="vendor-raw-btn" disabled title="View imported raw transaction history" aria-label="View imported raw transaction history">
+                                <span class="material-symbols-outlined vendor-raw-icon" aria-hidden="true">format_list_bulleted</span>
+                            </button>
                         </div>
                     </td>
                     <td class="cost-per-period">
