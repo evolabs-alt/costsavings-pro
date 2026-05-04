@@ -1246,8 +1246,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .logo-above-container {
             text-align: center;
-            margin-bottom: 30px;
-            padding: 20px 0;
+            padding: 10px 0;
         }
         
         .logo-above-container .login-logo {
