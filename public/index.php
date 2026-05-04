@@ -1269,7 +1269,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             font-size: 12px;
             font-weight: 600;
             letter-spacing: 0.03em;
-            color: var(--color-text-secondary);
+            color: #ffffff;
         }
 
         /* Responsive styles for cost savings tool table */
@@ -2670,6 +2670,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             padding: 4px 10px;
         }
 
+        .app-nav-shell {
+            width: 100%;
+            max-width: 100%;
+            margin: 0 auto 14px auto;
+        }
+
+        .app-nav-shell .app-nav {
+            margin-bottom: 0;
+        }
+
         .app-nav-list {
             list-style: none;
             margin: 0;
@@ -3502,59 +3512,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <div class="logo-tagline">Savvy Expense Optimizer</div>
             </div>
         <?php endif; ?>
-        <div class="container">
-            <?php if ($current_view === 'login'): ?>
-            <div class="content-padding login-page">
-                <h1>Savvy Expense Optimizer</h1>
-                <p class="subtitle">Sign in with your username and password.</p>
-            
-            <?php if (!empty($_SESSION['awaiting_role'])): ?>
-                <form method="POST">
-                    <input type="hidden" name="action" value="save_user_role">
-                    <div class="form-group">
-                        <label>Select the option that best describes you:</label>
-                        <p class="subtitle" style="margin-top: 4px; font-size: 15px; color: #4b5563;">
-                            Signed in as <?php echo htmlspecialchars($_SESSION['user_email'] ?? $_SESSION['username'] ?? ''); ?>. Let us know who you are to tailor your experience.
-                        </p>
-                        <div class="role-options">
-                            <?php foreach ($user_role_options as $option): ?>
-                                <label class="role-option">
-                                    <input type="radio" name="user_role" value="<?php echo htmlspecialchars($option); ?>" required>
-                                    <span><?php echo htmlspecialchars($option); ?></span>
-                                </label>
-                            <?php endforeach; ?>
-                        </div>
-                    </div>
-                    <div class="button-group">
-                        <button type="submit">Continue</button>
-                    </div>
-                </form>
-            <?php else: ?>
-                <form method="POST">
-                    <input type="hidden" name="action" value="login">
-                    <div class="form-group">
-                        <label for="username">Username or email</label>
-                        <input type="text" id="username" name="username" required autocomplete="username">
-                    </div>
-                    <div class="form-group">
-                        <label for="password">Password</label>
-                        <input type="password" id="password" name="password" required autocomplete="current-password">
-                    </div>
-                    <div class="form-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" name="agree_terms" id="agree_terms" required>
-                            <span>By using this cost savings tool, I agree to the <a href="https://savvycfo.com/terms-conditions-privacy-policy/" target="_blank" rel="noopener noreferrer">terms of use</a>.</span>
-                        </label>
-                    </div>
-                    <button type="submit">Log in</button>
-                </form>
-            <?php endif; ?>
-            
-            <!-- eBook Promotion Section -->
-            </div> <!-- Close content-padding -->
-
-        <?php elseif ($current_view === 'placeholder'): ?>
-            <div class="content-padding">
+        <?php if ($current_view === 'placeholder'): ?>
+            <div class="app-nav-shell">
                 <nav class="app-nav" aria-label="App sections">
                     <ul class="app-nav-list">
                         <li class="app-nav-item has-submenu" id="appMembersNavItem">
@@ -3615,7 +3574,61 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         </li>
                     </ul>
                 </nav>
+            </div>
+        <?php endif; ?>
+        <div class="container">
+            <?php if ($current_view === 'login'): ?>
+            <div class="content-padding login-page">
+                <h1>Savvy Expense Optimizer</h1>
+                <p class="subtitle">Sign in with your username and password.</p>
+            
+            <?php if (!empty($_SESSION['awaiting_role'])): ?>
+                <form method="POST">
+                    <input type="hidden" name="action" value="save_user_role">
+                    <div class="form-group">
+                        <label>Select the option that best describes you:</label>
+                        <p class="subtitle" style="margin-top: 4px; font-size: 15px; color: #4b5563;">
+                            Signed in as <?php echo htmlspecialchars($_SESSION['user_email'] ?? $_SESSION['username'] ?? ''); ?>. Let us know who you are to tailor your experience.
+                        </p>
+                        <div class="role-options">
+                            <?php foreach ($user_role_options as $option): ?>
+                                <label class="role-option">
+                                    <input type="radio" name="user_role" value="<?php echo htmlspecialchars($option); ?>" required>
+                                    <span><?php echo htmlspecialchars($option); ?></span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                    <div class="button-group">
+                        <button type="submit">Continue</button>
+                    </div>
+                </form>
+            <?php else: ?>
+                <form method="POST">
+                    <input type="hidden" name="action" value="login">
+                    <div class="form-group">
+                        <label for="username">Username or email</label>
+                        <input type="text" id="username" name="username" required autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" name="password" required autocomplete="current-password">
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="agree_terms" id="agree_terms" required>
+                            <span>By using this cost savings tool, I agree to the <a href="https://savvycfo.com/terms-conditions-privacy-policy/" target="_blank" rel="noopener noreferrer">terms of use</a>.</span>
+                        </label>
+                    </div>
+                    <button type="submit">Log in</button>
+                </form>
+            <?php endif; ?>
+            
+            <!-- eBook Promotion Section -->
+            </div> <!-- Close content-padding -->
 
+        <?php elseif ($current_view === 'placeholder'): ?>
+            <div class="content-padding">
                 <div class="report-filters">
                     <label for="reportFilter">Report Filters:</label>
                     <select id="reportFilter" onchange="filterTableRows(this.value)">
