@@ -489,6 +489,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-0Z8U4b0JvoQ9QP9N9Pn+a7piklQNoRxwGBUpzUgtjtY+2a9pYNHeT0ZWhhFodS0xsJD6ODwbF8vvZ57D7x6Grg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <style>
         /* Complete CSS Reset */
@@ -863,27 +864,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             box-shadow: none;
         }
 
-        .cost-calculator-grid .vendor-chat-glyph {
-            position: relative;
-            width: 15px;
-            height: 11px;
-            border: 2px solid #6b5b95;
-            border-radius: 7px;
-            background: #fff;
-            display: inline-block;
+        .cost-calculator-grid .material-symbols-outlined {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 20;
+            line-height: 1;
+            user-select: none;
         }
 
-        .cost-calculator-grid .vendor-chat-glyph::before {
-            content: '';
-            position: absolute;
-            bottom: -5px;
-            left: 2px;
-            width: 5px;
-            height: 5px;
-            border-left: 2px solid #6b5b95;
-            border-bottom: 2px solid #6b5b95;
-            background: #fff;
-            transform: skewX(-24deg);
+        .cost-calculator-grid .vendor-chat-icon {
+            font-size: 18px;
+            color: var(--color-primary);
         }
 
         .vendor-raw-results {
@@ -976,36 +968,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             display: none;
         }
 
-        .cost-calculator-grid .cancel-guidance-glyph {
-            position: relative;
-            width: 14px;
-            height: 12px;
-            border: 2px solid #f59e0b;
-            border-radius: 2px;
-            transform: rotate(-2deg);
-        }
-
-        .cost-calculator-grid .cancel-guidance-glyph::before {
-            content: '';
-            position: absolute;
-            left: 2px;
-            right: 2px;
-            top: 2px;
-            height: 2px;
-            background: #f59e0b;
-            box-shadow: 0 3px 0 #f59e0b, 0 6px 0 #f59e0b;
-        }
-
-        .cost-calculator-grid .cancel-guidance-glyph::after {
-            content: '';
-            position: absolute;
-            right: -3px;
-            top: -3px;
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: #ef4444;
-            border: 1px solid #fff;
+        .cost-calculator-grid .cancel-guidance-icon {
+            font-size: 16px;
+            color: #f59e0b;
         }
 
         .cost-calculator-grid .row-status .cancel-deadline-input {
@@ -1121,18 +1086,20 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .bulk-action-btn {
-            background: #4f46e5;
+            background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
             color: #fff;
             border: none;
             padding: 10px 20px;
-            border-radius: 4px;
+            border-radius: 8px;
             cursor: pointer;
             font-size: 16px;
             font-weight: 600;
+            box-shadow: 0 4px 12px rgba(11, 88, 163, 0.22);
         }
 
         .bulk-action-btn:hover {
-            background: #4338ca;
+            background: var(--color-primary-hover);
+            box-shadow: 0 8px 20px rgba(10, 75, 142, 0.28);
         }
 
         .bulk-actions-form {
@@ -1163,6 +1130,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .bulk-actions-buttons .btn-secondary {
             font-size: 13px;
             padding: 8px 12px;
+        }
+
+        .project-wizard-cancel-btn {
+            font-size: 12px;
+            padding: 6px 10px;
         }
 
         .bulk-actions-form .bulk-confirm-summary {
@@ -2930,6 +2902,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             border-radius: 12px;
             border: 1px solid var(--color-border);
             box-shadow: 0 4px 20px rgba(11, 88, 163, 0.06);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
         }
 
         .app-modal-body .ai-usage-bar {
@@ -2939,7 +2914,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             border: 1px solid var(--color-border);
             border-radius: 8px;
             padding: 10px 12px;
-            margin-bottom: 10px;
             line-height: 1.45;
         }
 
@@ -2986,7 +2960,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             display: flex;
             align-items: flex-end;
             gap: 10px;
-            margin-bottom: 10px;
+            margin-top: auto;
         }
 
         .app-modal-body .ai-question-input {
@@ -3038,10 +3012,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .app-modal-body .ai-chat-log {
-            max-height: 280px;
+            max-height: 420px;
             min-height: 72px;
             overflow-y: auto;
-            margin-top: 6px;
+            flex: 1 1 auto;
             padding: 10px;
             border: 1px solid var(--color-border);
             border-radius: 8px;
@@ -3262,9 +3236,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             box-shadow: 0 6px 16px rgba(11, 88, 163, 0.22);
         }
 
-        .cost-calculator-grid .vendor-chat-glyph,
-        .cost-calculator-grid .vendor-chat-glyph::before {
-            border-color: var(--color-primary);
+        .cost-calculator-grid .vendor-chat-btn:hover:not(:disabled) .vendor-chat-icon {
+            color: var(--color-primary-hover);
+        }
+
+        .cost-calculator-grid .cancel-guidance-btn:hover .cancel-guidance-icon {
+            color: #d97706;
         }
 
         .report-filters select:focus,
@@ -4130,7 +4107,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 <option value="cancelled">Cancelled</option>
                             </select>
                             <button type="button" class="cancel-guidance-btn" aria-label="Show cancellation guidance" title="Show AI cancellation guidance for this vendor" hidden>
-                                <span class="cancel-guidance-glyph" aria-hidden="true"></span>
+                                <span class="material-symbols-outlined cancel-guidance-icon" aria-hidden="true">rule</span>
                             </button>
                         </div>
                         <input type="date"
@@ -4146,7 +4123,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     </td>
                     <td class="vendor-chat-col">
                         <button type="button" class="vendor-chat-btn" disabled title="Save this row first to enable chat" aria-label="Open vendor chat">
-                            <span class="vendor-chat-glyph" aria-hidden="true"></span>
+                            <span class="material-symbols-outlined vendor-chat-icon" aria-hidden="true">chat</span>
                         </button>
                     </td>
                 `;
@@ -5219,7 +5196,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     }
                     wrap.appendChild(bubble);
                     log.appendChild(wrap);
-                    log.scrollTop = log.scrollHeight;
+                    if (role === 'assistant') {
+                        // Keep the newest assistant answer positioned from its start.
+                        var wrapRect = wrap.getBoundingClientRect();
+                        var logRect = log.getBoundingClientRect();
+                        var targetTop = log.scrollTop + (wrapRect.top - logRect.top);
+                        log.scrollTop = targetTop > 0 ? targetTop : 0;
+                    } else {
+                        log.scrollTop = log.scrollHeight;
+                    }
                 }
                 function setAiUiBusy(busy) {
                     var aiBtn = document.getElementById('aiSubmitBtn');
@@ -5547,8 +5532,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     </label>
                     <p style="margin:0;color:#4b5563;font-size:13px;">Select one or more members. Users not assigned will not be able to access this project.</p>
                     <div style="display:flex;gap:8px;justify-content:flex-end;">
-                        <button type="button" class="btn-secondary app-modal-close">Cancel</button>
-                        <button type="submit">You're done!</button>
+                        <button type="button" class="btn-secondary app-modal-close project-wizard-cancel-btn">Cancel</button>
+                        <button type="submit">Create</button>
                     </div>
                 </form>
             </div>
@@ -5569,11 +5554,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <button type="button" class="btn-secondary ai-preset" data-preset="duplicates">Duplicate subscriptions</button>
                         <button type="button" class="btn-secondary ai-preset" data-preset="executive">Executive summary</button>
                     </div>
+                    <div id="aiChatLog" class="chat-container ai-chat-log" aria-label="AI Assistant conversation"></div>
                     <div class="ai-composer">
                         <textarea id="aiQuestion" class="ai-question-input" rows="2" placeholder="Ask a specific question..."></textarea>
                         <button type="button" id="aiSubmitBtn" class="ai-submit-btn">Ask</button>
                     </div>
-                    <div id="aiChatLog" class="chat-container ai-chat-log" aria-label="AI Assistant conversation"></div>
                 </div>
             </div>
         </div>
