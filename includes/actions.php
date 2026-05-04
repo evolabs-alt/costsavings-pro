@@ -164,6 +164,11 @@ function handleLogin() {
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     }
+    if (!empty($row['is_disabled'])) {
+        $_SESSION['error'] = 'Your account has been disabled. Contact your administrator.';
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    }
     session_regenerate_id(true);
     $_SESSION['user_id'] = (int) $row['id'];
     $_SESSION['org_id'] = (int) $row['org_id'];
@@ -559,11 +564,48 @@ function handleLoadTeamMembers() {
         exit;
     }
     $pdo = getDBConnection();
-    $st = $pdo->prepare('SELECT id, username, display_name, email, role FROM users WHERE org_id = ? ORDER BY username, email');
+    $st = $pdo->prepare('SELECT id, username, display_name, email, role, is_disabled FROM users WHERE org_id = ? ORDER BY username, email');
     $st->execute([(int) $_SESSION['org_id']]);
     $members = $st->fetchAll(PDO::FETCH_ASSOC);
     echo json_encode(['success' => true, 'members' => $members]);
     exit;
+}
+
+function handleToggleMemberDisabled(): void
+{
+    $redir = function () {
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    };
+    if (empty($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
+        $_SESSION['error'] = 'Only admins can manage member status.';
+        $redir();
+    }
+    $memberId = (int) ($_POST['member_id'] ?? 0);
+    $disable = (int) ($_POST['disable'] ?? 0) === 1 ? 1 : 0;
+    if ($memberId <= 0) {
+        $_SESSION['error'] = 'Invalid member selected.';
+        $redir();
+    }
+
+    $pdo = getDBConnection();
+    $orgId = (int) $_SESSION['org_id'];
+    $lookup = $pdo->prepare('SELECT id, role FROM users WHERE id = ? AND org_id = ? LIMIT 1');
+    $lookup->execute([$memberId, $orgId]);
+    $member = $lookup->fetch(PDO::FETCH_ASSOC);
+    if (!$member) {
+        $_SESSION['error'] = 'Member not found.';
+        $redir();
+    }
+    if (($member['role'] ?? '') !== 'member') {
+        $_SESSION['error'] = 'Only members can be disabled or enabled.';
+        $redir();
+    }
+
+    $upd = $pdo->prepare('UPDATE users SET is_disabled = ? WHERE id = ? AND org_id = ?');
+    $upd->execute([$disable, $memberId, $orgId]);
+    $_SESSION['message'] = $disable === 1 ? 'Member disabled successfully.' : 'Member enabled successfully.';
+    $redir();
 }
 
 function handleSaveOrgReminders() {

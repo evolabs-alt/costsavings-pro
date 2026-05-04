@@ -82,6 +82,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --color-primary: #0B58A3;
+            --color-primary-hover: #0A4B8E;
+            --color-secondary: #25A8E0;
+            --color-bg: #F7FAFC;
+            --color-surface: #FFFFFF;
+            --color-text-primary: #1F2937;
+            --color-text-secondary: #4B5563;
+            --color-border: #DCE3EA;
+            --color-error: #DC2626;
+        }
+
         body {
             font-family: 'Inter', system-ui, sans-serif;
             max-width: 440px;
@@ -89,25 +101,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
             padding: 28px 20px;
             box-sizing: border-box;
             min-height: 100vh;
-            background: linear-gradient(160deg, #f3effb 0%, #e8e2f4 40%, #d4c8e8 100%);
+            background: linear-gradient(160deg, var(--color-bg) 0%, #edf5fa 40%, #e4f2f8 100%);
         }
         h1 {
             font-family: 'Cormorant Garamond', Georgia, serif;
             font-size: 1.85rem;
             font-weight: 700;
             text-align: center;
-            background: linear-gradient(135deg, #4a3f6b 0%, #6b5b95 50%, #8b7cb8 100%);
+            background: linear-gradient(135deg, var(--color-primary-hover) 0%, var(--color-primary) 50%, var(--color-secondary) 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
-        label { display: block; margin-top: 14px; font-weight: 600; color: #4a3f6b; font-size: 14px; }
+        label { display: block; margin-top: 14px; font-weight: 600; color: var(--color-text-primary); font-size: 14px; }
         input[type="text"], input[type="password"] {
             width: 100%;
             padding: 16px 18px;
             margin-top: 6px;
             box-sizing: border-box;
-            border: 2px solid #e5e7eb;
+            border: 2px solid var(--color-border);
             border-radius: 12px;
             font-size: 16px;
             font-family: inherit;
@@ -118,15 +130,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
         }
         input[type="text"]:focus, input[type="password"]:focus {
             outline: none;
-            border-color: #6b5b95;
-            box-shadow: 0 0 0 3px rgba(107, 91, 149, 0.14);
+            border-color: var(--color-secondary);
+            box-shadow: 0 0 0 3px rgba(37, 168, 224, 0.18);
             background: #fff;
         }
         button {
             margin-top: 22px;
             padding: 14px 22px;
             width: 100%;
-            background: linear-gradient(135deg, #7c6ba8, #5b4d8f);
+            background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
             color: white;
             border: none;
             border-radius: 12px;
@@ -134,14 +146,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
             font-size: 16px;
             font-weight: 600;
         }
-        button:hover { filter: brightness(1.05); }
-        .err { color: #b91c1c; margin-bottom: 12px; }
-        a { color: #5b4d8f; }
+        button:hover { filter: brightness(1.07); }
+        .err { color: var(--color-error); margin-bottom: 12px; }
+        a { color: var(--color-primary); }
+        a:hover { color: var(--color-primary-hover); }
     </style>
 </head>
 <body>
     <h1>Cost Savings Pro Tool</h1>
-    <p style="text-align:center;color:#5c4d7a;margin:0 0 20px;font-size:15px;">Complete your registration</p>
+    <p style="text-align:center;color:#4B5563;margin:0 0 20px;font-size:15px;">Complete your registration</p>
     <?php if ($error): ?><p class="err"><?php echo htmlspecialchars($error); ?></p><?php endif; ?>
     <form method="post">
         <input type="hidden" name="token" value="<?php echo htmlspecialchars($token); ?>">

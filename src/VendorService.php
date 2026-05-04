@@ -249,6 +249,7 @@ class VendorService
      */
     public static function saveAdmin(PDO $pdo, int $orgId, int $projectId, int $adminUserId, array $items): array
     {
+        $items = self::normalizeMarkForCancellationDeadlines($items);
         $v = self::validateItems($items);
         if (!$v['success']) {
             return $v;
@@ -372,6 +373,7 @@ class VendorService
      */
     public static function saveMember(PDO $pdo, int $orgId, int $projectId, int $userId, array $items): array
     {
+        $items = self::normalizeMarkForCancellationDeadlines($items);
         $v = self::validateItems($items);
         if (!$v['success']) {
             return $v;
@@ -491,6 +493,31 @@ class VendorService
         }
 
         return null;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $items
+     * @return array<int, array<string, mixed>>
+     */
+    private static function normalizeMarkForCancellationDeadlines(array $items): array
+    {
+        $defaultDeadline = self::currentMonthEndIsoDate();
+        foreach ($items as $i => $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $status = self::resolveStatusFromItem($item);
+            $deadline = trim((string) ($item['cancellation_deadline'] ?? ''));
+            if ($status === self::STATUS_MARK && $deadline === '') {
+                $items[$i]['cancellation_deadline'] = $defaultDeadline;
+            }
+        }
+        return $items;
+    }
+
+    private static function currentMonthEndIsoDate(): string
+    {
+        return (new \DateTimeImmutable('now'))->modify('last day of this month')->format('Y-m-d');
     }
 
     private static function getUserEmail(PDO $pdo, int $userId): string

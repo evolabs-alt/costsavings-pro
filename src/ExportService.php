@@ -53,7 +53,7 @@ class ExportService
      */
     public static function pdfVendorListHtml(array $items): string
     {
-        $html = '<html><head><meta charset="UTF-8"><style>body{font-family:DejaVu Sans,sans-serif;font-size:10px;} table{border-collapse:collapse;width:100%;} th,td{border:1px solid #333;padding:4px;}</style></head><body>';
+        $html = '<html><head><meta charset="UTF-8"><style>body{font-family:DejaVu Sans,sans-serif;font-size:10px;color:#1F2937;} table{border-collapse:collapse;width:100%;} th{background:#0B58A3;color:#fff;} th,td{border:1px solid #DCE3EA;padding:4px;}</style></head><body>';
         $html .= '<h2>Vendor list</h2><table><thead><tr>';
         foreach (['Vendor', 'Annual', 'Frequency', 'Status', 'Purpose'] as $h) {
             $html .= '<th>' . htmlspecialchars($h) . '</th>';
@@ -98,7 +98,7 @@ class ExportService
             }
         }
 
-        $html = '<html><head><meta charset="UTF-8"><style>body{font-family:DejaVu Sans,sans-serif;font-size:11px;line-height:1.4;} h1{color:#238FBE;}</style></head><body>';
+        $html = '<html><head><meta charset="UTF-8"><style>body{font-family:DejaVu Sans,sans-serif;font-size:11px;line-height:1.4;color:#1F2937;} h1{color:#0B58A3;}</style></head><body>';
         $html .= '<h1>Executive summary</h1>';
         $html .= '<p><strong>Total annualized spend (visible vendors):</strong> $' . number_format($totalAnnual, 2) . '</p>';
         $html .= '<p><strong>Potential annual savings (Mark for Cancellation, not yet confirmed):</strong> $' . number_format($pendingCancel, 2) . '</p>';

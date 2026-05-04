@@ -176,6 +176,7 @@ function migrateSchema(PDO $pdo) {
                 `email` VARCHAR(255) NOT NULL,
                 `password_hash` VARCHAR(255) NULL,
                 `role` ENUM('admin','member') NOT NULL DEFAULT 'member',
+                `is_disabled` TINYINT(1) NOT NULL DEFAULT 0,
                 `display_name` VARCHAR(255) NULL,
                 `first_name` VARCHAR(255) NULL,
                 `last_name` VARCHAR(255) NULL,
@@ -214,6 +215,10 @@ function migrateSchema(PDO $pdo) {
             $cols = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'role'")->fetch();
             if (!$cols) {
                 $pdo->exec("ALTER TABLE `users` ADD COLUMN `role` ENUM('admin','member') NOT NULL DEFAULT 'member' AFTER `password_hash`");
+            }
+            $cols = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'is_disabled'")->fetch();
+            if (!$cols) {
+                $pdo->exec('ALTER TABLE `users` ADD COLUMN `is_disabled` TINYINT(1) NOT NULL DEFAULT 0 AFTER `role`');
             }
             $cols = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'org_id'")->fetch();
             if (!$cols) {

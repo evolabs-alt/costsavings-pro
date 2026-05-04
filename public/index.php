@@ -85,6 +85,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'load_team_members':
                 handleLoadTeamMembers();
                 break;
+            case 'toggle_member_disabled':
+                handleToggleMemberDisabled();
+                break;
             case 'save_org_reminders':
                 handleSaveOrgReminders();
                 break;
@@ -463,7 +466,7 @@ $team_members_max = 10;
 if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id'])) {
     try {
         $pdoTeam = getDBConnection();
-        $stTeam = $pdoTeam->prepare('SELECT id, username, display_name, email, role FROM users WHERE org_id = ? ORDER BY username, email');
+        $stTeam = $pdoTeam->prepare('SELECT id, username, display_name, email, role, is_disabled FROM users WHERE org_id = ? ORDER BY username, email');
         $stTeam->execute([(int) $_SESSION['org_id']]);
         $team_members_rows = $stTeam->fetchAll(PDO::FETCH_ASSOC);
         $team_members_json = json_encode($team_members_rows, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
@@ -501,14 +504,31 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             height: 100%;
         }
         
+        :root {
+            --color-primary: #0B58A3;
+            --color-primary-hover: #0A4B8E;
+            --color-secondary: #25A8E0;
+            --color-accent: #6ECCDB;
+            --color-bg: #F7FAFC;
+            --color-surface: #FFFFFF;
+            --color-text-primary: #1F2937;
+            --color-text-secondary: #4B5563;
+            --color-border: #DCE3EA;
+            --color-success: #16A34A;
+            --color-warning: #F59E0B;
+            --color-error: #DC2626;
+            --color-info: #0EA5E9;
+        }
+
         body { 
             font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; 
-            background: linear-gradient(160deg, #f3effb 0%, #e8e2f4 28%, #ddd2ec 55%, #d0c4e4 100%);
+            background: linear-gradient(160deg, var(--color-bg) 0%, #edf5fa 55%, #e4f2f8 100%);
             margin: 0;
             padding: 20px 20px;
             min-height: 100vh;
             line-height: 1.6;
             position: relative;
+            color: var(--color-text-primary);
         }
         
         .container-wrapper {
@@ -529,10 +549,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             width: 100%;
             max-width: 100%;
             margin: 0 auto; 
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(252, 250, 255, 0.96) 45%, rgba(248, 244, 255, 0.94) 100%);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(247, 250, 252, 0.96) 100%);
             backdrop-filter: blur(12px);
             border-radius: 20px; 
-            box-shadow: 0 24px 56px rgba(74, 63, 107, 0.12), 0 0 0 1px rgba(107, 91, 149, 0.12);
+            box-shadow: 0 24px 56px rgba(11, 88, 163, 0.12), 0 0 0 1px rgba(220, 227, 234, 0.92);
             padding: 0; 
             position: relative;
             overflow: visible;
@@ -552,7 +572,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             left: 0;
             right: 0;
             height: 4px;
-            background: linear-gradient(90deg, #7c6ba8, #5b4d8f, #6b5b95);
+            background: linear-gradient(90deg, var(--color-primary), var(--color-primary-hover), var(--color-secondary));
         }
         
         @keyframes gradientShift {
@@ -562,14 +582,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         h1, h2 { 
             text-align: center; 
-            color: #424242; 
+            color: var(--color-text-primary); 
             font-weight: 700;
             margin-bottom: 30px;
         }
         
         .subtitle {
             text-align: center;
-            color: #5c4d7a;
+            color: var(--color-text-secondary);
             font-size: 16px;
             margin: -15px 0 30px 0;
             line-height: 1.5;
@@ -581,7 +601,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             font-size: 2.35em; 
             font-weight: 700;
             letter-spacing: 0.02em;
-            background: linear-gradient(135deg, #4a3f6b 0%, #6b5b95 45%, #8b7cb8 100%);
+            background: linear-gradient(135deg, var(--color-primary-hover) 0%, var(--color-primary) 45%, var(--color-secondary) 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
@@ -612,30 +632,30 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .ebook-promotion {
             margin-top: 40px;
             padding: 25px;
-            background: linear-gradient(135deg, rgba(107, 91, 149, 0.05), rgba(26, 109, 145, 0.05));
-            border: 1px solid rgba(107, 91, 149, 0.15);
+            background: linear-gradient(135deg, rgba(37, 168, 224, 0.08), rgba(110, 204, 219, 0.10));
+            border: 1px solid rgba(37, 168, 224, 0.25);
             border-radius: 12px;
             text-align: center;
             font-size: 14px;
-            color: #4a5568;
+            color: var(--color-text-secondary);
             line-height: 1.6;
         }
         
         .ebook-promotion .ebook-title {
             font-weight: 600;
-            color: #424242;
+            color: var(--color-text-primary);
             font-style: italic;
         }
         
         .ebook-promotion .ebook-link {
-            color: #6b5b95;
+            color: var(--color-primary);
             text-decoration: none;
             font-weight: 600;
             transition: color 0.3s ease;
         }
         
         .ebook-promotion .ebook-link:hover {
-            color: #4a3f6b;
+            color: var(--color-primary-hover);
             text-decoration: underline;
         }
 
@@ -643,20 +663,20 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .cost-calculator-link {
             display: inline-block;
             padding: 15px 40px;
-            background: #6b5b95;
+            background: var(--color-primary);
             color: white;
             text-decoration: none;
             border-radius: 8px;
             font-size: 18px;
             font-weight: 600;
             transition: background 0.3s, transform 0.2s;
-            box-shadow: 0 4px 6px rgba(91, 77, 143, 0.28);
+            box-shadow: 0 4px 6px rgba(11, 88, 163, 0.28);
         }
 
         .cost-calculator-link:hover {
-            background: #4a3f6b;
+            background: var(--color-primary-hover);
             transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(91, 77, 143, 0.35);
+            box-shadow: 0 6px 12px rgba(10, 75, 142, 0.35);
         }
 
         .cost-calculator-link:active {
@@ -671,12 +691,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .placeholder-content p a {
-            color: #6b5b95;
+            color: var(--color-primary);
             text-decoration: underline;
         }
 
         .placeholder-content p a:hover {
-            color: #4a3f6b;
+            color: var(--color-primary-hover);
         }
 
         /* Cost Savings Pro Tool grid */
@@ -695,17 +715,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
         
         .cost-calculator-table-wrapper::-webkit-scrollbar-track {
-            background: #f1f1f1;
+            background: #edf2f7;
             border-radius: 4px;
         }
         
         .cost-calculator-table-wrapper::-webkit-scrollbar-thumb {
-            background: #6b5b95;
+            background: var(--color-primary);
             border-radius: 4px;
         }
         
         .cost-calculator-table-wrapper::-webkit-scrollbar-thumb:hover {
-            background: #4a3f6b;
+            background: var(--color-primary-hover);
         }
 
         .cost-calculator-grid {
@@ -713,12 +733,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             min-width: 1020px;
             border-collapse: collapse;
             margin: 0;
-            background: white;
+            background: var(--color-surface);
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
         .cost-calculator-grid thead {
-            background: #6b5b95;
+            background: var(--color-primary);
             color: white;
         }
 
@@ -726,18 +746,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             padding: 8px 6px;
             text-align: left;
             font-weight: 600;
-            border: 1px solid #4a3f6b;
+            border: 1px solid var(--color-primary-hover);
             font-size: 13px;
             white-space: nowrap;
         }
 
         .cost-calculator-grid td {
             padding: 6px;
-            border: 1px solid #e0e0e0;
+            border: 1px solid var(--color-border);
         }
 
         .cost-calculator-grid tbody tr:hover {
-            background: #f5f5f5;
+            background: #f3f8fc;
         }
 
         .cost-calculator-grid input[type="text"],
@@ -746,7 +766,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .cost-calculator-grid textarea {
             width: 100%;
             padding: 5px;
-            border: 1px solid #ccc;
+            border: 1px solid var(--color-border);
             border-radius: 4px;
             font-size: 13px;
             box-sizing: border-box;
@@ -757,8 +777,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .cost-calculator-grid select:focus,
         .cost-calculator-grid textarea:focus {
             outline: none;
-            border-color: #6b5b95;
-            box-shadow: 0 0 0 2px rgba(107, 91, 149, 0.2);
+            border-color: var(--color-secondary);
+            box-shadow: 0 0 0 2px rgba(37, 168, 224, 0.2);
         }
 
         .cost-calculator-grid .item-number {
@@ -1612,7 +1632,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             height: 20px;
             margin-top: 2px;
             flex-shrink: 0;
-            accent-color: #6b5b95;
+            accent-color: var(--color-primary);
             cursor: pointer;
         }
 
@@ -1623,18 +1643,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .checkbox-label a {
-            color: #6b5b95;
+            color: var(--color-primary);
             text-decoration: underline;
         }
 
         .checkbox-label a:hover {
-            color: #4a3f6b;
+            color: var(--color-primary-hover);
         }
         
         input[type="email"], input[type="text"], input[type="password"], select { 
             width: 100%; 
             padding: 16px 20px; 
-            border: 2px solid #e5e7eb; 
+            border: 2px solid var(--color-border); 
             border-radius: 12px; 
             font-size: 16px; 
             line-height: 1.4;
@@ -1653,15 +1673,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         input[type="email"]:focus, input[type="text"]:focus, input[type="password"]:focus, select:focus { 
             outline: none;
-            border-color: #6b5b95;
-            box-shadow: 0 0 0 3px rgba(107, 91, 149, 0.14);
+            border-color: var(--color-secondary);
+            box-shadow: 0 0 0 3px rgba(37, 168, 224, 0.14);
             transform: translateY(-2px);
             background: #fff;
         }
         
         button { 
             padding: 16px 32px; 
-            background: linear-gradient(135deg, #6b5b95, #4a3f6b); 
+            background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover)); 
             color: #fff; 
             border: none; 
             border-radius: 12px; 
@@ -1691,7 +1711,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         button:hover { 
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(107, 91, 149, 0.3);
+            box-shadow: 0 8px 25px rgba(11, 88, 163, 0.3);
         }
         
         .btn-secondary { 
@@ -1778,15 +1798,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
         
         .error { 
-            background: linear-gradient(135deg, #fecaca, #f87171); 
-            color: #7f1d1d; 
-            box-shadow: 0 4px 15px rgba(248, 113, 113, 0.2);
+            background: linear-gradient(135deg, #fee2e2, #fecaca); 
+            color: #991b1b; 
+            box-shadow: 0 4px 15px rgba(220, 38, 38, 0.18);
         }
         
         .success { 
-            background: linear-gradient(135deg, #bbf7d0, #34d399); 
-            color: #064e3b; 
-            box-shadow: 0 4px 15px rgba(52, 211, 153, 0.2);
+            background: linear-gradient(135deg, #dcfce7, #bbf7d0); 
+            color: #14532d; 
+            box-shadow: 0 4px 15px rgba(22, 163, 74, 0.2);
         }
         
         .navigation { 
@@ -1868,7 +1888,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
         
         .progress-bar { 
-            background: linear-gradient(90deg, #6b5b95, #4a3f6b); 
+            background: linear-gradient(90deg, var(--color-secondary), var(--color-primary)); 
             height: 100%; 
             border-radius: 8px; 
             transition: width 0.6s ease;
@@ -1893,7 +1913,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         /* Section styling */
         .section-header { 
-            background: linear-gradient(135deg, #6b5b95 0%, #4a3f6b 100%); 
+            background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-hover) 100%); 
             color: white; 
             padding: 20px 25px; 
             margin: 0; 
@@ -1903,7 +1923,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             font-weight: 700;
             letter-spacing: 0.5px;
             position: relative;
-            box-shadow: 0 4px 15px rgba(107, 91, 149, 0.3);
+            box-shadow: 0 4px 15px rgba(11, 88, 163, 0.3);
         }
         
         .section-header::after {
@@ -1916,7 +1936,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             height: 0;
             border-left: 15px solid transparent;
             border-right: 15px solid transparent;
-            border-top: 10px solid #4a3f6b;
+            border-top: 10px solid var(--color-primary-hover);
         }
 
         /* Content padding for areas that need it */
@@ -2573,11 +2593,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             text-align: center;
             margin-top: 30px;
             padding-top: 20px;
-            border-top: 1px solid #e9ecef;
+            border-top: 1px solid var(--color-border);
         }
 
         .ai-guidance-button {
-            background: #6b5b95;
+            background: var(--color-primary);
             color: white;
             border: none;
             padding: 12px 30px;
@@ -2588,16 +2608,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .ai-guidance-button:hover {
-            background: #4a3f6b;
+            background: var(--color-primary-hover);
         }
 
         .app-nav {
             width: 100%;
             margin: 0 0 18px 0;
-            border: 1px solid #d8caec;
+            border: 1px solid var(--color-border);
             border-radius: 10px;
-            background: linear-gradient(135deg, #faf8ff, #f3effb);
-            box-shadow: 0 6px 18px rgba(74, 63, 107, 0.08);
+            background: linear-gradient(135deg, #ffffff, #f6fbff);
+            box-shadow: 0 6px 18px rgba(11, 88, 163, 0.08);
             display: flex;
             justify-content: center;
             padding: 4px 10px;
@@ -2632,7 +2652,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             border-radius: 8px;
             border: 1px solid transparent;
             background: transparent;
-            color: #4a3f6b;
+            color: var(--color-text-primary);
             font-family: 'Inter', system-ui, sans-serif;
             font-size: 14px;
             font-weight: 600;
@@ -2644,9 +2664,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .app-nav-link:hover,
         .app-nav-link:focus-visible,
         .app-nav-item.is-open > .app-nav-link {
-            background: #ede9fe;
-            border-color: #c7b5e4;
-            color: #352a55;
+            background: #eaf5fd;
+            border-color: var(--color-secondary);
+            color: var(--color-primary-hover);
             outline: none;
         }
 
@@ -2666,10 +2686,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             list-style: none;
             margin: 0;
             padding: 8px;
-            border: 1px solid #d9ccec;
+            border: 1px solid var(--color-border);
             border-radius: 10px;
             background: #fff;
-            box-shadow: 0 12px 24px rgba(51, 40, 78, 0.14);
+            box-shadow: 0 12px 24px rgba(11, 88, 163, 0.14);
             z-index: 25;
             display: none;
         }
@@ -2687,7 +2707,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             border: 0;
             border-radius: 7px;
             background: transparent;
-            color: #4a3f6b;
+            color: var(--color-text-primary);
             text-decoration: none;
             text-align: left;
             font-family: 'Inter', system-ui, sans-serif;
@@ -2698,8 +2718,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .app-submenu-item:hover,
         .app-submenu-item:focus-visible {
-            background: #f1ebfd;
-            color: #352a55;
+            background: #edf7fd;
+            color: var(--color-primary-hover);
             outline: none;
         }
 
@@ -2708,7 +2728,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             margin: 0 0 6px 0;
             font-size: 12px;
             font-weight: 600;
-            color: #4a3f6b;
+            color: var(--color-text-primary);
         }
 
         .app-submenu-select {
@@ -2717,18 +2737,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             width: 100%;
             min-height: 34px;
             padding: 6px 30px 6px 10px;
-            border: 1px solid #c7b5e4;
+            border: 1px solid var(--color-border);
             border-radius: 8px;
             background-color: #fff;
             background-image:
-                linear-gradient(45deg, transparent 50%, #5b4a84 50%),
-                linear-gradient(135deg, #5b4a84 50%, transparent 50%);
+                linear-gradient(45deg, transparent 50%, var(--color-primary) 50%),
+                linear-gradient(135deg, var(--color-primary) 50%, transparent 50%);
             background-position:
                 calc(100% - 16px) calc(50% - 2px),
                 calc(100% - 11px) calc(50% - 2px);
             background-size: 5px 5px, 5px 5px;
             background-repeat: no-repeat;
-            color: #352a55;
+            color: var(--color-text-primary);
             font-size: 13px;
             line-height: 1.2;
             cursor: pointer;
@@ -2736,8 +2756,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .app-submenu-select:focus {
             outline: none;
-            border-color: #7b62b4;
-            box-shadow: 0 0 0 3px rgba(123, 98, 180, 0.18);
+            border-color: var(--color-secondary);
+            box-shadow: 0 0 0 3px rgba(37, 168, 224, 0.18);
         }
 
         .app-modal-overlay {
@@ -2745,7 +2765,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             position: fixed;
             inset: 0;
             z-index: 10000;
-            background: rgba(45, 35, 70, 0.45);
+            background: rgba(31, 41, 55, 0.45);
             align-items: center;
             justify-content: center;
             padding: 20px;
@@ -2759,8 +2779,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .app-modal {
             background: #fff;
             border-radius: 12px;
-            border: 1px solid #e4daf5;
-            box-shadow: 0 20px 50px rgba(74, 63, 107, 0.18);
+            border: 1px solid var(--color-border);
+            box-shadow: 0 20px 50px rgba(11, 88, 163, 0.18);
             max-width: 640px;
             width: 100%;
             max-height: min(90vh, 720px);
@@ -2780,8 +2800,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             justify-content: space-between;
             gap: 12px;
             padding: 14px 18px;
-            border-bottom: 1px solid #ede9fe;
-            background: linear-gradient(135deg, #faf8ff, #f8f5fc);
+            border-bottom: 1px solid var(--color-border);
+            background: linear-gradient(135deg, #ffffff, #f1f8fd);
             cursor: grab;
             user-select: none;
             -webkit-user-select: none;
@@ -2796,7 +2816,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             margin: 0;
             font-size: 1.25rem;
             font-family: 'Cormorant Garamond', Georgia, serif;
-            color: #4a3f6b;
+            color: var(--color-primary);
             font-weight: 700;
         }
 
@@ -2806,14 +2826,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             font-size: 1.5rem;
             line-height: 1;
             cursor: pointer;
-            color: #6b5b80;
+            color: var(--color-text-secondary);
             padding: 4px 8px;
             border-radius: 6px;
         }
 
         .app-modal-close:hover {
-            background: #ede9fe;
-            color: #4a3f6b;
+            background: #edf7fd;
+            color: var(--color-primary-hover);
         }
 
         .app-modal-body {
@@ -2837,21 +2857,55 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .members-table td {
             text-align: left;
             padding: 8px 10px;
-            border-bottom: 1px solid #ede9fe;
+            border-bottom: 1px solid var(--color-border);
         }
 
         .members-table th {
             font-weight: 600;
-            color: #4a3f6b;
-            background: #faf8ff;
+            color: var(--color-primary-hover);
+            background: #f6fbff;
+        }
+
+        .member-status-pill {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 3px 8px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .member-status-pill--active {
+            background: #ecfdf3;
+            color: #065f46;
+        }
+
+        .member-status-pill--disabled {
+            background: #fef2f2;
+            color: #991b1b;
+        }
+
+        .member-action-btn {
+            padding: 6px 10px;
+            border: 1px solid var(--color-border);
+            border-radius: 6px;
+            background: #ffffff;
+            color: #111827;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .member-action-btn:hover {
+            background: #f8fafc;
         }
 
         .app-modal-body .invite-block {
             margin-bottom: 12px;
             padding: 12px;
-            background: linear-gradient(135deg, #faf8ff, #f3effb);
+            background: linear-gradient(135deg, #f6fbff, #eff8fd);
             border-radius: 8px;
-            border: 1px solid #d4c4e8;
+            border: 1px solid var(--color-border);
         }
 
         .app-modal-body .data-actions {
@@ -2872,17 +2926,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .app-modal-body .ai-assistant-card {
             padding: 18px;
-            background: linear-gradient(145deg, #faf8ff, #f5f0ff);
+            background: linear-gradient(145deg, #f9fcff, #eef8fc);
             border-radius: 12px;
-            border: 1px solid #e4daf5;
-            box-shadow: 0 4px 20px rgba(74,63,107,0.06);
+            border: 1px solid var(--color-border);
+            box-shadow: 0 4px 20px rgba(11, 88, 163, 0.06);
         }
 
         .app-modal-body .ai-usage-bar {
             font-size: 12px;
-            color: #4a3f6b;
+            color: var(--color-text-secondary);
             background: #fff;
-            border: 1px solid #e4daf5;
+            border: 1px solid var(--color-border);
             border-radius: 8px;
             padding: 10px 12px;
             margin-bottom: 10px;
@@ -2890,7 +2944,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .app-modal-body .ai-usage-bar strong {
-            color: #352a55;
+            color: var(--color-primary-hover);
         }
 
         .app-modal-body .ai-presets-row {
@@ -2941,10 +2995,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             min-height: 70px;
             box-sizing: border-box;
             padding: 12px 14px;
-            border: 1px solid #d6caeb;
+            border: 1px solid var(--color-border);
             border-radius: 10px;
             background: #fff;
-            color: #352a55;
+            color: var(--color-text-primary);
             font-size: 14px;
             line-height: 1.4;
             resize: vertical;
@@ -2953,8 +3007,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .app-modal-body .ai-question-input:focus {
             outline: none;
-            border-color: #a78bda;
-            box-shadow: 0 0 0 3px rgba(167, 139, 218, 0.2);
+            border-color: var(--color-secondary);
+            box-shadow: 0 0 0 3px rgba(37, 168, 224, 0.2);
         }
 
         .app-modal-body .ai-submit-btn {
@@ -2966,14 +3020,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             font-size: 18px;
             font-weight: 700;
             color: #fff;
-            background: linear-gradient(145deg, #6f5a99, #57427f);
-            box-shadow: 0 5px 12px rgba(87, 66, 127, 0.3);
+            background: linear-gradient(145deg, var(--color-primary), var(--color-primary-hover));
+            box-shadow: 0 5px 12px rgba(10, 75, 142, 0.3);
             cursor: pointer;
             white-space: nowrap;
         }
 
         .app-modal-body .ai-submit-btn:hover {
-            background: linear-gradient(145deg, #7a65a5, #614b8c);
+            background: linear-gradient(145deg, #1366b8, var(--color-primary-hover));
             transform: translateY(-1px);
         }
 
@@ -2989,9 +3043,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             overflow-y: auto;
             margin-top: 6px;
             padding: 10px;
-            border: 1px solid #ddd0f0;
+            border: 1px solid var(--color-border);
             border-radius: 8px;
-            background: #fcfbff;
+            background: #f8fcff;
         }
 
         .app-modal-body .ai-chat-log .chat-message {
@@ -3038,11 +3092,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .ai-guidance-button.secondary {
-            background: #6c757d;
+            background: #4b5563;
         }
 
         .ai-guidance-button.secondary:hover {
-            background: #545b62;
+            background: #374151;
         }
         
         /* Responsive Design */
@@ -3153,7 +3207,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             top: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background: linear-gradient(135deg, #6b5b95 0%, #4a3f6b 100%);
+            background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-hover) 100%);
             color: white;
             text-align: center;
             border-radius: 12px;
@@ -3170,11 +3224,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
         
         .snackbar.error {
-            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+            background: linear-gradient(135deg, #ef4444 0%, var(--color-error) 100%);
         }
         
         .snackbar.success {
-            background: linear-gradient(135deg, #51cf66 0%, #40c057 100%);
+            background: linear-gradient(135deg, #22c55e 0%, var(--color-success) 100%);
         }
         
         .snackbar.show {
@@ -3196,6 +3250,129 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         .snackbar .close-btn:hover {
             opacity: 1;
+        }
+
+        /* Savvy theme overrides for legacy sections */
+        .cost-calculator-grid .vendor-raw-btn {
+            color: var(--color-primary-hover);
+        }
+
+        .cost-calculator-grid .vendor-chat-btn:hover:not(:disabled) {
+            border-color: var(--color-secondary);
+            box-shadow: 0 6px 16px rgba(11, 88, 163, 0.22);
+        }
+
+        .cost-calculator-grid .vendor-chat-glyph,
+        .cost-calculator-grid .vendor-chat-glyph::before {
+            border-color: var(--color-primary);
+        }
+
+        .report-filters select:focus,
+        .report-filters select:hover,
+        .report-filters .column-toggle-btn:hover {
+            border-color: var(--color-secondary);
+        }
+
+        .report-filters .column-toggle-btn:hover {
+            color: var(--color-primary-hover);
+        }
+
+        .add-row-btn,
+        .primary-btn,
+        .generate-summary-btn,
+        .chat-send-button,
+        .vendor-chat-send-btn {
+            background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
+        }
+
+        .add-row-btn:hover,
+        .primary-btn:hover,
+        .chat-send-button:hover:not(:disabled) {
+            background: var(--color-primary-hover);
+        }
+
+        .savings-section {
+            border-color: var(--color-primary);
+        }
+
+        .savings-amount,
+        .popup-link,
+        .ai-guidance-content h4 {
+            color: var(--color-primary);
+        }
+
+        .score-display-card,
+        .modal-header,
+        .ai-guidance-header,
+        .chat-bubble.user-bubble,
+        .vendor-chat-row.is-self .vendor-chat-bubble {
+            background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
+        }
+
+        .popup-link {
+            background: rgba(37, 168, 224, 0.12);
+        }
+
+        .popup-link:hover {
+            color: var(--color-primary-hover);
+            background: rgba(37, 168, 224, 0.2);
+            border-color: rgba(37, 168, 224, 0.3);
+        }
+
+        .modal-body::-webkit-scrollbar-thumb,
+        .ai-guidance-content::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
+        }
+
+        .performance-tier::before {
+            background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
+        }
+
+        .tier-title {
+            background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .action-item {
+            background: linear-gradient(135deg, #f0f8fe, #e7f3fb);
+            border-left-color: var(--color-primary);
+        }
+
+        .chat-input:focus,
+        .vendor-chat-input:focus,
+        .role-option:hover {
+            border-color: var(--color-secondary);
+            box-shadow: 0 0 0 2px rgba(37, 168, 224, 0.2);
+        }
+
+        .vendor-chat-meta {
+            background: linear-gradient(135deg, #f2f9fe 0%, #eef8fc 100%);
+            color: var(--color-primary-hover);
+        }
+
+        .vendor-chat-meta-badge {
+            background: var(--color-primary);
+        }
+
+        .vendor-chat-log {
+            background: radial-gradient(circle at top right, #f0f8fe 0%, #f8fbfd 52%, #f1f5f9 100%);
+        }
+
+        .vendor-chat-empty {
+            border: 1px dashed #9ed4ec;
+            background: #f4fbff;
+            color: var(--color-text-secondary);
+        }
+
+        .ai-loading-spinner,
+        .loading-spinner {
+            border-top-color: var(--color-primary);
+        }
+
+        .role-option input[type="radio"] {
+            accent-color: var(--color-primary);
         }
     </style>
     <!-- Google tag (gtag.js) -->
@@ -4036,7 +4213,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     const annualCostText = row.querySelector('.annual-cost-display').textContent;
                     const annualCost = parseFloat(annualCostText.replace(/[^0-9.-]/g, '')) || 0;
 
-                    if (status === 'mark_for_cancellation') {
+                    if (status === 'mark_for_cancellation' || status === 'cancelled') {
                         totalSavings += annualCost;
                     }
                 });
@@ -4161,6 +4338,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
             function statusToLegacyCancelledStatus(status) {
                 return status === 'cancelled' ? 1 : 0;
+            }
+
+            function getEndOfCurrentMonthIsoDate() {
+                const now = new Date();
+                const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                const year = String(monthEnd.getFullYear());
+                const month = String(monthEnd.getMonth() + 1).padStart(2, '0');
+                const day = String(monthEnd.getDate()).padStart(2, '0');
+                return year + '-' + month + '-' + day;
             }
             
             function performSaveCalculatorData(keepalive, silent) {
@@ -4393,11 +4579,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         syncRowCancellationGuidanceVisibility(row);
                         const newStatus = getRowStatus(row);
                         if (newStatus === 'mark_for_cancellation' && dlIn && !dlIn.value) {
-                            // Server requires a deadline for Mark for Cancellation; nudge the user.
-                            try { dlIn.focus(); } catch (_) {}
-                            if (typeof showSnackbar === 'function') {
-                                showSnackbar('A cancellation deadline is required for Mark for Cancellation.', 'info');
-                            }
+                            dlIn.value = getEndOfCurrentMonthIsoDate();
                         }
                         calculateAnnualSavings();
                         calculateConfirmedSavings();
@@ -5020,7 +5202,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     var used = d.used !== undefined ? d.used : Math.max(0, d.limit - (d.remaining !== undefined ? d.remaining : 0));
                     var hint = d.reset_hint || '';
                     bar.innerHTML = '<strong>This month:</strong> ' + used + ' / ' + d.limit + ' questions used'
-                        + (hint ? '<br><span style="font-size:11px;color:#6b5b80;">' + aiEscapeHtml(hint) + '</span>' : '');
+                        + (hint ? '<br><span style="font-size:11px;color:#4B5563;">' + aiEscapeHtml(hint) + '</span>' : '');
                 }
                 function appendAiChatMessage(role, text, asHtml) {
                     var log = document.getElementById('aiChatLog');
@@ -5281,17 +5463,44 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 <th>Name</th>
                                 <th>Email</th>
                                 <th>Role</th>
+                                <th>Status</th>
+                                <?php if ($is_admin): ?>
+                                <th>Action</th>
+                                <?php endif; ?>
                             </tr>
                         </thead>
                         <tbody>
+                            <?php $members_colspan = $is_admin ? 5 : 4; ?>
                             <?php if (empty($team_members_rows)): ?>
-                            <tr><td colspan="3">No members in this organization yet.</td></tr>
+                            <tr><td colspan="<?php echo (int) $members_colspan; ?>">No members in this organization yet.</td></tr>
                             <?php else: ?>
                             <?php foreach ($team_members_rows as $tm): ?>
+                            <?php $member_is_disabled = !empty($tm['is_disabled']); ?>
                             <tr>
                                 <td><?php echo htmlspecialchars($tm['display_name'] ?? $tm['username'] ?? '—'); ?></td>
                                 <td><?php echo htmlspecialchars($tm['email'] ?? ''); ?></td>
                                 <td><?php echo htmlspecialchars($tm['role'] ?? 'member'); ?></td>
+                                <td>
+                                    <?php if ($member_is_disabled): ?>
+                                    <span class="member-status-pill member-status-pill--disabled">Disabled</span>
+                                    <?php else: ?>
+                                    <span class="member-status-pill member-status-pill--active">Active</span>
+                                    <?php endif; ?>
+                                </td>
+                                <?php if ($is_admin): ?>
+                                <td>
+                                    <?php if (($tm['role'] ?? 'member') === 'member'): ?>
+                                    <form method="post" style="margin:0;">
+                                        <input type="hidden" name="action" value="toggle_member_disabled">
+                                        <input type="hidden" name="member_id" value="<?php echo (int) ($tm['id'] ?? 0); ?>">
+                                        <input type="hidden" name="disable" value="<?php echo $member_is_disabled ? '0' : '1'; ?>">
+                                        <button type="submit" class="member-action-btn"><?php echo $member_is_disabled ? 'Enable' : 'Disable'; ?></button>
+                                    </form>
+                                    <?php else: ?>
+                                    <span>—</span>
+                                    <?php endif; ?>
+                                </td>
+                                <?php endif; ?>
                             </tr>
                             <?php endforeach; ?>
                             <?php endif; ?>
@@ -5316,7 +5525,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <label>Start date
                         <input type="date" id="projectWizardStartDate" required>
                     </label>
-                    <label>End date
+                    <label>When will you start this project again?
                         <input type="date" id="projectWizardEndDate">
                     </label>
                     <label>
@@ -5357,10 +5566,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <div id="aiUsageBar" class="ai-usage-bar" aria-live="polite">Loading usage…</div>
                     <div class="ai-presets-row">
                         <button type="button" class="btn-secondary ai-preset" data-preset="overlap">Overlap between vendors</button>
-                        <button type="button" class="btn-secondary ai-preset" data-preset="alternatives">Cheaper alternatives</button>
-                        <button type="button" class="btn-secondary ai-preset" data-preset="lower_tiers">Lower service tiers</button>
                         <button type="button" class="btn-secondary ai-preset" data-preset="duplicates">Duplicate subscriptions</button>
-                        <button type="button" class="btn-secondary ai-preset" data-preset="executive">Executive summary suggestions</button>
+                        <button type="button" class="btn-secondary ai-preset" data-preset="executive">Executive summary</button>
                     </div>
                     <div class="ai-composer">
                         <textarea id="aiQuestion" class="ai-question-input" rows="2" placeholder="Ask a specific question..."></textarea>
@@ -5383,7 +5590,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <form method="POST" style="display:grid;gap:10px;">
                         <input type="hidden" name="action" value="save_reminder_settings">
                         <?php if ($is_admin): ?>
-                        <label><input type="checkbox" name="deadline_reminders_enabled" value="1" <?php echo $deadline_reminders_org ? 'checked' : ''; ?>> Org: deadline email assistant</label>
+                        <label><input type="checkbox" name="deadline_reminders_enabled" value="1" <?php echo $deadline_reminders_org ? 'checked' : ''; ?>> Email monthly executive summary</label>
                         <label style="display:grid;gap:6px;font-size:14px;">
                             <span>Webhook for notifications</span>
                             <input
@@ -5399,7 +5606,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             </small>
                         </label>
                         <?php endif; ?>
-                        <label style="font-size:14px;"><input type="checkbox" name="user_deadline_reminders" value="1" <?php echo $deadline_reminders_user ? 'checked' : ''; ?>> My deadline reminders</label>
+                        <label style="font-size:14px;"><input type="checkbox" name="user_deadline_reminders" value="1" <?php echo $deadline_reminders_user ? 'checked' : ''; ?>> Email me cancellation date reminders</label>
                         <div><button type="submit">Save</button></div>
                     </form>
                 </div>
