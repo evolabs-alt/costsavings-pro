@@ -485,7 +485,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Savvy CFO Cost Savings Pro Tool</title>
+    <title>Savvy Expense Optimizer</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -1262,6 +1262,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         .logo-above-container .login-logo {
             max-width: 160px;
+        }
+
+        .logo-tagline {
+            margin-top: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            color: var(--color-text-secondary);
         }
 
         /* Responsive styles for cost savings tool table */
@@ -3491,12 +3499,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <img src="https://savvycfo.com/wp-content/uploads/2023/06/SavvyCFO_logo_mainfinal-bluewhite_23Jun23.png" 
                      alt="Savvy CFO Logo" 
                      class="login-logo">
+                <div class="logo-tagline">Savvy Expense Optimizer</div>
             </div>
         <?php endif; ?>
         <div class="container">
             <?php if ($current_view === 'login'): ?>
             <div class="content-padding login-page">
-                <h1>Cost Savings Pro Tool</h1>
+                <h1>Savvy Expense Optimizer</h1>
                 <p class="subtitle">Sign in with your username and password.</p>
             
             <?php if (!empty($_SESSION['awaiting_role'])): ?>
@@ -3546,10 +3555,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         <?php elseif ($current_view === 'placeholder'): ?>
             <div class="content-padding">
-                <h1 id="costSavingsTitle">Cost Savings Pro Tool - Project: <span id="activeProjectNameLabel">No project selected</span></h1>
-                <p class="subtitle" style="margin-bottom:16px;">Signed in as <?php echo htmlspecialchars($_SESSION['username'] ?? $_SESSION['user_email'] ?? ''); ?>
-                    <?php if ($is_admin): ?> (Admin)<?php endif; ?></p>
-
                 <nav class="app-nav" aria-label="App sections">
                     <ul class="app-nav-list">
                         <li class="app-nav-item has-submenu" id="appMembersNavItem">
@@ -3594,14 +3599,19 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appAutoPopulatePurposeBtn">Auto populate purpose</button></li>
                             </ul>
                         </li>
-                        <li class="app-nav-item">
-                            <button type="button" class="app-nav-link" data-open-modal="appModalSettings">Settings</button>
-                        </li>
-                        <li class="app-nav-item">
-                            <form method="POST" class="app-nav-inline-form">
-                                <input type="hidden" name="action" value="logout">
-                                <button type="submit" class="app-nav-link">Logout</button>
-                            </form>
+                        <li class="app-nav-item has-submenu" id="appAdminNavItem">
+                            <button type="button" class="app-nav-link" id="appAdminMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appAdminSubmenu"><?php echo htmlspecialchars($_SESSION['username'] ?? $_SESSION['user_email'] ?? 'Account'); ?></button>
+                            <ul class="app-submenu" id="appAdminSubmenu" role="menu" aria-label="Account actions">
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings">Settings</button>
+                                </li>
+                                <li role="none">
+                                    <form method="POST" class="app-nav-inline-form">
+                                        <input type="hidden" name="action" value="logout">
+                                        <button type="submit" role="menuitem" class="app-submenu-item">Logout</button>
+                                    </form>
+                                </li>
+                            </ul>
                         </li>
                     </ul>
                 </nav>
@@ -3710,8 +3720,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             }
 
             function updateActiveProjectHeader(projectSource) {
-                const label = document.getElementById('activeProjectNameLabel');
-                if (!label) return;
+                const baseTitle = 'Savvy Expense Optimizer';
 
                 let projectName = '';
                 if (typeof projectSource === 'string') {
@@ -3723,7 +3732,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
 
                 projectName = projectName.trim();
-                label.textContent = projectName !== '' ? projectName : 'No project selected';
+                document.title = projectName !== '' ? (baseTitle + ' - ' + projectName) : baseTitle;
             }
 
             function submitProjectWizardForm() {

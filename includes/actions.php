@@ -294,7 +294,7 @@ function handleInviteMember() {
         . '<p><a href="' . htmlspecialchars($link) . '">Complete registration</a></p>'
         . '<p style="font-size:13px;color:#555;">If the link above does not work, copy and paste this address into your browser:<br>'
         . htmlspecialchars($link) . '</p>';
-    $mailResult = sendEmail($email, 'Your invitation — Cost Savings Pro Tool', $body);
+    $mailResult = sendEmail($email, 'Your invitation — Savvy Expense Optimizer', $body);
     if ($mailResult !== true) {
         if (is_array($mailResult)) {
             error_log(
