@@ -566,16 +566,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             max-width: 100%;
         }
         
-        .container::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, var(--color-primary), var(--color-primary-hover), var(--color-secondary));
-        }
-        
         @keyframes gradientShift {
             0%, 100% { background-position: 0% 50%; }
             50% { background-position: 100% 50%; }
