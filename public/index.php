@@ -1035,7 +1035,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             font-size: 13px;
             font-weight: 600;
             cursor: pointer;
-            white-space: nowrap;
+            white-space: normal;
+            line-height: 1.2;
+            text-align: center;
         }
 
         .report-filters .column-toggle-btn:hover {
@@ -3012,7 +3014,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .app-modal-body .ai-chat-log {
-            max-height: 420px;
+            max-height: 220px;
             min-height: 72px;
             overflow-y: auto;
             flex: 1 1 auto;
@@ -3662,8 +3664,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     start_date: (document.getElementById('projectWizardStartDate') || {}).value || '',
                     end_date: (document.getElementById('projectWizardEndDate') || {}).value || '',
                     member_ids: memberIds,
-                    copy_from_active: ((document.getElementById('projectWizardCopyFromActive') || {}).checked ? 1 : 0),
-                    source_project_id: currentActiveProjectId || 0,
+                    copy_from_active: ((document.querySelector('input[name="projectWizardDataMode"]:checked') || {}).value === 'copy_from_active' ? 1 : 0),
+                    source_project_id: ((document.querySelector('input[name="projectWizardDataMode"]:checked') || {}).value === 'copy_from_active' ? (currentActiveProjectId || 0) : 0),
                 };
                 postJson(payload)
                     .then(function(d) {
@@ -5514,12 +5516,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <input type="date" id="projectWizardEndDate">
                     </label>
                     <label>
-                        <input type="checkbox" id="projectWizardUploadDataHint">
+                        <input type="radio" name="projectWizardDataMode" id="projectWizardDataModeUpload" value="upload_after" checked>
                         I will upload data after creating this project.
                     </label>
                     <?php if ($is_admin): ?>
                     <label>
-                        <input type="checkbox" id="projectWizardCopyFromActive">
+                        <input type="radio" name="projectWizardDataMode" id="projectWizardDataModeCopy" value="copy_from_active">
                         Copy data from current active project.
                     </label>
                     <?php endif; ?>
