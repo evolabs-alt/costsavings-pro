@@ -1080,6 +1080,63 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             flex-wrap: wrap;
         }
 
+        .vendor-pagination {
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        .vendor-pagination[hidden] {
+            display: none;
+        }
+
+        .vendor-pagination-btn {
+            width: 30px;
+            height: 30px;
+            border: 1px solid #d1d5db;
+            background: #fff;
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            padding: 0;
+            margin: 0;
+        }
+
+        .vendor-pagination-btn .material-symbols-outlined {
+            font-size: 18px;
+            color: var(--color-primary-hover);
+            font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 20;
+            line-height: 1;
+        }
+
+        .vendor-pagination-btn:hover:not(:disabled) {
+            border-color: var(--color-secondary);
+            box-shadow: 0 6px 12px rgba(11, 88, 163, 0.16);
+            transform: translateY(-1px);
+        }
+
+        .vendor-pagination-btn:hover:not(:disabled) .material-symbols-outlined {
+            color: var(--color-primary);
+        }
+
+        .vendor-pagination-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        .vendor-pagination-status {
+            font-size: 12px;
+            color: var(--color-text-secondary);
+            min-width: 120px;
+            text-align: center;
+        }
+
         .add-row-btn {
             background: #6b5b95;
             color: white;
@@ -3586,6 +3643,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <!-- Rows will be added dynamically -->
                     </tbody>
                 </table>
+                <div id="vendorPagination" class="vendor-pagination" hidden>
+                    <button type="button" id="vendorPaginationPrev" class="vendor-pagination-btn" aria-label="Previous page" title="Previous page">
+                        <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
+                    </button>
+                    <div id="vendorPaginationStatus" class="vendor-pagination-status">Page 1 of 1</div>
+                    <button type="button" id="vendorPaginationNext" class="vendor-pagination-btn" aria-label="Next page" title="Next page">
+                        <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+                    </button>
+                </div>
                 
                 <div class="cost-calculator-actions">
                     <button type="button" class="add-row-btn" onclick="addCalculatorRow()">+ Add Row</button>
@@ -3917,9 +3983,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             let vendorChatLastSignature = '';
             let activeCancelGuidanceItemId = 0;
             let activeCancelGuidanceVendorName = '';
+            const VENDOR_PAGE_SIZE = 20;
+            let vendorCurrentPage = 1;
+            let vendorCurrentFilter = 'all';
 
             function getVendorRowCheckboxes() {
-                return Array.from(document.querySelectorAll('#calculatorRows .row-select-checkbox'));
+                return Array.from(document.querySelectorAll('#calculatorRows tr .row-select-checkbox')).filter(function(cb) {
+                    const row = cb.closest('tr');
+                    return !!(row && row.style.display !== 'none');
+                });
             }
 
             function getSelectedVendorRows() {
@@ -4040,7 +4112,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         if (mgrSel && !mgrSel.disabled) mgrSel.value = payload.value;
                     });
                 }
-                updateRowNumbers();
+                applyVendorTablePagination(vendorCurrentPage);
                 calculateAnnualSavings();
                 calculateConfirmedSavings();
                 clearRowSelection();
@@ -4154,7 +4226,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const rowCheckbox = row.querySelector('.row-select-checkbox');
                 if (rowCheckbox) rowCheckbox.addEventListener('change', updateSelectAllCheckboxState);
 
-                updateRowNumbers();
+                applyVendorTablePagination(vendorCurrentPage);
             }
             
             function attachRowListeners(row) {
@@ -4294,6 +4366,80 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             }
             
             const VALID_ROW_STATUSES = ['pending', 'unknown', 'keep', 'mark_for_cancellation', 'cancelled'];
+
+            function normalizeVendorFilter(filterValue) {
+                const filter = String(filterValue || 'all');
+                if (filter === 'all' || VALID_ROW_STATUSES.indexOf(filter) !== -1) {
+                    return filter;
+                }
+                return 'all';
+            }
+
+            function getFilteredVendorRows(filterValue) {
+                const filter = normalizeVendorFilter(filterValue);
+                return Array.from(document.querySelectorAll('#calculatorRows tr')).filter(function(row) {
+                    if (filter === 'all') {
+                        return true;
+                    }
+                    return getRowStatus(row) === filter;
+                });
+            }
+
+            function renderVendorPagination(totalFilteredRows, totalPages) {
+                const wrapper = document.getElementById('vendorPagination');
+                const prevBtn = document.getElementById('vendorPaginationPrev');
+                const nextBtn = document.getElementById('vendorPaginationNext');
+                const status = document.getElementById('vendorPaginationStatus');
+                if (!wrapper || !prevBtn || !nextBtn || !status) return;
+
+                const shouldShow = totalFilteredRows > VENDOR_PAGE_SIZE;
+                wrapper.hidden = !shouldShow;
+                if (!shouldShow) {
+                    prevBtn.disabled = true;
+                    nextBtn.disabled = true;
+                    status.textContent = 'Page 1 of 1';
+                    return;
+                }
+
+                status.textContent = 'Page ' + vendorCurrentPage + ' of ' + totalPages;
+                prevBtn.disabled = vendorCurrentPage <= 1;
+                nextBtn.disabled = vendorCurrentPage >= totalPages;
+            }
+
+            function applyVendorTablePagination(page, filterValue) {
+                if (typeof filterValue !== 'undefined') {
+                    vendorCurrentFilter = normalizeVendorFilter(filterValue);
+                }
+                if (typeof page === 'number' && isFinite(page)) {
+                    vendorCurrentPage = page;
+                }
+
+                const allRows = Array.from(document.querySelectorAll('#calculatorRows tr'));
+                const filteredRows = getFilteredVendorRows(vendorCurrentFilter);
+                const totalPages = Math.max(1, Math.ceil(filteredRows.length / VENDOR_PAGE_SIZE));
+                vendorCurrentPage = Math.min(totalPages, Math.max(1, vendorCurrentPage));
+
+                const startIdx = (vendorCurrentPage - 1) * VENDOR_PAGE_SIZE;
+                const endIdx = startIdx + VENDOR_PAGE_SIZE;
+                const pageRows = filteredRows.slice(startIdx, endIdx);
+                const visibleSet = new Set(pageRows);
+
+                allRows.forEach(function(row) {
+                    const show = visibleSet.has(row);
+                    row.style.display = show ? '' : 'none';
+                    if (!show) {
+                        const cb = row.querySelector('.row-select-checkbox');
+                        if (cb) cb.checked = false;
+                    }
+                });
+
+                updateRowNumbers();
+                renderVendorPagination(filteredRows.length, totalPages);
+            }
+
+            function goToVendorPage(page) {
+                applyVendorTablePagination(page);
+            }
 
             function normalizeStatusToken(value) {
                 if (value === undefined || value === null) return 'pending';
@@ -4519,9 +4665,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             calculateAnnualSavings();
                             calculateConfirmedSavings();
                             clearRowSelection();
+                            const filterSelect = document.getElementById('reportFilter');
+                            applyVendorTablePagination(1, filterSelect ? filterSelect.value : 'all');
                         } else {
                             addCalculatorRow();
                             clearRowSelection();
+                            const filterSelect = document.getElementById('reportFilter');
+                            applyVendorTablePagination(1, filterSelect ? filterSelect.value : 'all');
                         }
                     } finally {
                         calculatorLoadInProgress = false;
@@ -4533,6 +4683,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     try {
                         addCalculatorRow();
                         clearRowSelection();
+                        const filterSelect = document.getElementById('reportFilter');
+                        applyVendorTablePagination(1, filterSelect ? filterSelect.value : 'all');
                     } finally {
                         calculatorLoadInProgress = false;
                     }
@@ -4651,22 +4803,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             
             // Filter table rows based on selected filter
             function filterTableRows(filterValue) {
-                const rows = document.querySelectorAll('#calculatorRows tr');
-                const filter = String(filterValue || 'all');
-                rows.forEach(row => {
-                    const status = getRowStatus(row);
-                    let showRow = false;
-
-                    if (filter === 'all') {
-                        showRow = true;
-                    } else if (VALID_ROW_STATUSES.indexOf(filter) !== -1) {
-                        showRow = (status === filter);
-                    }
-
-                    row.style.display = showRow ? '' : 'none';
-                });
-
-                updateRowNumbers();
+                applyVendorTablePagination(1, filterValue);
             }
 
             function setPurposeColumnState(isVisible) {
@@ -4787,6 +4924,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     bulkConfirmCancelBtn.addEventListener('click', function() {
                         pendingBulkActionData = null;
                         closeBulkModalById('appModalBulkConfirm');
+                    });
+                }
+                const vendorPaginationPrev = document.getElementById('vendorPaginationPrev');
+                if (vendorPaginationPrev) {
+                    vendorPaginationPrev.addEventListener('click', function() {
+                        goToVendorPage(vendorCurrentPage - 1);
+                    });
+                }
+                const vendorPaginationNext = document.getElementById('vendorPaginationNext');
+                if (vendorPaginationNext) {
+                    vendorPaginationNext.addEventListener('click', function() {
+                        goToVendorPage(vendorCurrentPage + 1);
                     });
                 }
                 const calculatorRowsEl = document.getElementById('calculatorRows');
