@@ -3627,6 +3627,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <select id="reportFilter" onchange="filterTableRows(this.value)">
                         <option value="all">All</option>
                         <option value="pending">Pending</option>
+                        <option value="question">Question</option>
                         <option value="unknown">Unknown</option>
                         <option value="keep">Keep</option>
                         <option value="mark_for_cancellation">Mark for Cancellation</option>
@@ -3650,7 +3651,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <th class="annual-cost">Annual Cost</th>
                             <th class="manager-col">Manager</th>
                             <th class="visibility-col">Visibility</th>
-                            <th class="row-status" title="Vendor status: Pending, Unknown, Keep, Mark for Cancellation, or Cancelled">Status</th>
+                            <th class="row-status" title="Vendor status: Pending, Question, Unknown, Keep, Mark for Cancellation, or Cancelled">Status</th>
                             <th class="notes">Purpose</th>
                             <th class="vendor-chat-col">Chat</th>
                         </tr>
@@ -4213,6 +4214,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <div class="row-status-top">
                             <select name="status[]" class="row-status-select" data-row="${rowCount}">
                                 <option value="pending">Pending</option>
+                                <option value="question">Question</option>
                                 <option value="unknown">Unknown</option>
                                 <option value="keep">Keep</option>
                                 <option value="mark_for_cancellation">Mark for Cancellation</option>
@@ -4389,7 +4391,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 return saveQueue;
             }
             
-            const VALID_ROW_STATUSES = ['pending', 'unknown', 'keep', 'mark_for_cancellation', 'cancelled'];
+            const VALID_ROW_STATUSES = ['pending', 'question', 'unknown', 'keep', 'mark_for_cancellation', 'cancelled'];
 
             function normalizeVendorFilter(filterValue) {
                 const filter = String(filterValue || 'all');

@@ -334,7 +334,7 @@ function migrateCostCalculatorSchema(PDO $pdo) {
         `annual_cost` DECIMAL(12, 2) DEFAULT 0.00,
         `cancel_keep` VARCHAR(10) DEFAULT 'Keep',
         `cancelled_status` TINYINT(1) DEFAULT 0,
-        `status` ENUM('pending','unknown','keep','mark_for_cancellation','cancelled') NOT NULL DEFAULT 'pending',
+        `status` ENUM('pending','question','unknown','keep','mark_for_cancellation','cancelled') NOT NULL DEFAULT 'pending',
         `visibility` ENUM('public','confidential') NOT NULL DEFAULT 'public',
         `purpose_of_subscription` TEXT NULL,
         `cancellation_deadline` DATE NULL,
@@ -364,8 +364,13 @@ function migrateCostCalculatorSchema(PDO $pdo) {
         $addCol(
             $pdo,
             'status',
-            "`status` ENUM('pending','unknown','keep','mark_for_cancellation','cancelled') NOT NULL DEFAULT 'pending'"
+            "`status` ENUM('pending','question','unknown','keep','mark_for_cancellation','cancelled') NOT NULL DEFAULT 'pending'"
         );
+
+        $statusCol = $pdo->query("SHOW COLUMNS FROM `cost_calculator_items` LIKE 'status'")->fetch(PDO::FETCH_ASSOC);
+        if ($statusCol && strpos(strtolower((string) ($statusCol['Type'] ?? '')), 'question') === false) {
+            $pdo->exec("ALTER TABLE `cost_calculator_items` MODIFY COLUMN `status` ENUM('pending','question','unknown','keep','mark_for_cancellation','cancelled') NOT NULL DEFAULT 'pending'");
+        }
 
         // Backfill status from legacy cancel_keep/cancelled_status pair for rows
         // that still hold the default 'pending' value (idempotent).

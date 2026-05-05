@@ -151,6 +151,7 @@ class ReminderService
                 if (!in_array($status, [
                     VendorService::STATUS_KEEP,
                     VendorService::STATUS_PENDING,
+                    VendorService::STATUS_QUESTION,
                     VendorService::STATUS_UNKNOWN,
                 ], true)) {
                     continue;

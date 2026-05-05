@@ -8,6 +8,7 @@ use PDOException;
 class VendorService
 {
     public const STATUS_PENDING = 'pending';
+    public const STATUS_QUESTION = 'question';
     public const STATUS_UNKNOWN = 'unknown';
     public const STATUS_KEEP = 'keep';
     public const STATUS_MARK = 'mark_for_cancellation';
@@ -20,6 +21,7 @@ class VendorService
     {
         return [
             self::STATUS_PENDING,
+            self::STATUS_QUESTION,
             self::STATUS_UNKNOWN,
             self::STATUS_KEEP,
             self::STATUS_MARK,
@@ -42,6 +44,9 @@ class VendorService
         switch ($s) {
             case self::STATUS_PENDING:
                 return self::STATUS_PENDING;
+            case self::STATUS_QUESTION:
+            case 'question_mark':
+                return self::STATUS_QUESTION;
             case self::STATUS_UNKNOWN:
                 return self::STATUS_UNKNOWN;
             case self::STATUS_KEEP:
@@ -135,6 +140,8 @@ class VendorService
         switch (self::normalizeStatus($status)) {
             case self::STATUS_PENDING:
                 return 'Pending';
+            case self::STATUS_QUESTION:
+                return 'Question';
             case self::STATUS_UNKNOWN:
                 return 'Unknown';
             case self::STATUS_KEEP:
