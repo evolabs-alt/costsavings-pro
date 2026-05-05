@@ -355,7 +355,17 @@ function handleInviteMember() {
         . htmlspecialchars($link) . '</p>';
     $mailResult = sendEmail($email, 'Your invitation — Savvy Expense Optimizer', $body);
     if ($mailResult !== true) {
+        $postmarkDetail = '';
         if (is_array($mailResult)) {
+            $em = trim((string) ($mailResult['error_message'] ?? ''));
+            $ei = trim((string) ($mailResult['error_info'] ?? ''));
+            if ($em !== '' && $ei !== '' && $ei !== $em) {
+                $postmarkDetail = $em . ' (' . $ei . ')';
+            } elseif ($em !== '') {
+                $postmarkDetail = $em;
+            } elseif ($ei !== '') {
+                $postmarkDetail = $ei;
+            }
             error_log(
                 'handleInviteMember mail: '
                 . ($mailResult['error_message'] ?? '')
@@ -366,10 +376,23 @@ function handleInviteMember() {
                 $_SESSION['smtp_debug_transcript'] = (string) $mailResult['smtp_debug'];
             }
         }
-        logInviteEvent('mail_failed', ['invitation_id' => $invId, 'org_id' => $orgId, 'email' => $email]);
+        $detailForLog = $postmarkDetail !== ''
+            ? (function_exists('mb_substr') ? mb_substr($postmarkDetail, 0, 500) : substr($postmarkDetail, 0, 500))
+            : '';
+        logInviteEvent('mail_failed', [
+            'invitation_id' => $invId,
+            'org_id' => $orgId,
+            'email' => $email,
+            'postmark_detail' => $detailForLog,
+        ]);
         // Keep the invitation row so the token stays valid; admin can share the link manually.
-        $_SESSION['error'] = 'Could not send invitation email. Check POSTMARK_SERVER_TOKEN, that SMTP_FROM_EMAIL matches a verified Postmark sender, and Postmark account limits. '
-            . 'You can share this registration link manually: ' . $link;
+        $hint = 'Check POSTMARK_SERVER_TOKEN, that SMTP_FROM_EMAIL matches a verified Postmark sender, and Postmark account limits. See pro.logs for sendEmail_postmark_fail.';
+        if ($postmarkDetail !== '') {
+            $short = function_exists('mb_substr') ? mb_substr($postmarkDetail, 0, 450) : substr($postmarkDetail, 0, 450);
+            $hint = $short . ' See pro.logs for details. ' . $hint;
+        }
+        $_SESSION['error'] = 'Could not send invitation email. ' . $hint
+            . ' You can share this registration link manually: ' . $link;
         $redir();
     }
     logInviteEvent('mail_sent', ['invitation_id' => $invId, 'org_id' => $orgId, 'email' => $email]);
