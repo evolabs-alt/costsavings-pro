@@ -440,6 +440,15 @@ function migrateVendorDetailSchema(PDO $pdo): void
     } catch (PDOException $e) {
         error_log('migrateVendorDetailSchema: ' . $e->getMessage());
     }
+    // Shared vendor purpose cache: org_id is unused for matching; new rows use NULL.
+    try {
+        $col = $pdo->query("SHOW COLUMNS FROM `vendor_detail` LIKE 'org_id'")->fetch(PDO::FETCH_ASSOC);
+        if ($col && strtoupper((string) ($col['Null'] ?? '')) !== 'YES') {
+            $pdo->exec('ALTER TABLE `vendor_detail` MODIFY `org_id` INT UNSIGNED NULL');
+        }
+    } catch (PDOException $e) {
+        error_log('migrateVendorDetailSchema org_id nullable: ' . $e->getMessage());
+    }
 }
 
 /**

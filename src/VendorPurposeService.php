@@ -17,6 +17,9 @@ class VendorPurposeService
     /**
      * @param array<int, array{id:int, vendor_name:string}> $rows
      * @return array{success:bool, resolved:array<int, array{id:int, vendor_name:string, purpose:string, source:string}>, unresolved:array<int, array{id:int, vendor_name:string}>, error?:string}
+     *
+     * Vendor purpose cache in `vendor_detail` is global (shared across all orgs). $orgId is
+     * still used for calculator row updates and org-scoped fallback queries only.
      */
     public static function resolveForVisibleRows(PDO $pdo, int $orgId, array $rows): array
     {
@@ -36,15 +39,18 @@ class VendorPurposeService
             return ['success' => true, 'resolved' => [], 'unresolved' => []];
         }
 
+        $detailByCanon = self::vendorDetailPurposeByCanon($pdo);
+
         $resolved = [];
         $unresolved = [];
         foreach ($targets as $t) {
-            $hit = self::findByAnyAlias($pdo, $orgId, $t['vendor_name']);
-            if ($hit !== null && $hit['purpose'] !== '') {
+            $canon = self::canon($t['vendor_name']);
+            $purpose = ($canon !== '' && isset($detailByCanon[$canon])) ? $detailByCanon[$canon] : '';
+            if ($purpose !== '') {
                 $resolved[] = [
                     'id' => $t['id'],
                     'vendor_name' => $t['vendor_name'],
-                    'purpose' => $hit['purpose'],
+                    'purpose' => $purpose,
                     'source' => 'vendor_detail',
                 ];
             } else {
@@ -97,7 +103,7 @@ class VendorPurposeService
                     'purpose' => substr($purpose, 0, 220),
                     'names' => array_slice($names, 0, 5),
                 ];
-                self::upsertVendorDetail($pdo, $orgId, array_slice($names, 0, 5), substr($purpose, 0, 220));
+                self::upsertVendorDetail($pdo, array_slice($names, 0, 5), substr($purpose, 0, 220));
             }
         }
 
@@ -180,47 +186,53 @@ class VendorPurposeService
     }
 
     /**
-     * @return array{purpose:string}|null
+     * Canonical vendor name → purpose from global `vendor_detail` (shared across organizations).
+     * First alias match per canonical form wins row order from the database.
+     *
+     * @return array<string, string>
      */
-    private static function findByAnyAlias(PDO $pdo, int $orgId, string $vendorName): ?array
+    private static function vendorDetailPurposeByCanon(PDO $pdo): array
     {
-        $canon = self::canon($vendorName);
-        if ($canon === '') {
-            return null;
-        }
-        $st = $pdo->prepare(
-            'SELECT purpose, name_1, name_2, name_3, name_4, name_5
-             FROM vendor_detail
-             WHERE org_id = ?'
-        );
-        $st->execute([$orgId]);
-        while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
-            $names = [
-                (string) ($row['name_1'] ?? ''),
-                (string) ($row['name_2'] ?? ''),
-                (string) ($row['name_3'] ?? ''),
-                (string) ($row['name_4'] ?? ''),
-                (string) ($row['name_5'] ?? ''),
-            ];
-            foreach ($names as $n) {
-                if ($n !== '' && self::canon($n) === $canon) {
-                    return ['purpose' => trim((string) ($row['purpose'] ?? ''))];
+        $map = [];
+        try {
+            $st = $pdo->query(
+                'SELECT purpose, name_1, name_2, name_3, name_4, name_5 FROM vendor_detail'
+            );
+            if ($st === false) {
+                return $map;
+            }
+            while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+                $purpose = trim((string) ($row['purpose'] ?? ''));
+                if ($purpose === '') {
+                    continue;
+                }
+                foreach (['name_1', 'name_2', 'name_3', 'name_4', 'name_5'] as $col) {
+                    $cn = self::canon((string) ($row[$col] ?? ''));
+                    if ($cn !== '' && !isset($map[$cn])) {
+                        $map[$cn] = $purpose;
+                    }
                 }
             }
+        } catch (PDOException $e) {
+            error_log('VendorPurposeService::vendorDetailPurposeByCanon: ' . $e->getMessage());
         }
 
-        return null;
+        return $map;
     }
 
     /**
+     * Merge into global vendor_detail cache (org-agnostic).
+     *
      * @param array<int, string> $names
      */
-    private static function upsertVendorDetail(PDO $pdo, int $orgId, array $names, string $purpose): void
+    private static function upsertVendorDetail(PDO $pdo, array $names, string $purpose): void
     {
         $canonNames = array_map([self::class, 'canon'], $names);
-        $sql = 'SELECT id, name_1, name_2, name_3, name_4, name_5 FROM vendor_detail WHERE org_id = ?';
-        $st = $pdo->prepare($sql);
-        $st->execute([$orgId]);
+        $sql = 'SELECT id, name_1, name_2, name_3, name_4, name_5 FROM vendor_detail';
+        $st = $pdo->query($sql);
+        if ($st === false) {
+            return;
+        }
         $matchId = 0;
         while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
             $existing = [
@@ -242,9 +254,9 @@ class VendorPurposeService
             $upd = $pdo->prepare(
                 'UPDATE vendor_detail
                  SET name_1 = ?, name_2 = ?, name_3 = ?, name_4 = ?, name_5 = ?, purpose = ?
-                 WHERE id = ? AND org_id = ?'
+                 WHERE id = ?'
             );
-            $upd->execute([$names[0], $names[1], $names[2], $names[3], $names[4], $p, $matchId, $orgId]);
+            $upd->execute([$names[0], $names[1], $names[2], $names[3], $names[4], $p, $matchId]);
 
             return;
         }
@@ -253,7 +265,7 @@ class VendorPurposeService
                 'INSERT INTO vendor_detail (org_id, name_1, name_2, name_3, name_4, name_5, purpose)
                  VALUES (?,?,?,?,?,?,?)'
             );
-            $ins->execute([$orgId, $names[0], $names[1], $names[2], $names[3], $names[4], $p]);
+            $ins->execute([null, $names[0], $names[1], $names[2], $names[3], $names[4], $p]);
         } catch (PDOException $e) {
             error_log('VendorPurposeService::upsertVendorDetail: ' . $e->getMessage());
         }
