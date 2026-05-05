@@ -362,13 +362,13 @@ function handleInviteMember() {
                 . ' '
                 . ($mailResult['error_info'] ?? '')
             );
-            if (!empty($mailResult['smtp_debug']) && defined('SMTP_BROWSER_DEBUG') && SMTP_BROWSER_DEBUG) {
+            if (!empty($mailResult['smtp_debug']) && defined('POSTMARK_DEBUG') && POSTMARK_DEBUG) {
                 $_SESSION['smtp_debug_transcript'] = (string) $mailResult['smtp_debug'];
             }
         }
         logInviteEvent('mail_failed', ['invitation_id' => $invId, 'org_id' => $orgId, 'email' => $email]);
         // Keep the invitation row so the token stays valid; admin can share the link manually.
-        $_SESSION['error'] = 'Could not send invitation email. Check SMTP_HOST, SMTP_PORT, SMTP_SECURE (ssl vs tls), and credentials in config.php. '
+        $_SESSION['error'] = 'Could not send invitation email. Check POSTMARK_SERVER_TOKEN, that SMTP_FROM_EMAIL matches a verified Postmark sender, and Postmark account limits. '
             . 'You can share this registration link manually: ' . $link;
         $redir();
     }

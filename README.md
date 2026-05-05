@@ -4,7 +4,7 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
 
 ## Features
 
-- **Username + password login** — Sessions store `user_id`, `org_id`, and app role (`admin` / `member`). PHPMailer or PHP `mail()` via [includes/mail.php](includes/mail.php).
+- **Username + password login** — Sessions store `user_id`, `org_id`, and app role (`admin` / `member`). Transactional email via [Postmark](https://postmarkapp.com) ([includes/mail.php](includes/mail.php)).
 - **Organizations (up to 10 users)** — Admin invites members by email; registration completes at [public/register.php](public/register.php).
 - **Vendor grid** — Manager assignment, public/confidential visibility, purpose of subscription, cancellation deadline, last payment date; auto-save to `cost_calculator_items` (PDO / [src/VendorService.php](src/VendorService.php)).
 - **CSV import** — QuickBooks-style “Cost Savings - Transaction List by Vendor” exports ([src/CsvImport.php](src/CsvImport.php)).
@@ -21,7 +21,7 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
 │   ├── register.php        # Invitation registration
 │   └── cron_reminders.php  # Scheduled jobs (CLI or HTTP with key)
 ├── includes/
-│   ├── mail.php            # SMTP / PHPMailer
+│   ├── mail.php            # Postmark (HTTP API)
 │   └── actions.php         # POST handlers
 ├── src/                    # PSR-4 CostSavings namespace
 ├── composer.json
@@ -32,11 +32,11 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
 
 ## Configuration
 
-1. Copy `config.example.php` to `config.php`, then set `CACHE_DIR`, SMTP, GHL, database credentials, and at least one of `PERPLEXITY_API_KEY` or `OPENAI_API_KEY` (via environment or defines) for Ask AI. Set **`BASE_URL`** to your public app URL with trailing slash (e.g. `https://yourdomain.com/public/`) so invitation emails use correct links; if omitted, the app builds the URL from the current request (set `BASE_URL` when behind a reverse proxy or if invites point to the wrong host).
-2. **Composer:** From the project root run `composer install` (requires PHP with Composer) to install PhpSpreadsheet and Dompdf for exports.
+1. Copy `config.example.php` to `config.php`, then set `CACHE_DIR`, **Postmark** (`POSTMARK_SERVER_TOKEN` and verified `SMTP_FROM_EMAIL` / `SMTP_FROM_NAME`), GHL, database credentials, and at least one of `PERPLEXITY_API_KEY` or `OPENAI_API_KEY` (via environment or defines) for Ask AI. Set **`BASE_URL`** to your public app URL with trailing slash (e.g. `https://yourdomain.com/public/`) so invitation emails use correct links; if omitted, the app builds the URL from the current request (set `BASE_URL` when behind a reverse proxy or if invites point to the wrong host).
+2. **Composer:** From the project root run `composer install` (requires PHP with Composer) for PhpSpreadsheet and Dompdf.
 3. **Seed admin (local testing):** Set `SEED_ADMIN_PASSWORD` in the environment or in `config.php` so the first bootstrap can create the seeded admin (`SEED_ADMIN_USERNAME` / `SEED_ADMIN_EMAIL` in `config.example.php`). Leave empty in production if you do not want a seeded account.
 4. **Cron:** Schedule `php public/cron_reminders.php` daily (or call via HTTP with `CRON_SECRET` if defined in config).
-5. **PHPMailer (optional):** Install under `public/vendor/phpmailer/phpmailer/` or one of the paths in [includes/mail.php](includes/mail.php).
+5. **Postmark:** Create a Postmark **Server**, copy its **Server API token** into `POSTMARK_SERVER_TOKEN` (environment recommended). Verify the **sender domain** or add a **Sender Signature** for the address you use as `SMTP_FROM_EMAIL`. Invites and reminder emails use [includes/mail.php](includes/mail.php) (`POST https://api.postmarkapp.com/email`).
 
 ## Security note
 

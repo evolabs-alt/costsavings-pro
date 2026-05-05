@@ -3486,7 +3486,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         <?php endif; ?>
         <?php if (isset($_SESSION['smtp_debug_transcript'])): ?>
             try {
-                console.group('SMTP Debug Transcript');
+                console.group('Postmark HTTP debug');
                 console.log(<?php echo json_encode((string) $_SESSION['smtp_debug_transcript']); ?>);
                 console.groupEnd();
             } catch (e) {}

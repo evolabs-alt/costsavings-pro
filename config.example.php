@@ -5,17 +5,16 @@
 
 define('CACHE_DIR', __DIR__ . '/cache/');
 
-define('SMTP_HOST', 'smtp.example.com');
-define('SMTP_PORT', 465);
-define('SMTP_SECURE', 'ssl');
-define('SMTP_USERNAME', 'user@example.com');
-define('SMTP_PASSWORD', 'your-smtp-password');
+/**
+ * Postmark (https://postmarkapp.com): Server API token from your Postmark server.
+ * Prefer setting POSTMARK_SERVER_TOKEN in the environment in production.
+ * The From address below must match a verified Sender Signature or domain in Postmark.
+ */
+define('POSTMARK_SERVER_TOKEN', getenv('POSTMARK_SERVER_TOKEN') ?: '');
 define('SMTP_FROM_EMAIL', 'user@example.com');
 define('SMTP_FROM_NAME', 'Savvy CFO Portal');
-/** Optional: set true temporarily to print PHPMailer SMTP transcript in browser console after invite failures. */
-define('SMTP_BROWSER_DEBUG', false);
-/** Optional: EHLO/HELO hostname (use your mail domain if the server rejects connections). Example: define('SMTP_HELO_HOST', 'mail.example.com'); */
-/** Optional Return-Path. If messages are accepted but never arrive (e.g. Gmail), set to the same address you use for SMTP_USERNAME. Example: define('SMTP_ENVELOPE_FROM', 'user@example.com'); */
+/** Optional: set true temporarily to print Postmark HTTP debug detail in the browser console after invite failures. */
+define('POSTMARK_DEBUG', false);
 
 define('GHL_API_KEY', 'your-ghl-private-integration-token');
 define('GHL_LOCATION_ID', 'your-location-id');

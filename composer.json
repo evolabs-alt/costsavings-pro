@@ -3,7 +3,6 @@
     "description": "Savvy CFO Cost Savings Pro Tool",
     "require": {
         "php": ">=8.0",
-        "phpmailer/phpmailer": "^6.9",
         "phpoffice/phpspreadsheet": "^2.0",
         "dompdf/dompdf": "^2.0"
     },

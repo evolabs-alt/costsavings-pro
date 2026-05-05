@@ -2,176 +2,223 @@
 
 require_once __DIR__ . '/pro_log.php';
 
-$phpmailer_paths = [
-    __DIR__ . '/../public/phpmailer/phpmailer/src/PHPMailer.php',
-    __DIR__ . '/../public/vendor/phpmailer/phpmailer/src/PHPMailer.php',
-    __DIR__ . '/../vendor/phpmailer/phpmailer/src/PHPMailer.php',
-];
+/**
+ * Strip HTML to a plain-text fallback for multipart/alternative-style APIs.
+ */
+function sendEmailHtmlToPlain(string $html): string {
+    $plain = html_entity_decode(
+        strip_tags(str_ireplace(['<br>', '<br/>', '<br />'], "\n", $html)),
+        ENT_QUOTES | ENT_HTML5,
+        'UTF-8'
+    );
+    $plain = trim($plain);
 
-$phpmailer_loaded = false;
-foreach ($phpmailer_paths as $path) {
-    if (file_exists($path)) {
-        require_once $path;
-        require_once dirname($path) . '/SMTP.php';
-        require_once dirname($path) . '/Exception.php';
-        $phpmailer_loaded = true;
-        break;
-    }
+    return $plain !== '' ? $plain : 'Please view this message in an HTML-capable email client.';
 }
 
+/**
+ * @return true|array{success:false,error_message:string,error_info:string,smtp_debug?:string}
+ */
 function sendEmail($to, $subject, $body) {
-    global $phpmailer_loaded;
+    $to = trim((string) $to);
+    $subject = (string) $subject;
+    $body = (string) $body;
 
-    // Use PHPMailer whenever the class is available (Composer autoload loads it even if manual paths above missed).
-    if (!class_exists('PHPMailer\PHPMailer\PHPMailer')) {
-        proLog('sendEmail_mail_fallback_start', [
+    $token = defined('POSTMARK_SERVER_TOKEN') ? trim((string) POSTMARK_SERVER_TOKEN) : '';
+    if ($token === '') {
+        proLog('sendEmail_postmark_fail', [
             'to' => $to,
             'subject' => $subject,
-            'from' => SMTP_FROM_EMAIL,
+            'error_message' => 'POSTMARK_SERVER_TOKEN is not set',
         ]);
-        $headers = [
-            'MIME-Version: 1.0',
-            'Content-type: text/html; charset=UTF-8',
-            'From: ' . SMTP_FROM_NAME . ' <' . SMTP_FROM_EMAIL . '>',
-            'Reply-To: ' . SMTP_FROM_EMAIL,
-            'X-Mailer: PHP/' . phpversion(),
-        ];
-        $result = mail($to, $subject, $body, implode("\r\n", $headers));
-        if ($result) {
-            proLog('sendEmail_mail_fallback_ok', ['to' => $to]);
-        } else {
-            proLog('sendEmail_mail_fallback_fail', ['to' => $to]);
-        }
-
-        return $result ? true : [
-            'success' => false,
-            'error_message' => 'PHP mail() function failed',
-            'error_info' => 'Server mail configuration may be incorrect',
-        ];
-    }
-
-    $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
-    $smtpTranscript = '';
-    $captureSmtp = defined('SMTP_BROWSER_DEBUG') && SMTP_BROWSER_DEBUG;
-
-    proLog('sendEmail_smtp_start', [
-        'to' => $to,
-        'subject' => $subject,
-        'host' => SMTP_HOST,
-        'port' => (int) SMTP_PORT,
-        'secure' => (string) SMTP_SECURE,
-        'from' => SMTP_FROM_EMAIL,
-        'username' => SMTP_USERNAME,
-    ]);
-
-    try {
-        $mail->CharSet = 'UTF-8';
-        if ($captureSmtp) {
-            $mail->SMTPDebug = 2;
-            $mail->Debugoutput = static function ($str, $level) use (&$smtpTranscript): void {
-                $smtpTranscript .= '[L' . (int) $level . '] ' . trim((string) $str) . "\n";
-            };
-        } else {
-            $mail->SMTPDebug = 0;
-        }
-        $mail->Timeout = 30;
-        $mail->isSMTP();
-        $mail->Host = SMTP_HOST;
-        $mail->SMTPAuth = true;
-        $mail->Username = SMTP_USERNAME;
-        $mail->Password = SMTP_PASSWORD;
-        $mail->Port = (int) SMTP_PORT;
-        // Map config strings to PHPMailer constants (avoids subtle mismatches on some PHP/OpenSSL builds).
-        $sec = strtolower(trim((string) SMTP_SECURE));
-        if ($sec === 'ssl' || $sec === 'smtps') {
-            $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
-        } elseif ($sec === 'tls' || $sec === 'starttls') {
-            $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
-        } else {
-            $mail->SMTPSecure = SMTP_SECURE;
-        }
-        if (defined('SMTP_HELO_HOST') && SMTP_HELO_HOST !== '') {
-            $mail->Hostname = SMTP_HELO_HOST;
-        }
-        $mail->SMTPOptions = [
-            'ssl' => [
-                'verify_peer' => false,
-                'verify_peer_name' => false,
-                'allow_self_signed' => true,
-            ],
-        ];
-        $mail->setFrom(SMTP_FROM_EMAIL, SMTP_FROM_NAME);
-        // Align envelope sender with From (helps SPF/DMARC on strict hosts).
-        if (defined('SMTP_ENVELOPE_FROM') && SMTP_ENVELOPE_FROM !== '') {
-            $mail->Sender = SMTP_ENVELOPE_FROM;
-        } else {
-            $mail->Sender = SMTP_FROM_EMAIL;
-        }
-        $mail->addReplyTo(SMTP_FROM_EMAIL, SMTP_FROM_NAME);
-        $mail->addAddress($to);
-        $mail->isHTML(true);
-        $mail->Subject = $subject;
-        $mail->Body = $body;
-        $plain = html_entity_decode(
-            strip_tags(str_ireplace(['<br>', '<br/>', '<br />'], "\n", $body)),
-            ENT_QUOTES | ENT_HTML5,
-            'UTF-8'
-        );
-        $mail->AltBody = trim($plain) !== '' ? trim($plain) : 'Please view this message in an HTML-capable email client.';
-        $mail->send();
-
-        $okCtx = [
-            'to' => $to,
-            'subject' => $subject,
-            'host' => SMTP_HOST,
-            'envelope_sender' => (defined('SMTP_ENVELOPE_FROM') && SMTP_ENVELOPE_FROM !== '') ? SMTP_ENVELOPE_FROM : SMTP_FROM_EMAIL,
-        ];
-        if (method_exists($mail, 'getLastMessageID')) {
-            $mid = $mail->getLastMessageID();
-            if ($mid !== '') {
-                $okCtx['message_id'] = $mid;
-            }
-        }
-        $smtpInst = $mail->getSMTPInstance();
-        if (is_object($smtpInst)) {
-            // $last_reply is protected — use getter only (direct access throws and was mis-reported as send failure).
-            if (method_exists($smtpInst, 'getLastReply')) {
-                $lr = $smtpInst->getLastReply();
-                if ($lr !== null && $lr !== '') {
-                    $okCtx['smtp_last_reply'] = trim((string) $lr);
-                }
-            }
-            if (method_exists($smtpInst, 'getLastTransactionID')) {
-                $tid = $smtpInst->getLastTransactionID();
-                if ($tid !== null && $tid !== '') {
-                    $okCtx['smtp_transaction_id'] = $tid;
-                }
-            }
-        }
-        $okCtx['delivery_note'] = 'SMTP accepted for relay; inbox delivery depends on recipient/spam/DMARC.';
-        proLog('sendEmail_smtp_ok', $okCtx);
-
-        return true;
-    } catch (\Throwable $e) {
-        error_log('PHPMailer sending failed: ' . $e->getMessage());
-
-        $failCtx = [
-            'to' => $to,
-            'subject' => $subject,
-            'host' => SMTP_HOST,
-            'error_message' => $e->getMessage(),
-            'error_info' => isset($mail->ErrorInfo) ? $mail->ErrorInfo : '',
-        ];
-        if ($captureSmtp && $smtpTranscript !== '') {
-            $failCtx['smtp_transcript'] = trim($smtpTranscript);
-        }
-        proLog('sendEmail_smtp_fail', $failCtx);
 
         return [
             'success' => false,
-            'error_message' => $e->getMessage(),
-            'error_info' => isset($mail->ErrorInfo) ? $mail->ErrorInfo : '',
-            'smtp_debug' => $captureSmtp ? trim($smtpTranscript) : '',
+            'error_message' => 'Postmark is not configured',
+            'error_info' => 'Set POSTMARK_SERVER_TOKEN in config.php or the POSTMARK_SERVER_TOKEN environment variable.',
         ];
     }
+
+    if ($to === '' || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
+        proLog('sendEmail_postmark_fail', [
+            'to' => $to,
+            'subject' => $subject,
+            'error_message' => 'Invalid recipient address',
+        ]);
+
+        return [
+            'success' => false,
+            'error_message' => 'Invalid recipient email address',
+            'error_info' => $to,
+        ];
+    }
+
+    $fromEmail = defined('SMTP_FROM_EMAIL') ? trim((string) SMTP_FROM_EMAIL) : '';
+    $fromName = defined('SMTP_FROM_NAME') ? trim((string) SMTP_FROM_NAME) : '';
+    if ($fromEmail === '' || !filter_var($fromEmail, FILTER_VALIDATE_EMAIL)) {
+        proLog('sendEmail_postmark_fail', [
+            'to' => $to,
+            'subject' => $subject,
+            'error_message' => 'Invalid SMTP_FROM_EMAIL',
+        ]);
+
+        return [
+            'success' => false,
+            'error_message' => 'Invalid From email in configuration',
+            'error_info' => 'Set SMTP_FROM_EMAIL to a Postmark-verified address.',
+        ];
+    }
+
+    $fromHeader = $fromName !== '' ? $fromName . ' <' . $fromEmail . '>' : $fromEmail;
+    $payload = [
+        'From' => $fromHeader,
+        'To' => $to,
+        'Subject' => $subject,
+        'HtmlBody' => $body,
+        'TextBody' => sendEmailHtmlToPlain($body),
+        'ReplyTo' => $fromEmail,
+    ];
+
+    $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($json === false) {
+        proLog('sendEmail_postmark_fail', ['to' => $to, 'subject' => $subject, 'error_message' => 'json_encode failed']);
+
+        return [
+            'success' => false,
+            'error_message' => 'Could not build email payload',
+            'error_info' => 'json_encode failed',
+        ];
+    }
+
+    $debug = defined('POSTMARK_DEBUG') && POSTMARK_DEBUG;
+    proLog('sendEmail_postmark_start', [
+        'to' => $to,
+        'subject' => $subject,
+        'from' => $fromEmail,
+    ]);
+
+    $url = 'https://api.postmarkapp.com/email';
+    $responseBody = '';
+    $http = 0;
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        if ($ch === false) {
+            proLog('sendEmail_postmark_fail', ['to' => $to, 'error_message' => 'curl_init failed']);
+
+            return [
+                'success' => false,
+                'error_message' => 'Could not initialize HTTP client',
+                'error_info' => 'curl_init failed',
+            ];
+        }
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => [
+                'Accept: application/json',
+                'Content-Type: application/json',
+                'X-Postmark-Server-Token: ' . $token,
+            ],
+            CURLOPT_POSTFIELDS => $json,
+            CURLOPT_CONNECTTIMEOUT => 15,
+            CURLOPT_TIMEOUT => 30,
+        ]);
+        $responseBody = (string) curl_exec($ch);
+        $errNo = curl_errno($ch);
+        $err = curl_error($ch);
+        $http = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($errNo !== 0) {
+            proLog('sendEmail_postmark_fail', [
+                'to' => $to,
+                'subject' => $subject,
+                'error_message' => $err,
+                'curl_errno' => $errNo,
+            ]);
+
+            return [
+                'success' => false,
+                'error_message' => 'Postmark request failed: ' . $err,
+                'error_info' => 'HTTP client error',
+                'smtp_debug' => $debug ? trim($responseBody) : '',
+            ];
+        }
+    } else {
+        $ctx = stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => implode("\r\n", [
+                    'Accept: application/json',
+                    'Content-Type: application/json',
+                    'X-Postmark-Server-Token: ' . $token,
+                ]),
+                'content' => $json,
+                'timeout' => 30,
+                'ignore_errors' => true,
+            ],
+        ]);
+        $responseBody = @file_get_contents($url, false, $ctx);
+        if ($responseBody === false) {
+            proLog('sendEmail_postmark_fail', ['to' => $to, 'subject' => $subject, 'error_message' => 'file_get_contents failed']);
+
+            return [
+                'success' => false,
+                'error_message' => 'Postmark request failed (no cURL)',
+                'error_info' => 'file_get_contents failed',
+            ];
+        }
+        if (isset($http_response_header) && is_array($http_response_header)) {
+            foreach ($http_response_header as $line) {
+                if (preg_match('#^HTTP/\S+\s+(\d{3})#', $line, $m)) {
+                    $http = (int) $m[1];
+                    break;
+                }
+            }
+        }
+    }
+
+    $decoded = json_decode($responseBody, true);
+    $msg = is_array($decoded) && isset($decoded['Message']) ? (string) $decoded['Message'] : '';
+    $hasErrCode = is_array($decoded) && array_key_exists('ErrorCode', $decoded);
+    $errCode = $hasErrCode ? $decoded['ErrorCode'] : null;
+
+    if (is_array($decoded) && isset($decoded['MessageID'])) {
+        $okCtx = [
+            'to' => $to,
+            'subject' => $subject,
+            'message_id' => (string) $decoded['MessageID'],
+            'from' => $fromEmail,
+        ];
+        if (isset($decoded['SubmittedAt'])) {
+            $okCtx['submitted_at'] = (string) $decoded['SubmittedAt'];
+        }
+        proLog('sendEmail_postmark_ok', $okCtx);
+
+        return true;
+    }
+
+    $errorInfo = $msg !== '' ? $msg : trim($responseBody);
+    if ($hasErrCode) {
+        $errorInfo = 'ErrorCode ' . $errCode . ($msg !== '' ? ': ' . $msg : '');
+    }
+
+    proLog('sendEmail_postmark_fail', [
+        'to' => $to,
+        'subject' => $subject,
+        'http' => $http,
+        'error_message' => $msg !== '' ? $msg : 'Postmark error',
+        'error_info' => $errorInfo,
+    ]);
+
+    $out = [
+        'success' => false,
+        'error_message' => $msg !== '' ? $msg : ('Postmark HTTP ' . ($http > 0 ? $http : 'error')),
+        'error_info' => $errorInfo,
+    ];
+    if ($debug && $responseBody !== '') {
+        $out['smtp_debug'] = trim($responseBody);
+    }
+
+    return $out;
 }
