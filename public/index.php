@@ -565,6 +565,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             width: 100%;
             max-width: 100%;
         }
+
+        .container.project-onboarding-hidden {
+            display: none;
+        }
         
         @keyframes gradientShift {
             0%, 100% { background-position: 0% 50%; }
@@ -3565,7 +3569,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 </nav>
             </div>
         <?php endif; ?>
-        <div class="container">
+        <div class="container<?php echo ($current_view === 'placeholder' && $is_admin && !empty($_SESSION['project_onboarding_required'])) ? ' project-onboarding-hidden' : ''; ?>">
             <?php if ($current_view === 'login'): ?>
             <div class="content-padding login-page">
                 <h1>Savvy Expense Optimizer</h1>
@@ -3685,7 +3689,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             let rowCount = 0;
             let currentActiveProjectId = null;
             const isAdminUser = <?php echo $is_admin ? 'true' : 'false'; ?>;
-            const autoStartProjectWizard = <?php echo !empty($_SESSION['project_onboarding_required']) ? 'true' : 'false'; ?>;
 
             function postJson(data) {
                 return fetch(window.location.href, {
@@ -3763,6 +3766,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             return;
                         }
                         showSnackbar("You're done! Project created.", 'success');
+                        var mainAppContainer = document.querySelector('.container');
+                        if (mainAppContainer) mainAppContainer.classList.remove('project-onboarding-hidden');
                         closeAppModal('appModalProjectWizard');
                         loadProjectsIntoMenu().then(function() { loadCalculatorData(); });
                     })
@@ -3782,6 +3787,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             }
             function openAppModal(overlay) {
                 if (!overlay) return;
+                if (typeof overlay === 'string') {
+                    overlay = document.getElementById(overlay);
+                }
+                if (!overlay || !overlay.querySelector) return;
                 var modal = overlay.querySelector('.app-modal');
                 resetAppModalPosition(modal);
                 overlay.classList.add('is-open');
@@ -3792,6 +3801,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             }
             function closeAppModal(overlay) {
                 if (!overlay) return;
+                if (typeof overlay === 'string') {
+                    overlay = document.getElementById(overlay);
+                }
+                if (!overlay || !overlay.querySelector) return;
                 var modal = overlay.querySelector('.app-modal');
                 resetAppModalPosition(modal);
                 overlay.classList.remove('is-open');
@@ -4851,11 +4864,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 initAppModals();
                 initNavSubmenus();
                 initPurposeColumnToggle();
-                loadProjectsIntoMenu().then(function() {
-                    if (autoStartProjectWizard && isAdminUser) {
-                        openAppModal('appModalProjectWizard');
-                    }
-                });
+                loadProjectsIntoMenu();
                 syncBulkManagerOptions();
                 const projectSwitcher = document.getElementById('projectSwitcherSelect');
                 if (projectSwitcher) {
