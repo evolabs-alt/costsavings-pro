@@ -77,6 +77,7 @@ function sendEmail($to, $subject, $body) {
         'HtmlBody' => $body,
         'TextBody' => sendEmailHtmlToPlain($body),
         'ReplyTo' => $fromEmail,
+        'MessageStream' => 'outbound',
     ];
 
     $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
