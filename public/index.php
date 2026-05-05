@@ -4249,6 +4249,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 updateVendorDrilldownState(row);
                 syncRowDeadlineVisibility(row);
                 syncRowCancellationGuidanceVisibility(row);
+                syncMemberStatusEditability(row);
                 const rowCheckbox = row.querySelector('.row-select-checkbox');
                 if (rowCheckbox) rowCheckbox.addEventListener('change', updateSelectAllCheckboxState);
 
@@ -4497,6 +4498,60 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 btn.hidden = (getRowStatus(row) !== 'mark_for_cancellation');
             }
 
+            /** For org members: only the assigned manager may edit status and cancellation deadline. */
+            function syncMemberStatusEditability(row) {
+                if (!row) return;
+                const statusSel = row.querySelector('.row-status-select');
+                const dl = row.querySelector('.cancel-deadline-input');
+                const guide = row.querySelector('.cancel-guidance-btn');
+                const lockedTip = 'Only the assigned manager can change status';
+                if (IS_ADMIN) {
+                    if (statusSel) {
+                        statusSel.disabled = false;
+                        statusSel.removeAttribute('title');
+                    }
+                    if (dl) {
+                        dl.disabled = false;
+                        dl.removeAttribute('title');
+                    }
+                    if (guide) {
+                        guide.disabled = false;
+                        guide.removeAttribute('title');
+                    }
+                    return;
+                }
+                const rowIdEl = row.querySelector('.row-db-id');
+                const dbId = rowIdEl && rowIdEl.value ? parseInt(rowIdEl.value, 10) : 0;
+                const mgrSel = row.querySelector('.manager-select');
+                const managerId = mgrSel && mgrSel.value ? parseInt(mgrSel.value, 10) : null;
+                const isMine = (dbId === 0) || (managerId !== null && !isNaN(managerId) && managerId === CURRENT_USER_ID);
+                const locked = !isMine;
+                if (statusSel) {
+                    statusSel.disabled = locked;
+                    if (locked) {
+                        statusSel.title = lockedTip;
+                    } else {
+                        statusSel.removeAttribute('title');
+                    }
+                }
+                if (dl) {
+                    dl.disabled = locked;
+                    if (locked) {
+                        dl.title = lockedTip;
+                    } else {
+                        dl.removeAttribute('title');
+                    }
+                }
+                if (guide) {
+                    guide.disabled = locked;
+                    if (locked) {
+                        guide.title = lockedTip;
+                    } else {
+                        guide.removeAttribute('title');
+                    }
+                }
+            }
+
             function statusToLegacyCancelKeep(status) {
                 return (status === 'mark_for_cancellation' || status === 'cancelled') ? 'Cancel' : 'Keep';
             }
@@ -4678,6 +4733,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     }
                                     syncRowDeadlineVisibility(lastRow);
                                     syncRowCancellationGuidanceVisibility(lastRow);
+                                    syncMemberStatusEditability(lastRow);
 
                                     if (notesTextarea) notesTextarea.value = item.purpose_of_subscription || item.notes || '';
                                     
