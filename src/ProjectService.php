@@ -13,19 +13,8 @@ class ProjectService
      */
     public static function listForUser(PDO $pdo, int $orgId, int $userId, string $role): array
     {
-        if ($role === 'admin') {
-            $st = $pdo->prepare('SELECT id, name, start_date, end_date, created_at FROM projects WHERE org_id = ? ORDER BY created_at ASC, id ASC');
-            $st->execute([$orgId]);
-        } else {
-            $st = $pdo->prepare(
-                'SELECT p.id, p.name, p.start_date, p.end_date, p.created_at
-                 FROM projects p
-                 INNER JOIN project_members pm ON pm.project_id = p.id
-                 WHERE p.org_id = ? AND pm.user_id = ?
-                 ORDER BY p.created_at ASC, p.id ASC'
-            );
-            $st->execute([$orgId, $userId]);
-        }
+        $st = $pdo->prepare('SELECT id, name, start_date, end_date, created_at FROM projects WHERE org_id = ? ORDER BY created_at ASC, id ASC');
+        $st->execute([$orgId]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
         return is_array($rows) ? $rows : [];
     }
@@ -42,18 +31,8 @@ class ProjectService
         if ($projectId <= 0) {
             return false;
         }
-        if ($role === 'admin') {
-            $st = $pdo->prepare('SELECT 1 FROM projects WHERE id = ? AND org_id = ?');
-            $st->execute([$projectId, $orgId]);
-            return (bool) $st->fetchColumn();
-        }
-        $st = $pdo->prepare(
-            'SELECT 1
-             FROM projects p
-             INNER JOIN project_members pm ON pm.project_id = p.id
-             WHERE p.id = ? AND p.org_id = ? AND pm.user_id = ?'
-        );
-        $st->execute([$projectId, $orgId, $userId]);
+        $st = $pdo->prepare('SELECT 1 FROM projects WHERE id = ? AND org_id = ?');
+        $st->execute([$projectId, $orgId]);
         return (bool) $st->fetchColumn();
     }
 
@@ -142,21 +121,8 @@ class ProjectService
         if ($sessionProjectId !== null && self::canAccessProject($pdo, $sessionProjectId, $orgId, $userId, $role)) {
             return $sessionProjectId;
         }
-        if ($role === 'admin') {
-            $st = $pdo->prepare('SELECT id FROM projects WHERE org_id = ? ORDER BY created_at ASC, id ASC LIMIT 1');
-            $st->execute([$orgId]);
-            $id = (int) $st->fetchColumn();
-            return $id > 0 ? $id : null;
-        }
-        $st = $pdo->prepare(
-            'SELECT p.id
-             FROM projects p
-             INNER JOIN project_members pm ON pm.project_id = p.id
-             WHERE p.org_id = ? AND pm.user_id = ?
-             ORDER BY p.created_at ASC, p.id ASC
-             LIMIT 1'
-        );
-        $st->execute([$orgId, $userId]);
+        $st = $pdo->prepare('SELECT id FROM projects WHERE org_id = ? ORDER BY created_at ASC, id ASC LIMIT 1');
+        $st->execute([$orgId]);
         $id = (int) $st->fetchColumn();
         return $id > 0 ? $id : null;
     }

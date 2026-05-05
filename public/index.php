@@ -5717,7 +5717,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <?php endforeach; ?>
                         </select>
                     </label>
-                    <p style="margin:0;color:#4b5563;font-size:13px;">Select one or more members. Users not assigned will not be able to access this project.</p>
+                    <p style="margin:0;color:#4b5563;font-size:13px;">Optional: tag teammates here for your records. Everyone in your organization can access every project.</p>
                     <div style="display:flex;gap:8px;justify-content:flex-end;">
                         <button type="button" class="btn-secondary app-modal-close project-wizard-cancel-btn">Cancel</button>
                         <button type="submit">Create</button>
