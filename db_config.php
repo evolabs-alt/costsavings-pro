@@ -152,19 +152,30 @@ function migrateSchema(PDO $pdo) {
         $pdo->exec("CREATE TABLE IF NOT EXISTS `organizations` (
             `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             `name` VARCHAR(255) NOT NULL DEFAULT 'Organization',
-            `max_users` TINYINT UNSIGNED NOT NULL DEFAULT 10,
+            `max_users` TINYINT UNSIGNED NOT NULL DEFAULT 20,
             `deadline_reminders_enabled` TINYINT(1) NOT NULL DEFAULT 1,
             `notification_webhook_url` VARCHAR(1024) NULL,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
-        $pdo->exec("INSERT INTO `organizations` (`id`, `name`, `max_users`) VALUES (1, 'Default Organization', 10)
+        $pdo->exec("INSERT INTO `organizations` (`id`, `name`, `max_users`) VALUES (1, 'Default Organization', 20)
             ON DUPLICATE KEY UPDATE `name` = VALUES(`name`)");
 
         $orgWebhookCol = $pdo->query("SHOW COLUMNS FROM `organizations` LIKE 'notification_webhook_url'")->fetch();
         if (!$orgWebhookCol) {
             $pdo->exec('ALTER TABLE `organizations` ADD COLUMN `notification_webhook_url` VARCHAR(1024) NULL AFTER `deadline_reminders_enabled`');
+        }
+
+        try {
+            $pdo->exec('ALTER TABLE `organizations` MODIFY COLUMN `max_users` TINYINT UNSIGNED NOT NULL DEFAULT 20');
+        } catch (PDOException $e) {
+            error_log('migrateSchema organizations max_users default: ' . $e->getMessage());
+        }
+        try {
+            $pdo->exec('UPDATE `organizations` SET `max_users` = 20 WHERE `max_users` = 10');
+        } catch (PDOException $e) {
+            error_log('migrateSchema organizations max_users bump: ' . $e->getMessage());
         }
 
         $hasUserId = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'id'")->fetch();
@@ -557,9 +568,9 @@ function getOrganizationMaxUsers(PDO $pdo, int $orgId): int
     $st = $pdo->prepare('SELECT `max_users` FROM `organizations` WHERE `id` = ?');
     $st->execute([$orgId]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
-    $m = (int) ($row['max_users'] ?? 10);
+    $m = (int) ($row['max_users'] ?? 20);
 
-    return $m > 0 ? $m : 10;
+    return $m > 0 ? $m : 20;
 }
 
 /**

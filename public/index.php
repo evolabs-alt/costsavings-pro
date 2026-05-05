@@ -462,7 +462,7 @@ if ($is_logged_in && !empty($_SESSION['org_id'])) {
 $team_members_rows = [];
 $team_members_json = '[]';
 $team_members_count = 0;
-$team_members_max = 10;
+$team_members_max = 20;
 if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id'])) {
     try {
         $pdoTeam = getDBConnection();
@@ -476,7 +476,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         $team_members_rows = [];
         $team_members_json = '[]';
         $team_members_count = 0;
-        $team_members_max = 10;
+        $team_members_max = 20;
     }
 }
 ?>

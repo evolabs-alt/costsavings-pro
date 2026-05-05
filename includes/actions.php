@@ -185,7 +185,7 @@ function ensureUserOrganizationId(PDO $pdo, int $userId): int {
         $orgName = substr($orgName, 0, 252) . '...';
     }
     try {
-        $ins = $pdo->prepare('INSERT INTO organizations (name, max_users) VALUES (?, 10)');
+        $ins = $pdo->prepare('INSERT INTO organizations (name, max_users) VALUES (?, 20)');
         $ins->execute([$orgName]);
         $newOrgId = (int) $pdo->lastInsertId();
         if ($newOrgId < 1) {
