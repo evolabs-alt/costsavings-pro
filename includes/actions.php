@@ -147,6 +147,60 @@ function postWebhookJson(string $url, array $payload): bool
     return true;
 }
 
+/**
+ * Ensure users.org_id refers to a real organization. If missing or invalid, creates a new
+ * dedicated organization for this user (never assigns shared org 1 implicitly — that would
+ * let admins see every other tenant's projects scoped to that org).
+ */
+function ensureUserOrganizationId(PDO $pdo, int $userId): int {
+    if ($userId < 1) {
+        return 0;
+    }
+    $st = $pdo->prepare('SELECT org_id, email, username, display_name FROM users WHERE id = ? LIMIT 1');
+    $st->execute([$userId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return 0;
+    }
+    $current = isset($row['org_id']) && $row['org_id'] !== null && $row['org_id'] !== '' ? (int) $row['org_id'] : 0;
+    if ($current >= 1) {
+        $chk = $pdo->prepare('SELECT 1 FROM organizations WHERE id = ?');
+        $chk->execute([$current]);
+        if ($chk->fetchColumn()) {
+            return $current;
+        }
+    }
+    $label = trim((string) ($row['display_name'] ?? ''));
+    if ($label === '') {
+        $label = trim((string) ($row['username'] ?? ''));
+    }
+    if ($label === '') {
+        $label = trim((string) ($row['email'] ?? ''));
+    }
+    if ($label === '') {
+        $label = 'Organization';
+    }
+    $orgName = $label . ' workspace';
+    if (strlen($orgName) > 255) {
+        $orgName = substr($orgName, 0, 252) . '...';
+    }
+    try {
+        $ins = $pdo->prepare('INSERT INTO organizations (name, max_users) VALUES (?, 10)');
+        $ins->execute([$orgName]);
+        $newOrgId = (int) $pdo->lastInsertId();
+        if ($newOrgId < 1) {
+            error_log('ensureUserOrganizationId: lastInsertId invalid for user ' . $userId);
+            return 0;
+        }
+        $upd = $pdo->prepare('UPDATE users SET org_id = ? WHERE id = ?');
+        $upd->execute([$newOrgId, $userId]);
+        return $newOrgId;
+    } catch (PDOException $e) {
+        error_log('ensureUserOrganizationId: ' . $e->getMessage());
+        return 0;
+    }
+}
+
 function handleLogin() {
     $pdo = getDBConnection();
     $u = trim($_POST['username'] ?? '');
@@ -174,14 +228,14 @@ function handleLogin() {
     $_SESSION['role'] = $row['role'];
     $_SESSION['username'] = $row['username'] ?? '';
     $_SESSION['user_email'] = normalizeUserEmail($row['email']);
-    $orgId = isset($row['org_id']) && $row['org_id'] !== null && $row['org_id'] !== '' ? (int) $row['org_id'] : 0;
+    $userId = (int) $row['id'];
+    $orgId = ensureUserOrganizationId($pdo, $userId);
     if ($orgId < 1) {
-        $fixOrg = $pdo->prepare('UPDATE users SET org_id = 1 WHERE id = ?');
-        $fixOrg->execute([(int) $row['id']]);
-        $orgId = 1;
+        $_SESSION['error'] = 'Your account organization could not be set up. Please contact support.';
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
     }
     $_SESSION['org_id'] = $orgId;
-    $userId = (int) $row['id'];
     $role = (string) ($row['role'] ?? 'member');
     $projectCount = ProjectService::orgProjectCount($pdo, $orgId);
     $_SESSION['project_onboarding_required'] = ($role === 'admin' && $projectCount === 0);
@@ -974,13 +1028,10 @@ function handleProjectCreate() {
 
     $pdo = getDBConnection();
     $userId = (int) $_SESSION['user_id'];
-    $stOrg = $pdo->prepare('SELECT org_id FROM users WHERE id = ? LIMIT 1');
-    $stOrg->execute([$userId]);
-    $orgRow = $stOrg->fetch(PDO::FETCH_ASSOC);
-    $orgId = isset($orgRow['org_id']) && $orgRow['org_id'] !== null && $orgRow['org_id'] !== '' ? (int) $orgRow['org_id'] : 0;
+    $orgId = ensureUserOrganizationId($pdo, $userId);
     if ($orgId < 1) {
-        $pdo->prepare('UPDATE users SET org_id = 1 WHERE id = ?')->execute([$userId]);
-        $orgId = 1;
+        echo json_encode(['success' => false, 'error' => 'Your account organization could not be loaded. Try logging in again.']);
+        exit;
     }
     $_SESSION['org_id'] = $orgId;
     $create = ProjectService::createProject(
