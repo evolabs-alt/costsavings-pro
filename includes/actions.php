@@ -171,11 +171,16 @@ function handleLogin() {
     }
     session_regenerate_id(true);
     $_SESSION['user_id'] = (int) $row['id'];
-    $_SESSION['org_id'] = (int) $row['org_id'];
     $_SESSION['role'] = $row['role'];
     $_SESSION['username'] = $row['username'] ?? '';
     $_SESSION['user_email'] = normalizeUserEmail($row['email']);
-    $orgId = (int) $row['org_id'];
+    $orgId = isset($row['org_id']) && $row['org_id'] !== null && $row['org_id'] !== '' ? (int) $row['org_id'] : 0;
+    if ($orgId < 1) {
+        $fixOrg = $pdo->prepare('UPDATE users SET org_id = 1 WHERE id = ?');
+        $fixOrg->execute([(int) $row['id']]);
+        $orgId = 1;
+    }
+    $_SESSION['org_id'] = $orgId;
     $userId = (int) $row['id'];
     $role = (string) ($row['role'] ?? 'member');
     $projectCount = ProjectService::orgProjectCount($pdo, $orgId);
@@ -968,8 +973,16 @@ function handleProjectCreate() {
     $sourceProjectId = isset($_POST['source_project_id']) ? (int) $_POST['source_project_id'] : 0;
 
     $pdo = getDBConnection();
-    $orgId = (int) $_SESSION['org_id'];
     $userId = (int) $_SESSION['user_id'];
+    $stOrg = $pdo->prepare('SELECT org_id FROM users WHERE id = ? LIMIT 1');
+    $stOrg->execute([$userId]);
+    $orgRow = $stOrg->fetch(PDO::FETCH_ASSOC);
+    $orgId = isset($orgRow['org_id']) && $orgRow['org_id'] !== null && $orgRow['org_id'] !== '' ? (int) $orgRow['org_id'] : 0;
+    if ($orgId < 1) {
+        $pdo->prepare('UPDATE users SET org_id = 1 WHERE id = ?')->execute([$userId]);
+        $orgId = 1;
+    }
+    $_SESSION['org_id'] = $orgId;
     $create = ProjectService::createProject(
         $pdo,
         $orgId,

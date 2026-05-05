@@ -107,9 +107,14 @@ class ProjectService
             return ['success' => true, 'project_id' => $projectId];
         } catch (PDOException $e) {
             $pdo->rollBack();
-            error_log('ProjectService::createProject: ' . $e->getMessage());
-            if (stripos($e->getMessage(), 'uk_projects_org_name') !== false) {
+            $msg = $e->getMessage();
+            error_log('ProjectService::createProject: ' . $msg);
+            if (stripos($msg, 'uk_projects_org_name') !== false
+                || (stripos($msg, '1062') !== false && stripos($msg, 'Duplicate') !== false)) {
                 return ['success' => false, 'error' => 'A project with this name already exists.'];
+            }
+            if (stripos($msg, '1452') !== false || stripos($msg, 'foreign key constraint') !== false) {
+                return ['success' => false, 'error' => 'Could not create project: check that your account is assigned to an organization.'];
             }
             return ['success' => false, 'error' => 'Could not create project.'];
         }
