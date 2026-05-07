@@ -844,6 +844,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             text-align: center;
         }
 
+        .cost-calculator-grid th.vendor-chat-col.th-with-filter {
+            min-width: 108px;
+            width: auto;
+        }
+
+        .cost-calculator-grid th.vendor-chat-col.th-with-filter .th-with-filter-inner {
+            justify-content: center;
+            gap: 6px;
+        }
+
         .cost-calculator-grid .vendor-chat-btn {
             position: relative;
             width: 34px;
@@ -886,10 +896,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .cost-calculator-grid .vendor-chat-unread-badge {
             position: absolute;
-            top: 1px;
-            right: 1px;
-            width: 9px;
-            height: 9px;
+            top: 0;
+            right: 0;
+            width: 11px;
+            height: 11px;
             border-radius: 50%;
             background: #e11d48;
             box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.95);
@@ -1004,6 +1014,26 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             border-color: var(--color-primary, #0b58a3);
         }
 
+        /* Header sits on primary-blue thead: use light button + white icon; active state = white pill + blue icon (avoids blue-on-blue). */
+        .cost-calculator-grid thead .vendor-col-filter-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.5);
+            color: #ffffff;
+        }
+
+        .cost-calculator-grid thead .vendor-col-filter-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.75);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+        }
+
+        .cost-calculator-grid thead .vendor-col-filter-btn.is-active {
+            background: #ffffff;
+            border-color: #ffffff;
+            color: var(--color-primary, #0b58a3);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+        }
+
         .vendor-col-filter-dropdown {
             position: absolute;
             top: calc(100% + 4px);
@@ -1023,6 +1053,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             text-align: left;
             font-weight: normal;
             box-sizing: border-box;
+            /* thead has color:white; reset so controls and labels stay readable on white panel */
+            color: #1e293b;
         }
 
         .vendor-col-filter-option {
@@ -1059,12 +1091,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             border-radius: 6px;
             border: 1px solid #dee3ec;
             background: #fff;
+            color: #1e293b;
             cursor: pointer;
             font-weight: 500;
         }
 
         .vendor-col-filter-clear:hover {
             background: #f8fafc;
+            color: #0f172a;
         }
 
         .cost-calculator-grid .row-status .row-status-top {
@@ -3838,7 +3872,20 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 </div>
                             </th>
                             <th class="notes">Purpose</th>
-                            <th class="vendor-chat-col">Chat</th>
+                            <th class="vendor-chat-col th-with-filter">
+                                <div class="th-with-filter-inner">
+                                    <span class="th-with-filter-caption">Chat</span>
+                                    <button type="button" class="vendor-col-filter-btn" data-vendor-filter="chat_unread" title="Filter chat" aria-label="Filter by chat unread" aria-haspopup="true" aria-expanded="false">
+                                        <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
+                                    </button>
+                                    <div class="vendor-col-filter-dropdown" data-vendor-filter="chat_unread" hidden>
+                                        <div class="vendor-col-filter-list"></div>
+                                        <div class="vendor-col-filter-actions">
+                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="chat_unread">Clear</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </th>
                         </tr>
                     </thead>
                     <tbody id="calculatorRows">
@@ -4213,6 +4260,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         badge.classList.remove('is-visible');
                         badge.hidden = true;
                     }
+                    scheduleVendorTablePaginationIfChatUnreadFilter();
                     return;
                 }
                 chatBtn.title = vendorHint ? ('Unread notes for ' + vendorHint + ' (' + n + ')') : ('Unread vendor chat (' + n + ')');
@@ -4221,6 +4269,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     badge.hidden = false;
                     badge.classList.add('is-visible');
                 }
+                scheduleVendorTablePaginationIfChatUnreadFilter();
             }
 
             function applySparseVendorChatUnreadCounts(counts) {
@@ -4255,13 +4304,25 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             let vendorCurrentPage = 1;
             let vendorCurrentFilter = 'all';
 
-            const VENDOR_FILTER_COLS = ['frequency', 'manager', 'visibility', 'status'];
+            const VENDOR_FILTER_COLS = ['frequency', 'manager', 'visibility', 'status', 'chat_unread'];
             let vendorColumnFilters = {
                 frequency: new Set(),
                 manager: new Set(),
                 visibility: new Set(),
                 status: new Set(),
+                chat_unread: new Set(),
             };
+
+            let vendorChatUnreadFilterReflowScheduled = false;
+            function scheduleVendorTablePaginationIfChatUnreadFilter() {
+                if (!vendorColumnFilters.chat_unread || vendorColumnFilters.chat_unread.size === 0) return;
+                if (vendorChatUnreadFilterReflowScheduled) return;
+                vendorChatUnreadFilterReflowScheduled = true;
+                window.requestAnimationFrame(function() {
+                    vendorChatUnreadFilterReflowScheduled = false;
+                    applyVendorTablePagination(vendorCurrentPage);
+                });
+            }
 
             /** Labels for checkbox list in frequency column header filter (values match `.frequency-select` options). */
             const FREQUENCY_FILTER_LABELS = {
@@ -4808,6 +4869,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 if (vendorColumnFilters.status.size) {
                     if (!vendorColumnFilters.status.has(getRowStatus(row))) return false;
                 }
+                if (vendorColumnFilters.chat_unread.size) {
+                    if (!vendorColumnFilters.chat_unread.has('unread')) return false;
+                    const chatBtn = row.querySelector('.vendor-chat-btn');
+                    const nRaw = chatBtn ? Number(chatBtn.getAttribute('data-chat-unread')) : 0;
+                    const n = (isFinite(nRaw) && nRaw > 0) ? Math.floor(nRaw) : 0;
+                    if (n <= 0) return false;
+                }
                 return true;
             }
 
@@ -4849,6 +4917,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     VALID_ROW_STATUSES.forEach(function(s) {
                         opts.push({ value: s, label: STATUS_COLUMN_FILTER_LABELS[s] || s });
                     });
+                } else if (col === 'chat_unread') {
+                    opts.push({ value: 'unread', label: 'Unread' });
                 }
                 opts.forEach(function(opt) {
                     const labEl = document.createElement('label');
