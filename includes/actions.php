@@ -873,6 +873,22 @@ function handleLoadCostCalculator() {
         $activeProjectId,
         $_SESSION['role'] ?? 'member'
     );
+    $uid = (int) $_SESSION['user_id'];
+    $counts = VendorChatService::unreadCountsForUserProject(
+        $pdo,
+        (int) $_SESSION['org_id'],
+        $activeProjectId,
+        $uid,
+        (string) ($_SESSION['role'] ?? 'member')
+    );
+    foreach ($items as &$it) {
+        if (!is_array($it)) {
+            continue;
+        }
+        $iid = (int) ($it['id'] ?? 0);
+        $it['vendor_chat_unread'] = $counts[$iid] ?? 0;
+    }
+    unset($it);
 
     echo json_encode(['success' => true, 'items' => $items]);
     exit;
@@ -984,6 +1000,39 @@ function handleAddVendorChatMessage() {
         (string) ($_SESSION['role'] ?? 'member')
     );
     echo json_encode($result);
+    exit;
+}
+
+function handleVendorChatUnreadCounts() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'User not logged in', 'counts' => []]);
+        exit;
+    }
+
+    $pdo = getDBConnection();
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        echo json_encode(['success' => true, 'counts' => []]);
+        exit;
+    }
+
+    $uid = (int) $_SESSION['user_id'];
+    $counts = VendorChatService::unreadCountsForUserProject(
+        $pdo,
+        (int) $_SESSION['org_id'],
+        $activeProjectId,
+        $uid,
+        (string) ($_SESSION['role'] ?? 'member')
+    );
+    $sparse = [];
+    foreach ($counts as $vid => $n) {
+        if ($n > 0) {
+            $sparse[(string) $vid] = $n;
+        }
+    }
+
+    echo json_encode(['success' => true, 'counts' => $sparse]);
     exit;
 }
 

@@ -67,6 +67,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'add_vendor_chat_message':
                 handleAddVendorChatMessage();
                 break;
+            case 'vendor_chat_unread_counts':
+                handleVendorChatUnreadCounts();
+                break;
             case 'invite_member':
                 handleInviteMember();
                 break;
@@ -842,6 +845,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .cost-calculator-grid .vendor-chat-btn {
+            position: relative;
             width: 34px;
             height: 34px;
             border: 1px solid #d1d5db;
@@ -878,6 +882,26 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .cost-calculator-grid .vendor-chat-icon {
             font-size: 18px;
             color: var(--color-primary);
+        }
+
+        .cost-calculator-grid .vendor-chat-unread-badge {
+            position: absolute;
+            top: 1px;
+            right: 1px;
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: #e11d48;
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.95);
+            pointer-events: none;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.15s ease;
+        }
+
+        .cost-calculator-grid .vendor-chat-unread-badge.is-visible {
+            opacity: 1;
+            visibility: visible;
         }
 
         .vendor-raw-results {
@@ -932,6 +956,115 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .cost-calculator-grid .row-status {
             min-width: 150px;
+        }
+
+        .cost-calculator-grid th.th-with-filter {
+            position: relative;
+            vertical-align: middle;
+        }
+
+        .th-with-filter-inner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 4px;
+            min-width: 0;
+        }
+
+        .vendor-col-filter-btn {
+            flex: 0 0 auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            margin: 0;
+            border: 1px solid var(--color-border, #d7dce6);
+            border-radius: 6px;
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            cursor: pointer;
+            color: var(--color-primary, #0b58a3);
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .vendor-col-filter-btn .material-symbols-outlined {
+            font-size: 17px;
+            line-height: 1;
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
+        .vendor-col-filter-btn:hover {
+            border-color: #93c5fd;
+            box-shadow: 0 2px 6px rgba(11, 88, 163, 0.12);
+        }
+
+        .vendor-col-filter-btn.is-active {
+            background: rgba(11, 88, 163, 0.1);
+            border-color: var(--color-primary, #0b58a3);
+        }
+
+        .vendor-col-filter-dropdown {
+            position: absolute;
+            top: calc(100% + 4px);
+            right: 0;
+            left: auto;
+            min-width: 200px;
+            max-width: min(280px, 92vw);
+            max-height: 260px;
+            overflow: auto;
+            z-index: 40;
+            margin: 0;
+            padding: 8px;
+            border: 1px solid var(--color-border, #d7dce6);
+            border-radius: 10px;
+            background: #fff;
+            box-shadow: 0 12px 24px rgba(11, 88, 163, 0.14);
+            text-align: left;
+            font-weight: normal;
+            box-sizing: border-box;
+        }
+
+        .vendor-col-filter-option {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 4px 2px;
+            font-size: 12px;
+            color: var(--color-text-primary, #161c2d);
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        .vendor-col-filter-option:hover {
+            background: #f8fafc;
+        }
+
+        .vendor-col-filter-option input {
+            margin-top: 2px;
+            flex-shrink: 0;
+        }
+
+        .vendor-col-filter-actions {
+            margin-top: 8px;
+            padding-top: 6px;
+            border-top: 1px solid #e9edf4;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .vendor-col-filter-clear {
+            padding: 4px 10px;
+            font-size: 12px;
+            border-radius: 6px;
+            border: 1px solid #dee3ec;
+            background: #fff;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .vendor-col-filter-clear:hover {
+            background: #f8fafc;
         }
 
         .cost-calculator-grid .row-status .row-status-top {
@@ -3647,11 +3780,63 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <th class="item-number">Item #</th>
                             <th class="vendor-name">Vendor</th>
                             <th class="cost-per-period">Cost</th>
-                            <th class="frequency">Freq</th>
+                            <th class="frequency th-with-filter">
+                                <div class="th-with-filter-inner">
+                                    <span class="th-with-filter-caption">Freq</span>
+                                    <button type="button" class="vendor-col-filter-btn" data-vendor-filter="frequency" title="Filter by frequency" aria-label="Filter by frequency" aria-haspopup="true" aria-expanded="false">
+                                        <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
+                                    </button>
+                                    <div class="vendor-col-filter-dropdown" data-vendor-filter="frequency" hidden>
+                                        <div class="vendor-col-filter-list"></div>
+                                        <div class="vendor-col-filter-actions">
+                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="frequency">Clear</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </th>
                             <th class="annual-cost">Annual Cost</th>
-                            <th class="manager-col">Manager</th>
-                            <th class="visibility-col">Visibility</th>
-                            <th class="row-status" title="Vendor status: Pending, Question, Unknown, Keep, Mark for Cancellation, or Cancelled">Status</th>
+                            <th class="manager-col th-with-filter">
+                                <div class="th-with-filter-inner">
+                                    <span class="th-with-filter-caption">Manager</span>
+                                    <button type="button" class="vendor-col-filter-btn" data-vendor-filter="manager" title="Filter by manager" aria-label="Filter by manager" aria-haspopup="true" aria-expanded="false">
+                                        <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
+                                    </button>
+                                    <div class="vendor-col-filter-dropdown" data-vendor-filter="manager" hidden>
+                                        <div class="vendor-col-filter-list"></div>
+                                        <div class="vendor-col-filter-actions">
+                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="manager">Clear</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </th>
+                            <th class="visibility-col th-with-filter">
+                                <div class="th-with-filter-inner">
+                                    <span class="th-with-filter-caption">Visibility</span>
+                                    <button type="button" class="vendor-col-filter-btn" data-vendor-filter="visibility" title="Filter by visibility" aria-label="Filter by visibility" aria-haspopup="true" aria-expanded="false">
+                                        <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
+                                    </button>
+                                    <div class="vendor-col-filter-dropdown" data-vendor-filter="visibility" hidden>
+                                        <div class="vendor-col-filter-list"></div>
+                                        <div class="vendor-col-filter-actions">
+                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="visibility">Clear</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </th>
+                            <th class="row-status th-with-filter" title="Vendor status: Pending, Question, Unknown, Keep, Mark for Cancellation, or Cancelled">
+                                <div class="th-with-filter-inner">
+                                    <span class="th-with-filter-caption">Status</span>
+                                    <button type="button" class="vendor-col-filter-btn" data-vendor-filter="status" title="Filter by status" aria-label="Filter by column status" aria-haspopup="true" aria-expanded="false">
+                                        <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
+                                    </button>
+                                    <div class="vendor-col-filter-dropdown" data-vendor-filter="status" hidden>
+                                        <div class="vendor-col-filter-list"></div>
+                                        <div class="vendor-col-filter-actions">
+                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="status">Clear</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </th>
                             <th class="notes">Purpose</th>
                             <th class="vendor-chat-col">Chat</th>
                         </tr>
@@ -4006,11 +4191,98 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             let vendorChatPollTimer = null;
             let vendorChatRequestInFlight = false;
             let vendorChatLastSignature = '';
+            let vendorChatUnreadPollTimer = null;
+            var VENDOR_CHAT_UNREAD_POLL_MS = 35000;
+
+            function setVendorChatUnreadBadge(chatBtn, count) {
+                if (!chatBtn) return;
+                var nRaw = Number(count);
+                var n = (isFinite(nRaw) && nRaw > 0) ? Math.floor(nRaw) : 0;
+                chatBtn.setAttribute('data-chat-unread', String(n));
+                var badge = chatBtn.querySelector('.vendor-chat-unread-badge');
+                var vendorHint = (chatBtn.getAttribute('data-vendor-name') || '').trim();
+                var baseAria = chatBtn.disabled
+                    ? 'Open vendor chat'
+                    : ('Open vendor chat for ' + (vendorHint || 'this vendor'));
+                if (chatBtn.disabled || n <= 0) {
+                    chatBtn.title = chatBtn.disabled
+                        ? 'Save this row first to enable chat'
+                        : ('Open vendor chat for ' + (vendorHint || 'this vendor'));
+                    chatBtn.setAttribute('aria-label', baseAria);
+                    if (badge) {
+                        badge.classList.remove('is-visible');
+                        badge.hidden = true;
+                    }
+                    return;
+                }
+                chatBtn.title = vendorHint ? ('Unread notes for ' + vendorHint + ' (' + n + ')') : ('Unread vendor chat (' + n + ')');
+                chatBtn.setAttribute('aria-label', baseAria + '; ' + n + ' unread');
+                if (badge) {
+                    badge.hidden = false;
+                    badge.classList.add('is-visible');
+                }
+            }
+
+            function applySparseVendorChatUnreadCounts(counts) {
+                var map = (counts && typeof counts === 'object') ? counts : {};
+                document.querySelectorAll('#calculatorRows tr .vendor-chat-btn').forEach(function(btn) {
+                    var vid = parseInt(btn.getAttribute('data-vendor-item-id'), 10) || 0;
+                    if (vid <= 0) {
+                        setVendorChatUnreadBadge(btn, 0);
+                        return;
+                    }
+                    var c = parseInt(map[String(vid)], 10) || 0;
+                    setVendorChatUnreadBadge(btn, c);
+                });
+            }
+
+            function pollVendorChatUnreadCounts() {
+                if (document.visibilityState === 'hidden') return;
+                var fd = new FormData();
+                fd.append('action', 'vendor_chat_unread_counts');
+                fetch(window.location.href, { method: 'POST', body: fd })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (!d || !d.success || !d.counts) return;
+                        applySparseVendorChatUnreadCounts(d.counts);
+                    })
+                    .catch(function() {});
+            }
+
             let activeCancelGuidanceItemId = 0;
             let activeCancelGuidanceVendorName = '';
             const VENDOR_PAGE_SIZE = 20;
             let vendorCurrentPage = 1;
             let vendorCurrentFilter = 'all';
+
+            const VENDOR_FILTER_COLS = ['frequency', 'manager', 'visibility', 'status'];
+            let vendorColumnFilters = {
+                frequency: new Set(),
+                manager: new Set(),
+                visibility: new Set(),
+                status: new Set(),
+            };
+
+            /** Labels for checkbox list in frequency column header filter (values match `.frequency-select` options). */
+            const FREQUENCY_FILTER_LABELS = {
+                '': '(Not set)',
+                weekly: 'Weekly',
+                monthly: 'Monthly',
+                quarterly: 'Quarterly',
+                semi_annual: 'Semi-annual',
+                annually: 'Annually',
+                one_off: 'One-off',
+            };
+            const FREQUENCY_FILTER_ORDER = ['', 'weekly', 'monthly', 'quarterly', 'semi_annual', 'annually', 'one_off'];
+
+            const STATUS_COLUMN_FILTER_LABELS = {
+                pending: 'Pending',
+                question: 'Question',
+                unknown: 'Unknown',
+                keep: 'Keep',
+                mark_for_cancellation: 'Mark for Cancellation',
+                cancelled: 'Cancelled',
+            };
 
             function getVendorRowCheckboxes() {
                 return Array.from(document.querySelectorAll('#calculatorRows tr .row-select-checkbox')).filter(function(cb) {
@@ -4054,11 +4326,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             function updateBulkActionFields() {
                 const actionSel = document.getElementById('bulkActionType');
                 const frequencyWrap = document.getElementById('bulkFrequencyWrap');
+                const statusWrap = document.getElementById('bulkStatusWrap');
                 const visibilityWrap = document.getElementById('bulkVisibilityWrap');
                 const managerWrap = document.getElementById('bulkManagerWrap');
-                if (!actionSel || !frequencyWrap || !visibilityWrap || !managerWrap) return;
+                if (!actionSel || !frequencyWrap || !statusWrap || !visibilityWrap || !managerWrap) return;
                 const action = actionSel.value;
                 frequencyWrap.style.display = action === 'frequency' ? '' : 'none';
+                statusWrap.style.display = action === 'status' ? '' : 'none';
                 visibilityWrap.style.display = action === 'visibility' ? '' : 'none';
                 managerWrap.style.display = action === 'manager' ? '' : 'none';
             }
@@ -4072,6 +4346,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     const freq = document.getElementById('bulkFrequencyValue');
                     if (!freq || !freq.value) return null;
                     return { action: action, value: freq.value, label: 'Update frequency to ' + freq.value };
+                }
+                if (action === 'status') {
+                    const st = document.getElementById('bulkStatusValue');
+                    if (!st || !st.value) return null;
+                    const opt = st.options[st.selectedIndex];
+                    const statusLabel = opt ? opt.text : st.value;
+                    return { action: action, value: st.value, label: 'Update status to ' + statusLabel };
                 }
                 if (action === 'visibility') {
                     const vis = document.getElementById('bulkVisibilityValue');
@@ -4136,6 +4417,24 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         const mgrSel = row.querySelector('.manager-select');
                         if (mgrSel && !mgrSel.disabled) mgrSel.value = payload.value;
                     });
+                } else if (payload.action === 'status') {
+                    selectedRows.forEach(function(row) {
+                        const statusSelect = row.querySelector('.row-status-select');
+                        if (!statusSelect || statusSelect.disabled) return;
+                        statusSelect.value = payload.value;
+                        syncRowDeadlineVisibility(row);
+                        syncRowCancellationGuidanceVisibility(row);
+                        if (payload.value === 'mark_for_cancellation') {
+                            const dlIn = row.querySelector('.cancel-deadline-input');
+                            if (dlIn && !dlIn.disabled && !dlIn.value) {
+                                dlIn.value = getEndOfCurrentMonthIsoDate();
+                            }
+                        }
+                    });
+                    const filterSelect = document.getElementById('reportFilter');
+                    if (filterSelect) {
+                        filterTableRows(filterSelect.value);
+                    }
                 }
                 applyVendorTablePagination(vendorCurrentPage);
                 calculateAnnualSavings();
@@ -4237,6 +4536,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     </td>
                     <td class="vendor-chat-col">
                         <button type="button" class="vendor-chat-btn" disabled title="Save this row first to enable chat" aria-label="Open vendor chat">
+                            <span class="vendor-chat-unread-badge" hidden aria-hidden="true"></span>
                             <span class="material-symbols-outlined vendor-chat-icon" aria-hidden="true">chat</span>
                         </button>
                     </td>
@@ -4405,10 +4705,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             function getFilteredVendorRows(filterValue) {
                 const filter = normalizeVendorFilter(filterValue);
                 return Array.from(document.querySelectorAll('#calculatorRows tr')).filter(function(row) {
-                    if (filter === 'all') {
-                        return true;
-                    }
-                    return getRowStatus(row) === filter;
+                    const passesReport = filter === 'all' || getRowStatus(row) === filter;
+                    return passesReport && rowMatchesColumnFilters(row);
                 });
             }
 
@@ -4482,6 +4780,134 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const sel = row.querySelector('select.row-status-select');
                 if (!sel) return 'pending';
                 return normalizeStatusToken(sel.value);
+            }
+
+            function getRowFrequencyValue(row) {
+                const sel = row.querySelector('.frequency-select');
+                return sel ? sel.value : '';
+            }
+
+            function getRowManagerFilterKey(row) {
+                const mgrSel = row.querySelector('.manager-select');
+                const mgr = mgrSel && mgrSel.value ? String(mgrSel.value) : '';
+                return mgr === '' ? '__none__' : mgr;
+            }
+
+            function rowMatchesColumnFilters(row) {
+                if (vendorColumnFilters.frequency.size) {
+                    if (!vendorColumnFilters.frequency.has(getRowFrequencyValue(row))) return false;
+                }
+                if (vendorColumnFilters.manager.size) {
+                    if (!vendorColumnFilters.manager.has(getRowManagerFilterKey(row))) return false;
+                }
+                if (vendorColumnFilters.visibility.size) {
+                    const visSel = row.querySelector('.visibility-select');
+                    const vis = visSel ? visSel.value : 'public';
+                    if (!vendorColumnFilters.visibility.has(vis)) return false;
+                }
+                if (vendorColumnFilters.status.size) {
+                    if (!vendorColumnFilters.status.has(getRowStatus(row))) return false;
+                }
+                return true;
+            }
+
+            function closeAllVendorColumnFilterDropdowns() {
+                document.querySelectorAll('.vendor-col-filter-dropdown').forEach(function(dd) {
+                    dd.hidden = true;
+                });
+                document.querySelectorAll('.vendor-col-filter-btn').forEach(function(b) {
+                    b.setAttribute('aria-expanded', 'false');
+                });
+            }
+
+            function updateVendorFilterButtonActive(col) {
+                const btn = document.querySelector('.vendor-col-filter-btn[data-vendor-filter="' + col + '"]');
+                if (btn) btn.classList.toggle('is-active', vendorColumnFilters[col].size > 0);
+            }
+
+            function populateVendorColumnFilterList(col) {
+                const dd = document.querySelector('.vendor-col-filter-dropdown[data-vendor-filter="' + col + '"]');
+                if (!dd) return;
+                const listEl = dd.querySelector('.vendor-col-filter-list');
+                if (!listEl) return;
+                listEl.innerHTML = '';
+                const opts = [];
+                if (col === 'frequency') {
+                    FREQUENCY_FILTER_ORDER.forEach(function(v) {
+                        opts.push({ value: v, label: FREQUENCY_FILTER_LABELS[v] || v });
+                    });
+                } else if (col === 'manager') {
+                    opts.push({ value: '__none__', label: 'Unassigned' });
+                    (TEAM_MEMBERS || []).forEach(function(m) {
+                        const lab = (m.username || m.email || ('User ' + m.id)).replace(/</g, '');
+                        opts.push({ value: String(m.id), label: lab });
+                    });
+                } else if (col === 'visibility') {
+                    opts.push({ value: 'public', label: 'Public' });
+                    opts.push({ value: 'confidential', label: 'Confidential' });
+                } else if (col === 'status') {
+                    VALID_ROW_STATUSES.forEach(function(s) {
+                        opts.push({ value: s, label: STATUS_COLUMN_FILTER_LABELS[s] || s });
+                    });
+                }
+                opts.forEach(function(opt) {
+                    const labEl = document.createElement('label');
+                    labEl.className = 'vendor-col-filter-option';
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.value = opt.value;
+                    cb.checked = vendorColumnFilters[col].has(opt.value);
+                    labEl.appendChild(cb);
+                    labEl.appendChild(document.createTextNode(opt.label));
+                    listEl.appendChild(labEl);
+                });
+            }
+
+            function initVendorColumnHeaderFilters() {
+                document.addEventListener('click', function(e) {
+                    if (e.target.closest('.th-with-filter')) return;
+                    closeAllVendorColumnFilterDropdowns();
+                });
+                document.addEventListener('keydown', function(e) {
+                    if (e.key === 'Escape') closeAllVendorColumnFilterDropdowns();
+                });
+                VENDOR_FILTER_COLS.forEach(function(col) {
+                    const btn = document.querySelector('.vendor-col-filter-btn[data-vendor-filter="' + col + '"]');
+                    const dd = document.querySelector('.vendor-col-filter-dropdown[data-vendor-filter="' + col + '"]');
+                    const clearBtn = document.querySelector('.vendor-col-filter-clear[data-vendor-filter="' + col + '"]');
+                    const listEl = dd ? dd.querySelector('.vendor-col-filter-list') : null;
+                    if (!btn || !dd || !listEl) return;
+                    btn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        const wasOpen = !dd.hidden;
+                        closeAllVendorColumnFilterDropdowns();
+                        if (!wasOpen) {
+                            populateVendorColumnFilterList(col);
+                            dd.hidden = false;
+                            btn.setAttribute('aria-expanded', 'true');
+                        }
+                    });
+                    listEl.addEventListener('change', function() {
+                        vendorColumnFilters[col].clear();
+                        listEl.querySelectorAll('input[type=checkbox]').forEach(function(c) {
+                            if (c.checked) vendorColumnFilters[col].add(c.value);
+                        });
+                        applyVendorTablePagination(vendorCurrentPage);
+                        updateVendorFilterButtonActive(col);
+                    });
+                    if (clearBtn) {
+                        clearBtn.addEventListener('click', function(e) {
+                            e.stopPropagation();
+                            vendorColumnFilters[col].clear();
+                            listEl.querySelectorAll('input[type=checkbox]').forEach(function(c) {
+                                c.checked = false;
+                            });
+                            applyVendorTablePagination(vendorCurrentPage);
+                            updateVendorFilterButtonActive(col);
+                        });
+                    }
+                    updateVendorFilterButtonActive(col);
+                });
             }
 
             function syncRowDeadlineVisibility(row) {
@@ -4694,6 +5120,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     
                                     if (vendorInput) vendorInput.value = item.vendor_name || '';
                                     updateVendorDrilldownState(lastRow);
+                                    var uch = typeof item.vendor_chat_unread !== 'undefined' ? item.vendor_chat_unread : 0;
+                                    var cbtn = lastRow.querySelector('.vendor-chat-btn');
+                                    if (cbtn) setVendorChatUnreadBadge(cbtn, uch);
+
                                     if (costInput) costInput.value = item.cost_per_period > 0 ? '$' + parseFloat(item.cost_per_period).toFixed(2) : '';
                                     if (frequencySelect) frequencySelect.value = item.frequency || '';
                                     if (mgr) {
@@ -4797,6 +5227,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     frequencySelect.addEventListener('change', function(e) {
                         calculateAnnualCost(e);
                         autoSave();
+                        if (!calculatorLoadInProgress) {
+                            applyVendorTablePagination(vendorCurrentPage);
+                        }
                     });
                 }
 
@@ -4842,7 +5275,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     notesTextarea.addEventListener('blur', autoSave);
                 }
                 [mgrSel, visSel].forEach(function(el) {
-                    if (el) el.addEventListener('change', autoSave);
+                    if (el) el.addEventListener('change', function() {
+                        autoSave();
+                        if (!calculatorLoadInProgress) {
+                            applyVendorTablePagination(vendorCurrentPage);
+                        }
+                    });
                 });
                 [dlIn, lpIn].forEach(function(el) {
                     if (el) el.addEventListener('change', autoSave);
@@ -4872,6 +5310,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     chatBtn.title = canChat
                         ? ('Open vendor chat for ' + (vendorName || 'this vendor'))
                         : 'Save this row first to enable chat';
+                    if (!canChat) {
+                        setVendorChatUnreadBadge(chatBtn, 0);
+                    } else {
+                        var prevUnread = parseInt(chatBtn.getAttribute('data-chat-unread'), 10);
+                        if (!isFinite(prevUnread)) prevUnread = 0;
+                        setVendorChatUnreadBadge(chatBtn, prevUnread);
+                    }
                 }
                 if (cancelGuideBtn) {
                     cancelGuideBtn.setAttribute('data-vendor-item-id', idVal > 0 ? String(idVal) : '');
@@ -4922,6 +5367,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 initAppModals();
                 initNavSubmenus();
                 initPurposeColumnToggle();
+                initVendorColumnHeaderFilters();
                 loadProjectsIntoMenu();
                 syncBulkManagerOptions();
                 const projectSwitcher = document.getElementById('projectSwitcherSelect');
@@ -5047,6 +5493,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     });
                 }
                 loadCalculatorData();
+                vendorChatUnreadPollTimer = window.setInterval(pollVendorChatUnreadCounts, VENDOR_CHAT_UNREAD_POLL_MS);
+                window.addEventListener('beforeunload', function() {
+                    if (vendorChatUnreadPollTimer) {
+                        clearInterval(vendorChatUnreadPollTimer);
+                        vendorChatUnreadPollTimer = null;
+                    }
+                });
                 var csvIn = document.getElementById('csvImportInput');
                 if (csvIn) {
                     csvIn.addEventListener('change', function() {
@@ -5174,6 +5627,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         .then(function(r) { return r.json(); })
                         .then(function(d) {
                             vendorChatRequestInFlight = false;
+                            if (d && d.success) {
+                                var rows = document.querySelectorAll('.vendor-chat-btn[data-vendor-item-id="' + String(vendorItemId) + '"]');
+                                rows.forEach(function(b) { setVendorChatUnreadBadge(b, 0); });
+                            }
                             if (!d || !d.success) {
                                 if (!isSilent) {
                                     renderVendorChatMessages([]);
@@ -5259,7 +5716,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 showSnackbar((d && d.error) || 'Could not send chat message.', 'error');
                                 return;
                             }
+                            var sentVid = activeVendorChatItemId;
                             input.value = '';
+                            if (sentVid) {
+                                document.querySelectorAll('.vendor-chat-btn[data-vendor-item-id="' + String(sentVid) + '"]').forEach(function(b) {
+                                    setVendorChatUnreadBadge(b, 0);
+                                });
+                            }
                             if (d.vendor_name) {
                                 activeVendorChatVendorName = String(d.vendor_name);
                                 var title = document.getElementById('appModalVendorChatTitle');
@@ -5854,6 +6317,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <select id="bulkActionType">
                         <option value="">Select action</option>
                         <option value="frequency">Update Frequency</option>
+                        <option value="status">Update Status</option>
                         <?php if ($is_admin): ?>
                         <option value="visibility">Update Visibility</option>
                         <option value="manager">Update Manager</option>
@@ -5871,6 +6335,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 <option value="semi_annual">Semi-annual</option>
                                 <option value="annually">Annually</option>
                                 <option value="one_off">One-off</option>
+                            </select>
+                        </div>
+                        <div id="bulkStatusWrap" style="display:none;">
+                            <label for="bulkStatusValue">Status value</label>
+                            <select id="bulkStatusValue">
+                                <option value="">Select status</option>
+                                <option value="pending">Pending</option>
+                                <option value="question">Question</option>
+                                <option value="unknown">Unknown</option>
+                                <option value="keep">Keep</option>
+                                <option value="mark_for_cancellation">Mark for Cancellation</option>
+                                <option value="cancelled">Cancelled</option>
                             </select>
                         </div>
                         <div id="bulkVisibilityWrap" style="display:none;">

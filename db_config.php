@@ -427,6 +427,7 @@ function migrateCostCalculatorSchema(PDO $pdo) {
     migrateVendorDetailSchema($pdo);
     migrateVendorRawTransactionSchema($pdo);
     migrateVendorChatSchema($pdo);
+    migrateVendorChatReadStateSchema($pdo);
 }
 
 /**
@@ -521,6 +522,27 @@ function migrateVendorChatSchema(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     } catch (PDOException $e) {
         error_log('migrateVendorChatSchema: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Per-user last-read pointers for vendor line chat unread badges.
+ *
+ * @param PDO $pdo
+ */
+function migrateVendorChatReadStateSchema(PDO $pdo): void
+{
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `vendor_item_chat_reads` (
+            `user_id` INT UNSIGNED NOT NULL,
+            `vendor_item_id` INT NOT NULL,
+            `last_read_message_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`user_id`, `vendor_item_id`),
+            KEY `idx_vicr_vendor` (`vendor_item_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    } catch (PDOException $e) {
+        error_log('migrateVendorChatReadStateSchema: ' . $e->getMessage());
     }
 }
 

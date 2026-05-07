@@ -34,6 +34,8 @@ class VendorChatService
                 $messages[] = self::mapMessageRow($row);
             }
 
+            self::markThreadRead($pdo, $orgId, $projectId, $vendorItemId, $userId, $role);
+
             return [
                 'success' => true,
                 'vendor_name' => (string) ($item['vendor_name'] ?? ''),
@@ -114,6 +116,101 @@ class VendorChatService
             error_log('VendorChatService::addMessage: ' . $e->getMessage());
 
             return ['success' => false, 'error' => 'Unable to save chat message'];
+        }
+    }
+
+    /**
+     * Advances the user's read pointer to the latest message in the thread (if they may access it).
+     */
+    public static function markThreadRead(
+        PDO $pdo,
+        int $orgId,
+        int $projectId,
+        int $vendorItemId,
+        int $userId,
+        string $role
+    ): void {
+        $item = self::loadAccessibleVendorItem($pdo, $orgId, $projectId, $vendorItemId, $userId, $role);
+        if ($item === null) {
+            return;
+        }
+
+        try {
+            $st = $pdo->prepare(
+                'SELECT COALESCE(MAX(id), 0) FROM vendor_item_chat_messages
+                 WHERE org_id = ? AND project_id = ? AND vendor_item_id = ?'
+            );
+            $st->execute([$orgId, $projectId, $vendorItemId]);
+            $maxId = (int) $st->fetchColumn();
+
+            $up = $pdo->prepare(
+                'INSERT INTO vendor_item_chat_reads (user_id, vendor_item_id, last_read_message_id)
+                 VALUES (?, ?, ?)
+                 ON DUPLICATE KEY UPDATE
+                   last_read_message_id = GREATEST(last_read_message_id, ?),
+                   updated_at = CURRENT_TIMESTAMP'
+            );
+            $up->execute([$userId, $vendorItemId, $maxId, $maxId]);
+        } catch (PDOException $e) {
+            error_log('VendorChatService::markThreadRead: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Unread counts (messages from other users) per vendor row visible to this user.
+     *
+     * @return array<int, int> vendor_item_id => count
+     */
+    public static function unreadCountsForUserProject(
+        PDO $pdo,
+        int $orgId,
+        int $projectId,
+        int $userId,
+        string $role
+    ): array {
+        $items = VendorService::loadVisibleItems($pdo, $userId, $orgId, $projectId, $role);
+        $ids = [];
+        foreach ($items as $it) {
+            if (!is_array($it)) {
+                continue;
+            }
+            $id = (int) ($it['id'] ?? 0);
+            if ($id > 0) {
+                $ids[] = $id;
+            }
+        }
+        if ($ids === []) {
+            return [];
+        }
+
+        try {
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $sql = "SELECT m.vendor_item_id, COUNT(*) AS c
+                    FROM vendor_item_chat_messages m
+                    LEFT JOIN vendor_item_chat_reads r
+                      ON r.user_id = ? AND r.vendor_item_id = m.vendor_item_id
+                    WHERE m.org_id = ? AND m.project_id = ?
+                      AND m.vendor_item_id IN ($placeholders)
+                      AND m.user_id <> ?
+                      AND m.id > COALESCE(r.last_read_message_id, 0)
+                    GROUP BY m.vendor_item_id";
+
+            $params = array_merge([$userId, $orgId, $projectId], $ids, [$userId]);
+            $st = $pdo->prepare($sql);
+            $st->execute($params);
+            $out = [];
+            while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+                $vid = (int) ($row['vendor_item_id'] ?? 0);
+                if ($vid > 0) {
+                    $out[$vid] = (int) ($row['c'] ?? 0);
+                }
+            }
+
+            return $out;
+        } catch (PDOException $e) {
+            error_log('VendorChatService::unreadCountsForUserProject: ' . $e->getMessage());
+
+            return [];
         }
     }
 
