@@ -1158,8 +1158,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         /* Filter dropdown styles */
         .report-filters {
             display: flex;
-            align-items: center;
-            gap: 15px;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0;
             margin-bottom: 20px;
             padding: 15px;
             background: #f8f9fa;
@@ -1220,6 +1221,111 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             padding: 8px 12px;
             font-size: 13px;
             border-radius: 8px;
+        }
+
+        .report-filters-top {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+            width: 100%;
+        }
+
+        .status-key-details {
+            width: 100%;
+            margin: 4px 0 0;
+            padding: 0;
+            border: none;
+            font-size: 13px;
+            color: #374151;
+        }
+
+        .status-key-summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: #4a3f6b;
+            list-style: none;
+            padding: 6px 0;
+            user-select: none;
+        }
+
+        .status-key-summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .status-key-summary::before {
+            content: '';
+            display: inline-block;
+            width: 0;
+            height: 0;
+            margin-right: 6px;
+            border-style: solid;
+            border-width: 5px 0 5px 6px;
+            border-color: transparent transparent transparent #6b5b95;
+            vertical-align: middle;
+            transform: rotate(0deg);
+            transition: transform 0.15s ease;
+        }
+
+        .status-key-details[open] .status-key-summary::before {
+            transform: rotate(90deg);
+        }
+
+        .status-key-summary:hover {
+            color: #6b5b95;
+        }
+
+        .status-key-summary:focus {
+            outline: none;
+        }
+
+        .status-key-summary:focus-visible {
+            outline: 2px solid #6b5b95;
+            outline-offset: 3px;
+            border-radius: 4px;
+        }
+
+        .status-key-body {
+            margin-top: 10px;
+            padding: 12px 14px;
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+        }
+
+        .status-key-body dl {
+            margin: 0;
+            display: grid;
+            grid-template-columns: minmax(9rem, 12rem) 1fr;
+            gap: 6px 16px;
+            align-items: start;
+        }
+
+        .status-key-body dt {
+            margin: 0;
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .status-key-body dd {
+            margin: 0;
+            color: #4b5563;
+            line-height: 1.45;
+        }
+
+        @media (max-width: 640px) {
+            .status-key-body dl {
+                grid-template-columns: 1fr;
+            }
+
+            .status-key-body dt {
+                margin-top: 6px;
+            }
+
+            .status-key-body dt:first-child {
+                margin-top: 0;
+            }
         }
 
         .cost-calculator-grid.notes-collapsed {
@@ -3792,18 +3898,39 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         <?php elseif ($current_view === 'placeholder'): ?>
             <div class="content-padding">
                 <div class="report-filters">
-                    <label for="reportFilter">Report Filters:</label>
-                    <select id="reportFilter" onchange="filterTableRows(this.value)">
-                        <option value="all">All</option>
-                        <option value="pending">Pending</option>
-                        <option value="question">Question</option>
-                        <option value="unknown">Unknown</option>
-                        <option value="keep">Keep</option>
-                        <option value="mark_for_cancellation">Mark for Cancellation</option>
-                        <option value="cancelled">Cancelled</option>
-                    </select>
-                    <button type="button" class="bulk-action-btn" data-open-modal="appModalBulkActions">Bulk Actions</button>
-                    <button type="button" id="togglePurposeColumnBtn" class="column-toggle-btn" aria-pressed="false">Show Purpose</button>
+                    <div class="report-filters-top">
+                        <label for="reportFilter">Report Filters:</label>
+                        <select id="reportFilter" onchange="filterTableRows(this.value)">
+                            <option value="all">All</option>
+                            <option value="pending">Pending</option>
+                            <option value="question">Question</option>
+                            <option value="unknown">Unknown</option>
+                            <option value="keep">Keep</option>
+                            <option value="mark_for_cancellation">Mark for Cancellation</option>
+                            <option value="cancelled">Cancelled</option>
+                        </select>
+                        <button type="button" class="bulk-action-btn" data-open-modal="appModalBulkActions">Bulk Actions</button>
+                        <button type="button" id="togglePurposeColumnBtn" class="column-toggle-btn" aria-pressed="false">Show Purpose</button>
+                    </div>
+                    <details class="status-key-details" id="vendorStatusKey">
+                        <summary class="status-key-summary">Status key</summary>
+                        <div class="status-key-body">
+                            <dl>
+                                <dt>Pending</dt>
+                                <dd>Not reviewed yet, or no decision recorded—use this until the team classifies the vendor.</dd>
+                                <dt>Question</dt>
+                                <dd>Needs a follow-up (stakeholder input, clarification, or discussion) before you commit to keep or cancel.</dd>
+                                <dt>Unknown</dt>
+                                <dd>Not enough context to decide—purpose, owner, or numbers are unclear (common right after import or with thin data).</dd>
+                                <dt>Keep</dt>
+                                <dd>Reviewed and you plan to continue this vendor or spend; no cancellation in progress.</dd>
+                                <dt>Mark for Cancellation</dt>
+                                <dd>Decision is to cancel; use the cancellation date field to track the target end until it is fully executed.</dd>
+                                <dt>Cancelled</dt>
+                                <dd>Cancellation is complete (or the contract ended); treat this spend as off for forward-looking savings.</dd>
+                            </dl>
+                        </div>
+                    </details>
                 </div>
                 
                 <div class="cost-calculator-table-wrapper">
