@@ -580,9 +580,12 @@ class VendorService
                 $legacy = self::statusToLegacy($status);
                 $purpose = $item['purpose_of_subscription'] ?? $item['notes'] ?? '';
                 $vis = ($item['visibility'] ?? 'public') === 'confidential' ? 'confidential' : 'public';
-                $mgr = isset($item['manager_user_id']) ? (int) $item['manager_user_id'] : $userId;
-                if (!self::userInOrg($pdo, $mgr, $orgId)) {
-                    $mgr = $userId;
+                $mgrRaw = array_key_exists('manager_user_id', $item) ? $item['manager_user_id'] : null;
+                if ($mgrRaw === null || $mgrRaw === '') {
+                    $mgr = null;
+                } else {
+                    $mgrId = (int) $mgrRaw;
+                    $mgr = ($mgrId > 0 && self::userInOrg($pdo, $mgrId, $orgId)) ? $mgrId : null;
                 }
                 $deadline = self::normDate($item['cancellation_deadline'] ?? null);
                 $lastPay = self::normDate($item['last_payment_date'] ?? null);
