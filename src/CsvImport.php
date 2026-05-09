@@ -10,6 +10,8 @@ class CsvImport
     private const HEADER_NEEDLE = ',Date,Transaction type';
 
     /**
+     * Summary vendor rows use the chronologically latest transaction amount as cost_per_period.
+     *
      * @return array{
      *   summary: array<int, array{vendor_name:string,cost_per_period:float,frequency:string,annual_cost:float,last_payment_date:?string}>,
      *   raw: array<int, array{vendor_name:string,transaction_date:string,amount:float,transaction_type:string,account:string,memo:string}>
@@ -149,6 +151,8 @@ class CsvImport
     }
 
     /**
+     * cost_per_period is the chronologically latest transaction amount.
+     *
      * @param array<int, array{date:string, amount:float}> $rows
      * @return array{vendor_name:string,cost_per_period:float,frequency:string,annual_cost:float,last_payment_date:?string}
      */
@@ -158,8 +162,8 @@ class CsvImport
             return strcmp($a['date'], $b['date']);
         });
 
-        $amounts = array_column($rows, 'amount');
-        $typical = self::median($amounts);
+        $lastRow = $rows[count($rows) - 1];
+        $latestAmount = (float) $lastRow['amount'];
 
         $dates = array_column($rows, 'date');
         $gaps = [];
@@ -171,12 +175,12 @@ class CsvImport
 
         $frequency = self::inferFrequency($gaps);
         $mult = self::annualMultiplier($frequency);
-        $annual = $typical * $mult;
+        $annual = $latestAmount * $mult;
         $last = $dates[count($dates) - 1] ?? null;
 
         return [
             'vendor_name' => $vendorName,
-            'cost_per_period' => round($typical, 2),
+            'cost_per_period' => round($latestAmount, 2),
             'frequency' => $frequency,
             'annual_cost' => round($annual, 2),
             'last_payment_date' => $last,
