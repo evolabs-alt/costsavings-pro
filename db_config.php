@@ -434,15 +434,23 @@ function migrateCostCalculatorSchema(PDO $pdo) {
             $pdo->exec("ALTER TABLE `cost_calculator_items` MODIFY COLUMN `status` ENUM('pending','question','unknown','keep','mark_for_cancellation','cancelled') NOT NULL DEFAULT 'pending'");
         }
 
-        // Backfill status from legacy cancel_keep/cancelled_status pair for rows
-        // that still hold the default 'pending' value (idempotent).
+        // Backfill status from legacy cancel_keep/cancelled_status for pending rows only when
+        // legacy fields imply a non-pending state, or the row predates explicit pending semantics
+        // (manager was assigned). CSV imports intentionally use pending + NULL manager and must
+        // not be rewritten here.
         $pdo->exec("UPDATE `cost_calculator_items`
             SET `status` = CASE
                 WHEN (`cancel_keep` IN ('0','Cancel')) AND `cancelled_status` = 1 THEN 'cancelled'
                 WHEN (`cancel_keep` IN ('0','Cancel')) THEN 'mark_for_cancellation'
-                ELSE 'keep'
+                WHEN `manager_user_id` IS NOT NULL THEN 'keep'
+                ELSE `status`
             END
-            WHERE `status` IS NULL OR `status` = '' OR `status` = 'pending'");
+            WHERE `status` = 'pending'
+            AND (
+                (`cancel_keep` IN ('0','Cancel'))
+                OR (`cancelled_status` = 1)
+                OR (`manager_user_id` IS NOT NULL)
+            )");
 
         try {
             $pdo->exec('CREATE INDEX `idx_cc_status` ON `cost_calculator_items` (`status`)');
@@ -465,7 +473,6 @@ function migrateCostCalculatorSchema(PDO $pdo) {
             SET cci.user_id = u.id
             WHERE cci.user_id IS NULL");
 
-        $pdo->exec("UPDATE `cost_calculator_items` SET `manager_user_id` = `user_id` WHERE `manager_user_id` IS NULL AND `user_id` IS NOT NULL");
         try {
             $pdo->exec('CREATE INDEX `idx_cc_project` ON `cost_calculator_items` (`project_id`)');
         } catch (PDOException $e) {
