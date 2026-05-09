@@ -5,6 +5,7 @@ require_once __DIR__ . '/pro_log.php';
 use CostSavings\AiService;
 use CostSavings\CsvImport;
 use CostSavings\ExportService;
+use CostSavings\OrgRole;
 use CostSavings\ProjectService;
 use CostSavings\VendorChatService;
 use CostSavings\VendorPurposeService;
@@ -238,7 +239,7 @@ function handleLogin() {
     $_SESSION['org_id'] = $orgId;
     $role = (string) ($row['role'] ?? 'member');
     $projectCount = ProjectService::orgProjectCount($pdo, $orgId);
-    $_SESSION['project_onboarding_required'] = ($role === 'admin' && $projectCount === 0);
+    $_SESSION['project_onboarding_required'] = (OrgRole::isSuperAdmin($role) && $projectCount === 0);
     $activeProjectId = ProjectService::resolveActiveProjectId($pdo, $orgId, $userId, $role, null);
     if ($activeProjectId !== null) {
         $_SESSION['active_project_id'] = $activeProjectId;
@@ -292,7 +293,7 @@ function handleInviteMember() {
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     };
-    if (empty($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
+    if (empty($_SESSION['user_id']) || !OrgRole::isPrivileged((string) ($_SESSION['role'] ?? ''))) {
         $_SESSION['error'] = 'Only admins can invite members.';
         $redir();
     }
@@ -659,7 +660,7 @@ function handleToggleMemberDisabled(): void
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     };
-    if (empty($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
+    if (empty($_SESSION['user_id']) || !OrgRole::isPrivileged((string) ($_SESSION['role'] ?? ''))) {
         $_SESSION['error'] = 'Only admins can manage member status.';
         $redir();
     }
@@ -691,7 +692,7 @@ function handleToggleMemberDisabled(): void
 }
 
 function handleSaveOrgReminders() {
-    if (empty($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
+    if (empty($_SESSION['user_id']) || !OrgRole::isPrivileged((string) ($_SESSION['role'] ?? ''))) {
         $_SESSION['error'] = 'Only admins can change organization settings.';
 
         return;
@@ -723,7 +724,7 @@ function handleSaveReminderSettings() {
         return;
     }
     $pdo = getDBConnection();
-    $isAdmin = (($_SESSION['role'] ?? '') === 'admin');
+    $isAdmin = OrgRole::isPrivileged((string) ($_SESSION['role'] ?? ''));
 
     if ($isAdmin) {
         $orgOn = isset($_POST['deadline_reminders_enabled']) && $_POST['deadline_reminders_enabled'] === '1';
@@ -798,8 +799,8 @@ function handleSaveCostCalculator() {
         }
     }
 
-    if ($role === 'admin') {
-        $result = VendorService::saveAdmin($pdo, $orgId, $activeProjectId, $uid, $items);
+    if (OrgRole::isPrivileged((string) $role)) {
+        $result = VendorService::saveAdmin($pdo, $orgId, $activeProjectId, $uid, (string) $role, $items);
     } else {
         $result = VendorService::saveMember($pdo, $orgId, $activeProjectId, $uid, $items);
     }
@@ -1084,8 +1085,8 @@ function handleProjectSetActive() {
 
 function handleProjectCreate() {
     header('Content-Type: application/json');
-    if (empty($_SESSION['user_id']) || (string) ($_SESSION['role'] ?? '') !== 'admin') {
-        echo json_encode(['success' => false, 'error' => 'Only admins can create projects.']);
+    if (empty($_SESSION['user_id']) || !OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
+        echo json_encode(['success' => false, 'error' => 'Only a super admin can create projects.']);
         exit;
     }
     $projectName = trim((string) ($_POST['project_name'] ?? ''));
@@ -1126,7 +1127,7 @@ function handleProjectCreate() {
             $sourceProjectId = isset($_SESSION['active_project_id']) ? (int) $_SESSION['active_project_id'] : 0;
         }
         if ($sourceProjectId > 0) {
-            ProjectService::copyProjectData($pdo, $orgId, $sourceProjectId, $newProjectId, $userId);
+            ProjectService::copyProjectData($pdo, $orgId, $sourceProjectId, $newProjectId, $userId, (string) ($_SESSION['role'] ?? 'member'));
         }
     }
 

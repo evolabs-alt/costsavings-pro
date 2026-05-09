@@ -55,11 +55,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
                     error_log('[invite-register] blocked_duplicate_user org_id=' . $orgId . ' email=' . $email . ' username=' . $username);
                     $error = 'Username or email is already taken.';
                 } else {
+                    $inviterId = (int) ($inv['invited_by_user_id'] ?? 0);
+                    $desiredRole = 'member';
+                    $inviterRole = 'member';
+                    if ($inviterId > 0) {
+                        $ir = $pdo->prepare('SELECT role FROM users WHERE id = ? LIMIT 1');
+                        $ir->execute([$inviterId]);
+                        $inviterRole = (string) ($ir->fetchColumn() ?: 'member');
+                    }
+                    // Invites only elevate past member when super_admin allows (future invite_role column).
+                    if ($desiredRole !== \CostSavings\OrgRole::ROLE_MEMBER && !\CostSavings\OrgRole::canElevateOrgRoles($inviterRole)) {
+                        $desiredRole = \CostSavings\OrgRole::ROLE_MEMBER;
+                    }
+
                     $ph = password_hash($password, PASSWORD_DEFAULT);
                     $ins = $pdo->prepare(
                         'INSERT INTO users (org_id, username, email, password_hash, role, display_name) VALUES (?,?,?,?,?,?)'
                     );
-                    $ins->execute([$orgId, $username, $email, $ph, 'member', $displayName]);
+                    $ins->execute([$orgId, $username, $email, $ph, $desiredRole, $displayName]);
                     error_log('[invite-register] user_created org_id=' . $orgId . ' email=' . $email . ' username=' . $username);
                     $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
                     error_log('[invite-register] invite_consumed invitation_id=' . (int) $inv['id']);

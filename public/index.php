@@ -410,7 +410,7 @@ try {
 $current_view = 'login';
 $is_logged_in = !empty($_SESSION['user_id']) || !empty($_SESSION['user_email']);
 if ($is_logged_in) {
-    if (!empty($_SESSION['project_onboarding_required']) && (($_SESSION['role'] ?? '') === 'admin')) {
+    if (!empty($_SESSION['project_onboarding_required']) && \CostSavings\OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
         unset($_SESSION['awaiting_role']);
         $current_view = 'placeholder';
     } else {
@@ -432,7 +432,8 @@ if ($is_logged_in) {
     }
 }
 
-$is_admin = ($is_logged_in && ($_SESSION['role'] ?? '') === 'admin');
+$is_admin = ($is_logged_in && \CostSavings\OrgRole::isPrivileged((string) ($_SESSION['role'] ?? '')));
+$can_create_projects = ($is_logged_in && \CostSavings\OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? '')));
 
 $deadline_reminders_org = true;
 $deadline_reminders_user = true;
@@ -3688,7 +3689,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <li class="app-nav-item has-submenu" id="appProjectNavItem">
                             <button type="button" class="app-nav-link" id="appProjectMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appProjectSubmenu">Project</button>
                             <ul class="app-submenu" id="appProjectSubmenu" role="menu" aria-label="Project actions">
-                                <?php if ($is_admin): ?>
+                                <?php if ($can_create_projects): ?>
                                 <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appCreateProjectBtn" data-open-modal="appModalProjectWizard">Create New Project</button></li>
                                 <?php endif; ?>
                                 <li role="none">
@@ -3736,7 +3737,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 </nav>
             </div>
         <?php endif; ?>
-        <div class="container<?php echo ($current_view === 'placeholder' && $is_admin && !empty($_SESSION['project_onboarding_required'])) ? ' project-onboarding-hidden' : ''; ?>">
+        <div class="container<?php echo ($current_view === 'placeholder' && $can_create_projects && !empty($_SESSION['project_onboarding_required'])) ? ' project-onboarding-hidden' : ''; ?>">
             <?php if ($current_view === 'login'): ?>
             <div class="content-padding login-page">
                 <h1>Savvy Expense Optimizer</h1>
@@ -3922,6 +3923,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             let rowCount = 0;
             let currentActiveProjectId = null;
             const isAdminUser = <?php echo $is_admin ? 'true' : 'false'; ?>;
+            const canCreateProjects = <?php echo $can_create_projects ? 'true' : 'false'; ?>;
 
             function postJson(data) {
                 return fetch(window.location.href, {
@@ -3950,7 +3952,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         currentActiveProjectId = parseInt(d.active_project_id || 0, 10) || null;
                         updateActiveProjectHeader(sel);
                         const hasNoProjects = !Array.isArray(d.projects) || d.projects.length === 0;
-                        if (isAdminUser && (d.onboarding_required || hasNoProjects)) {
+                        if (canCreateProjects && (d.onboarding_required || hasNoProjects)) {
                             openAppModal('appModalProjectWizard');
                         }
                     })
@@ -6240,7 +6242,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <tr>
                                 <td><?php echo htmlspecialchars($tm['display_name'] ?? $tm['username'] ?? '—'); ?></td>
                                 <td><?php echo htmlspecialchars($tm['email'] ?? ''); ?></td>
-                                <td><?php echo htmlspecialchars($tm['role'] ?? 'member'); ?></td>
+                                <td><?php echo htmlspecialchars(\CostSavings\OrgRole::label((string) ($tm['role'] ?? 'member'))); ?></td>
                                 <td>
                                     <?php if ($member_is_disabled): ?>
                                     <span class="member-status-pill member-status-pill--disabled">Disabled</span>
@@ -6272,6 +6274,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         </div>
     </div>
 
+    <?php if ($can_create_projects): ?>
     <div class="app-modal-overlay" id="appModalProjectWizard" role="dialog" aria-modal="true" aria-labelledby="appModalProjectWizardTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
@@ -6293,12 +6296,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <input type="radio" name="projectWizardDataMode" id="projectWizardDataModeUpload" value="upload_after" checked>
                         I will upload data after creating this project.
                     </label>
-                    <?php if ($is_admin): ?>
                     <label>
                         <input type="radio" name="projectWizardDataMode" id="projectWizardDataModeCopy" value="copy_from_active">
                         Copy data from current active project.
                     </label>
-                    <?php endif; ?>
                     <label>Assign members
                         <select id="projectWizardMembers" multiple size="6">
                             <?php foreach ($team_members_rows as $tm): ?>
@@ -6315,6 +6316,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             </div>
         </div>
     </div>
+    <?php endif; ?>
 
     <div class="app-modal-overlay" id="appModalAI" role="dialog" aria-modal="true" aria-labelledby="appModalAITitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">

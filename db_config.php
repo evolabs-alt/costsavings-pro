@@ -138,6 +138,49 @@ function ensureAiUsageTable(PDO $pdo): void {
 }
 
 /**
+ * Migrate legacy users.role ENUM('admin','member') to super_admin / admin / member.
+ * Idempotent: safe across repeated migrateSchema runs.
+ *
+ * @param PDO $pdo
+ */
+function migrateUserRolesToThreeTierEnum(PDO $pdo): void
+{
+    try {
+        $col = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'role'")->fetch(PDO::FETCH_ASSOC);
+        if (!$col || empty($col['Type'])) {
+            return;
+        }
+        $typeDisp = strtolower(trim((string) $col['Type']));
+        $hasSuper = strpos($typeDisp, 'super_admin') !== false;
+        // Finished migration when canonical triple is present **in order** starting with super_admin.
+        if (preg_match('/enum\s*\(\s*\'super_admin\'\s*,\s*\'admin\'\s*,\s*\'member\'\s*\)/', $typeDisp)) {
+            return;
+        }
+
+        // Legacy ENUM('admin','member') — widen, remap rows, finalize.
+        if (!$hasSuper) {
+            $pdo->exec(
+                'ALTER TABLE `users` MODIFY COLUMN `role` ENUM(\'admin\',\'member\',\'super_admin\') NOT NULL DEFAULT \'member\''
+            );
+            $pdo->exec("UPDATE `users` SET `role` = 'super_admin' WHERE `role` = 'admin'");
+            $pdo->exec(
+                'ALTER TABLE `users` MODIFY COLUMN `role` ENUM(\'super_admin\',\'admin\',\'member\') NOT NULL DEFAULT \'member\''
+            );
+
+            return;
+        }
+
+        // Intermediate ENUM('admin','member','super_admin'): finish remap + final column definition.
+        $pdo->exec("UPDATE `users` SET `role` = 'super_admin' WHERE `role` = 'admin'");
+        $pdo->exec(
+            'ALTER TABLE `users` MODIFY COLUMN `role` ENUM(\'super_admin\',\'admin\',\'member\') NOT NULL DEFAULT \'member\''
+        );
+    } catch (PDOException $e) {
+        error_log('migrateUserRolesToThreeTierEnum: ' . $e->getMessage());
+    }
+}
+
+/**
  * Extended schema: organizations, auth, invitations, vendor columns, AI/reminder tables.
  *
  * @param PDO $pdo
@@ -186,7 +229,7 @@ function migrateSchema(PDO $pdo) {
                 `username` VARCHAR(64) NULL,
                 `email` VARCHAR(255) NOT NULL,
                 `password_hash` VARCHAR(255) NULL,
-                `role` ENUM('admin','member') NOT NULL DEFAULT 'member',
+                `role` ENUM('super_admin','admin','member') NOT NULL DEFAULT 'member',
                 `is_disabled` TINYINT(1) NOT NULL DEFAULT 0,
                 `display_name` VARCHAR(255) NULL,
                 `first_name` VARCHAR(255) NULL,
@@ -210,7 +253,7 @@ function migrateSchema(PDO $pdo) {
             $minId = $pdo->query('SELECT MIN(id) AS m FROM users')->fetch();
             $firstId = (int) ($minId['m'] ?? 1);
             $stmt = $pdo->prepare('UPDATE users SET org_id = 1, role = :r WHERE id = :id');
-            $stmt->execute([':r' => 'admin', ':id' => $firstId]);
+            $stmt->execute([':r' => 'super_admin', ':id' => $firstId]);
             $stmt = $pdo->prepare('UPDATE users SET org_id = 1, role = :r WHERE id <> :id');
             $stmt->execute([':r' => 'member', ':id' => $firstId]);
         } else {
@@ -225,7 +268,7 @@ function migrateSchema(PDO $pdo) {
             }
             $cols = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'role'")->fetch();
             if (!$cols) {
-                $pdo->exec("ALTER TABLE `users` ADD COLUMN `role` ENUM('admin','member') NOT NULL DEFAULT 'member' AFTER `password_hash`");
+                $pdo->exec("ALTER TABLE `users` ADD COLUMN `role` ENUM('super_admin','admin','member') NOT NULL DEFAULT 'member' AFTER `password_hash`");
             }
             $cols = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'is_disabled'")->fetch();
             if (!$cols) {
@@ -246,6 +289,8 @@ function migrateSchema(PDO $pdo) {
                 $pdo->exec('ALTER TABLE `users` ADD COLUMN `deadline_reminders_enabled` TINYINT(1) NOT NULL DEFAULT 1 AFTER `role_set_at`');
             }
         }
+
+        migrateUserRolesToThreeTierEnum($pdo);
 
         ensureAiUsageTable($pdo);
 
@@ -575,7 +620,7 @@ function seedInitialAdminIfNeeded(PDO $pdo) {
         ':u' => $username,
         ':e' => $email,
         ':p' => $hash,
-        ':admin' => 'admin',
+        ':admin' => 'super_admin',
         ':dn' => 'Test Admin',
     ]);
 }

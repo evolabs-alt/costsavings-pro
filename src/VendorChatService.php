@@ -229,10 +229,29 @@ class VendorChatService
             return null;
         }
 
-        if ($role === 'admin') {
+        if (OrgRole::isSuperAdmin($role)) {
             $sql = 'SELECT id, vendor_name, visibility, manager_user_id
                     FROM cost_calculator_items
                     WHERE id = :id AND org_id = :oid AND project_id = :pid
+                    LIMIT 1';
+            $st = $pdo->prepare($sql);
+            $st->execute([
+                ':id' => $vendorItemId,
+                ':oid' => $orgId,
+                ':pid' => $projectId,
+            ]);
+
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            return $row ?: null;
+        }
+
+        if (OrgRole::isPrivileged($role)) {
+            $sql = 'SELECT id, vendor_name, visibility, manager_user_id
+                    FROM cost_calculator_items
+                    WHERE id = :id
+                      AND org_id = :oid
+                      AND project_id = :pid
+                      AND visibility = \'public\'
                     LIMIT 1';
             $st = $pdo->prepare($sql);
             $st->execute([

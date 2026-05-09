@@ -132,8 +132,13 @@ class ReminderService
 
             $role = $u['role'] ?? 'member';
             $orgId = (int) $u['org_id'];
-            if ($role === 'admin') {
+            if (OrgRole::isSuperAdmin((string) $role)) {
                 $q = $pdo->prepare('SELECT * FROM cost_calculator_items WHERE org_id = ?');
+                $q->execute([$orgId]);
+            } elseif (OrgRole::isPrivileged((string) $role)) {
+                $q = $pdo->prepare(
+                    'SELECT * FROM cost_calculator_items WHERE org_id = ? AND visibility = \'public\''
+                );
                 $q->execute([$orgId]);
             } else {
                 $q = $pdo->prepare(
