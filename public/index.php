@@ -4732,6 +4732,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             let calculatorLoadInProgress = false;
             /** Serialize saves: server replaces all rows per request; overlapping saves must not complete out of order. */
             let saveQueue = Promise.resolve();
+            const AI_PURPOSE_PREFIX = <?php echo json_encode(\CostSavings\VendorPurposeService::AI_PURPOSE_UI_PREFIX, JSON_UNESCAPED_UNICODE); ?>;
+            function syncPurposeAiBadgeDataset(textarea, val) {
+                if (!textarea) return;
+                if (val && typeof val === 'string' && val.startsWith(AI_PURPOSE_PREFIX)) {
+                    textarea.dataset.aiPurposeBadge = '1';
+                } else {
+                    delete textarea.dataset.aiPurposeBadge;
+                }
+            }
             function autoSave() {
                 console.log('autoSave called');
                 clearTimeout(saveTimeout);
@@ -5238,7 +5247,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     syncRowCancellationGuidanceVisibility(lastRow);
                                     syncMemberStatusEditability(lastRow);
 
-                                    if (notesTextarea) notesTextarea.value = item.purpose_of_subscription || item.notes || '';
+                                    if (notesTextarea) {
+                                        var pVal = item.purpose_of_subscription || item.notes || '';
+                                        notesTextarea.value = pVal;
+                                        syncPurposeAiBadgeDataset(notesTextarea, pVal);
+                                    }
                                     
                                     if (costInput && frequencySelect) {
                                         const event = new Event('input');
@@ -5355,6 +5368,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
                 
                 if (notesTextarea) {
+                    notesTextarea.addEventListener('input', function() {
+                        if (this.dataset.aiPurposeBadge === '1') {
+                            if (this.value.startsWith(AI_PURPOSE_PREFIX)) {
+                                this.value = this.value.slice(AI_PURPOSE_PREFIX.length);
+                            }
+                            delete this.dataset.aiPurposeBadge;
+                        }
+                    });
                     notesTextarea.addEventListener('blur', autoSave);
                 }
                 [mgrSel, visSel].forEach(function(el) {
@@ -6016,15 +6037,26 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 function applyPurposeLookupResultsToUi(resultRows) {
                     if (!Array.isArray(resultRows)) return;
                     var byId = {};
+                    var bySource = {};
                     resultRows.forEach(function(r) {
-                        if (r && r.id) byId[String(r.id)] = String(r.purpose || '');
+                        if (r && r.id) {
+                            byId[String(r.id)] = String(r.purpose || '');
+                            bySource[String(r.id)] = String(r.source || '');
+                        }
                     });
                     document.querySelectorAll('#calculatorRows tr').forEach(function(row) {
                         var idEl = row.querySelector('.row-db-id');
                         var idVal = idEl && idEl.value ? String(parseInt(idEl.value, 10) || 0) : '';
                         if (!idVal || !byId[idVal]) return;
                         var notesTextarea = row.querySelector('textarea.purpose-textarea') || row.querySelector('textarea[name="notes[]"]');
-                        if (notesTextarea) notesTextarea.value = byId[idVal];
+                        if (!notesTextarea) return;
+                        notesTextarea.value = byId[idVal];
+                        var src = bySource[idVal] || '';
+                        if (src === 'vendor_detail' || src === 'live_lookup') {
+                            notesTextarea.dataset.aiPurposeBadge = '1';
+                        } else {
+                            delete notesTextarea.dataset.aiPurposeBadge;
+                        }
                     });
                 }
                 function filterResolvedRowsById(resultRows, allowedIds) {

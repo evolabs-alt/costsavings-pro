@@ -14,6 +14,45 @@ class VendorPurposeService
      */
     private const LIVE_LOOKUP_CHUNK_SIZE = 10;
 
+    /** Prepended to purpose text when auto-populated from AI or shared vendor cache (U+2728 + space). */
+    public const AI_PURPOSE_UI_PREFIX = "✨ ";
+
+    public const SOURCE_VENDOR_DETAIL = 'vendor_detail';
+
+    public const SOURCE_LIVE_LOOKUP = 'live_lookup';
+
+    public const SOURCE_FALLBACK_UNKNOWN = 'fallback_unknown';
+
+    public static function stripAiPurposeUiPrefix(string $s): string
+    {
+        $p = self::AI_PURPOSE_UI_PREFIX;
+        if ($p !== '' && str_starts_with($s, $p)) {
+            return substr($s, strlen($p));
+        }
+
+        return $s;
+    }
+
+    /**
+     * Format purpose for `cost_calculator_items.purpose_of_subscription` after auto-populate.
+     */
+    public static function formatAutoPopulatedPurposeForStorage(string $purpose, string $source): string
+    {
+        $trimmed = trim($purpose);
+        if ($trimmed === '') {
+            return '';
+        }
+        if ($source === self::SOURCE_FALLBACK_UNKNOWN) {
+            return $trimmed;
+        }
+        if ($source !== self::SOURCE_VENDOR_DETAIL && $source !== self::SOURCE_LIVE_LOOKUP) {
+            return $trimmed;
+        }
+        $base = self::stripAiPurposeUiPrefix($trimmed);
+
+        return self::AI_PURPOSE_UI_PREFIX . $base;
+    }
+
     /**
      * @param array<int, array{id:int, vendor_name:string}> $rows
      * @return array{success:bool, resolved:array<int, array{id:int, vendor_name:string, purpose:string, source:string}>, unresolved:array<int, array{id:int, vendor_name:string}>, error?:string}
@@ -51,7 +90,7 @@ class VendorPurposeService
                     'id' => $t['id'],
                     'vendor_name' => $t['vendor_name'],
                     'purpose' => $purpose,
-                    'source' => 'vendor_detail',
+                    'source' => self::SOURCE_VENDOR_DETAIL,
                 ];
             } else {
                 $unresolved[] = $t;
@@ -114,7 +153,7 @@ class VendorPurposeService
                     'id' => $u['id'],
                     'vendor_name' => $u['vendor_name'],
                     'purpose' => $byCanonical[$canon]['purpose'],
-                    'source' => 'live_lookup',
+                    'source' => self::SOURCE_LIVE_LOOKUP,
                 ];
             }
         }
@@ -164,7 +203,7 @@ class VendorPurposeService
                         'id' => $rid,
                         'vendor_name' => (string) ($u['vendor_name'] ?? ''),
                         'purpose' => 'Unknown',
-                        'source' => 'fallback_unknown',
+                        'source' => self::SOURCE_FALLBACK_UNKNOWN,
                     ];
                 } else {
                     $stillLeft[] = $u;

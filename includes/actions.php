@@ -633,18 +633,39 @@ function handleAutoPopulatePurpose() {
         }
         $id = (int) ($r['id'] ?? 0);
         $purpose = trim((string) ($r['purpose'] ?? ''));
+        $source = (string) ($r['source'] ?? '');
         if ($id <= 0 || $purpose === '') {
             continue;
         }
-        $updates[] = ['id' => $id, 'purpose' => $purpose];
+        $stored = VendorPurposeService::formatAutoPopulatedPurposeForStorage($purpose, $source);
+        if ($stored === '') {
+            continue;
+        }
+        $updates[] = ['id' => $id, 'purpose' => $stored];
     }
     $apply = VendorService::updatePurposesForVisibleRows($pdo, $orgId, $activeProjectId, $userId, $role, $updates);
+    $updateById = [];
+    foreach ($updates as $u) {
+        $updateById[(int) $u['id']] = $u['purpose'];
+    }
+    $resolvedForClient = [];
+    foreach (($resolved['resolved'] ?? []) as $r) {
+        if (!is_array($r)) {
+            continue;
+        }
+        $rid = (int) ($r['id'] ?? 0);
+        $copy = $r;
+        if (isset($updateById[$rid])) {
+            $copy['purpose'] = $updateById[$rid];
+        }
+        $resolvedForClient[] = $copy;
+    }
     echo json_encode([
         'success' => true,
         'updated' => $apply['updated'] ?? 0,
         'applied' => $apply['applied'] ?? 0,
         'applied_ids' => $apply['applied_ids'] ?? [],
-        'resolved' => $resolved['resolved'] ?? [],
+        'resolved' => $resolvedForClient,
         'unresolved' => $resolved['unresolved'] ?? [],
     ]);
     exit;

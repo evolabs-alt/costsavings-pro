@@ -34,7 +34,7 @@ class ExportService
                 VendorService::statusLabel($status),
                 $it['visibility'] ?? '',
                 $it['manager_user_id'] ?? '',
-                $it['purpose_of_subscription'] ?? $it['notes'] ?? '',
+                VendorPurposeService::stripAiPurposeUiPrefix((string) ($it['purpose_of_subscription'] ?? $it['notes'] ?? '')),
                 $it['cancellation_deadline'] ?? '',
                 $it['last_payment_date'] ?? '',
             ];
@@ -68,8 +68,8 @@ class ExportService
             $html .= '<td>' . htmlspecialchars((string) ($it['annual_cost'] ?? '')) . '</td>';
             $html .= '<td>' . htmlspecialchars((string) ($it['frequency'] ?? '')) . '</td>';
             $html .= '<td>' . htmlspecialchars(VendorService::statusLabel($status)) . '</td>';
-            $p = $it['purpose_of_subscription'] ?? $it['notes'] ?? '';
-            $html .= '<td>' . htmlspecialchars((string) $p) . '</td>';
+            $p = VendorPurposeService::stripAiPurposeUiPrefix((string) ($it['purpose_of_subscription'] ?? $it['notes'] ?? ''));
+            $html .= '<td>' . htmlspecialchars($p) . '</td>';
             $html .= '</tr>';
         }
         $html .= '</tbody></table></body></html>';

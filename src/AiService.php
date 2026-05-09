@@ -36,7 +36,7 @@ class AiService
                 number_format((float) ($vArr['annual_cost'] ?? 0), 2),
                 $vArr['frequency'] ?? '',
                 VendorService::statusLabel($statusToken),
-                substr((string) ($vArr['purpose_of_subscription'] ?? $vArr['notes'] ?? ''), 0, 500)
+                substr(VendorPurposeService::stripAiPurposeUiPrefix((string) ($vArr['purpose_of_subscription'] ?? $vArr['notes'] ?? '')), 0, 500)
             );
         }
         $ctx = implode("\n", $lines);
