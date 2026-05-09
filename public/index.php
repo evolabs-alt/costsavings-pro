@@ -434,6 +434,7 @@ if ($is_logged_in) {
 
 $is_admin = ($is_logged_in && \CostSavings\OrgRole::isPrivileged((string) ($_SESSION['role'] ?? '')));
 $can_create_projects = ($is_logged_in && \CostSavings\OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? '')));
+$invite_can_choose_org_role = $can_create_projects;
 
 $deadline_reminders_org = true;
 $deadline_reminders_user = true;
@@ -6190,7 +6191,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
     <div class="app-modal-overlay" id="appModalMembersInvite" role="dialog" aria-modal="true" aria-labelledby="appModalMembersInviteTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
-                <h2 id="appModalMembersInviteTitle">Invite Member</h2>
+                <h2 id="appModalMembersInviteTitle">Invite user</h2>
                 <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
             </div>
             <div class="app-modal-body">
@@ -6198,11 +6199,24 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> members
                 </p>
                 <div class="invite-block">
-                    <form method="POST" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                    <form method="POST" style="display:flex;flex-direction:column;gap:10px;max-width:420px;">
                         <input type="hidden" name="action" value="invite_member">
-                        <label>Invite member email</label>
-                        <input type="email" name="email" required placeholder="member@company.com" style="min-width:200px;">
-                        <button type="submit">Send invite</button>
+                        <label style="display:grid;gap:6px;font-size:14px;">
+                            <span>Email</span>
+                            <input type="email" name="email" required placeholder="user@company.com" style="min-width:200px;">
+                        </label>
+                        <?php if (!empty($invite_can_choose_org_role)): ?>
+                        <label style="display:grid;gap:6px;font-size:14px;">
+                            <span>Organization role</span>
+                            <select name="invite_role" style="max-width:280px;">
+                                <option value="member">Member</option>
+                                <option value="admin">Administrator (cannot create projects)</option>
+                            </select>
+                        </label>
+                        <?php endif; ?>
+                        <div>
+                            <button type="submit">Send invite</button>
+                        </div>
                     </form>
                 </div>
             </div>

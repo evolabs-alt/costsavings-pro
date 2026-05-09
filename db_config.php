@@ -301,6 +301,7 @@ function migrateSchema(PDO $pdo) {
             `token_hash` CHAR(64) NOT NULL,
             `invited_by_user_id` INT UNSIGNED NOT NULL,
             `expires_at` DATETIME NOT NULL,
+            `invite_role` ENUM('admin','member') NOT NULL DEFAULT 'member',
             `consumed_at` DATETIME NULL,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             KEY `idx_inv_token` (`token_hash`),
@@ -308,6 +309,11 @@ function migrateSchema(PDO $pdo) {
             CONSTRAINT `fk_inv_org` FOREIGN KEY (`org_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE,
             CONSTRAINT `fk_inv_user` FOREIGN KEY (`invited_by_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $invRoleCol = $pdo->query("SHOW COLUMNS FROM `invitations` LIKE 'invite_role'")->fetch();
+        if (!$invRoleCol) {
+            $pdo->exec("ALTER TABLE `invitations` ADD COLUMN `invite_role` ENUM('admin','member') NOT NULL DEFAULT 'member' AFTER `expires_at`");
+        }
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS `reminder_sent` (
             `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

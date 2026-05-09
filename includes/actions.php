@@ -304,10 +304,20 @@ function handleInviteMember() {
     }
     $pdo = getDBConnection();
     $orgId = (int) $_SESSION['org_id'];
+
+    $inviteRole = OrgRole::ROLE_MEMBER;
+    if (OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
+        $rawRole = strtolower(trim((string) ($_POST['invite_role'] ?? '')));
+        if ($rawRole === OrgRole::ROLE_ADMIN) {
+            $inviteRole = OrgRole::ROLE_ADMIN;
+        }
+    }
+
     logInviteEvent('request_received', [
         'admin_user_id' => (int) $_SESSION['user_id'],
         'org_id' => $orgId,
         'email' => $email,
+        'invite_role' => $inviteRole,
     ]);
     $maxUsers = getOrganizationMaxUsers($pdo, $orgId);
     $c = (int) $pdo->query('SELECT COUNT(*) AS c FROM users WHERE org_id = ' . (int) $orgId)->fetch()['c'];
@@ -336,10 +346,10 @@ function handleInviteMember() {
     $hash = hash('sha256', $plain);
     $exp = (new DateTimeImmutable('+14 days'))->format('Y-m-d H:i:s');
     $ins = $pdo->prepare(
-        'INSERT INTO invitations (org_id, email, token_hash, invited_by_user_id, expires_at) VALUES (?,?,?,?,?)'
+        'INSERT INTO invitations (org_id, email, token_hash, invited_by_user_id, expires_at, invite_role) VALUES (?,?,?,?,?,?)'
     );
     try {
-        $ins->execute([$orgId, $email, $hash, (int) $_SESSION['user_id'], $exp]);
+        $ins->execute([$orgId, $email, $hash, (int) $_SESSION['user_id'], $exp, $inviteRole]);
     } catch (PDOException $e) {
         error_log('handleInviteMember insert: ' . $e->getMessage());
         logInviteEvent('insert_failed', ['org_id' => $orgId, 'email' => $email]);
@@ -347,7 +357,7 @@ function handleInviteMember() {
         $redir();
     }
     $invId = (int) $pdo->lastInsertId();
-    logInviteEvent('invite_saved', ['invitation_id' => $invId, 'org_id' => $orgId, 'email' => $email]);
+    logInviteEvent('invite_saved', ['invitation_id' => $invId, 'org_id' => $orgId, 'email' => $email, 'invite_role' => $inviteRole]);
 
     $link = publicAppBaseUrl() . 'register.php?token=' . urlencode($plain);
     $body = '<p>You have been invited to join the Savvy CFO Cost Savings tool.</p>'
