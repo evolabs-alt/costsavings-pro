@@ -5252,6 +5252,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             clearRowSelection();
                             const filterSelect = document.getElementById('reportFilter');
                             applyVendorTablePagination(1, filterSelect ? filterSelect.value : 'all');
+                        } else if (data.success) {
+                            // Empty project (or zero visible rows): must clear DOM or previous project rows stay visible.
+                            document.getElementById('calculatorRows').innerHTML = '';
+                            rowCount = 0;
+                            addCalculatorRow();
+                            calculateAnnualSavings();
+                            calculateConfirmedSavings();
+                            clearRowSelection();
+                            const filterSelectEmpty = document.getElementById('reportFilter');
+                            applyVendorTablePagination(1, filterSelectEmpty ? filterSelectEmpty.value : 'all');
                         } else {
                             addCalculatorRow();
                             clearRowSelection();
