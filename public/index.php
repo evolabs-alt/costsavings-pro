@@ -13,6 +13,13 @@ if (isset($_SESSION['user_email'])) {
     $_SESSION['user_email'] = normalizeUserEmail($_SESSION['user_email']);
 }
 
+try {
+    getDBConnection();
+    syncSessionOrgRoleFromDatabase();
+} catch (Exception $e) {
+    // Handlers and rendering below may retry; avoid fatal page when DB is unreachable during bootstrap.
+}
+
 $user_role_options = [
     'Business owner',
     'Financial professional (book keeper, CPA, fractional CFO, accountant, etc)',
@@ -4057,6 +4064,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 return fetch(window.location.href, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
                     body: JSON.stringify(data),
                 }).then(function(r) { return r.json(); });
             }

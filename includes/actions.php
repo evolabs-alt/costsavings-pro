@@ -16,6 +16,34 @@ function normalizeUserEmail($email) {
 }
 
 /**
+ * Refresh org role (and org id) from the database into the session.
+ * Role is only written to SESSION at login; migrations or manual updates otherwise diverge from SESSION.
+ */
+function syncSessionOrgRoleFromDatabase(): void
+{
+    if (empty($_SESSION['user_id'])) {
+        return;
+    }
+    try {
+        $pdo = getDBConnection();
+        $st = $pdo->prepare('SELECT role, org_id FROM users WHERE id = ? LIMIT 1');
+        $st->execute([(int) $_SESSION['user_id']]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            return;
+        }
+        if (isset($row['role']) && $row['role'] !== '') {
+            $_SESSION['role'] = $row['role'];
+        }
+        if (isset($row['org_id']) && (int) $row['org_id'] > 0) {
+            $_SESSION['org_id'] = (int) $row['org_id'];
+        }
+    } catch (\PDOException $e) {
+        error_log('syncSessionOrgRoleFromDatabase: ' . $e->getMessage());
+    }
+}
+
+/**
  * Absolute base URL for links into public/ (invite emails, etc.).
  * Uses BASE_URL when set; otherwise derives from the current request (HTTPS, proxy headers, SCRIPT_NAME).
  */
@@ -1116,7 +1144,11 @@ function handleProjectSetActive() {
 
 function handleProjectCreate() {
     header('Content-Type: application/json');
-    if (empty($_SESSION['user_id']) || !OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
+        exit;
+    }
+    if (!OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
         echo json_encode(['success' => false, 'error' => 'Only a super admin can create projects.']);
         exit;
     }
