@@ -500,7 +500,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Savvy Expense Optimizer</title>
+    <title>Savvy Saver</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -3787,7 +3787,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <img src="https://savvycfo.com/wp-content/uploads/2023/06/SavvyCFO_logo_mainfinal-bluewhite_23Jun23.png" 
                      alt="Savvy CFO Logo" 
                      class="login-logo">
-                <div class="logo-tagline">Savvy Expense Optimizer</div>
+                <div class="logo-tagline">Savvy Saver</div>
             </div>
         <?php endif; ?>
         <?php if ($current_view === 'placeholder'): ?>
@@ -3858,7 +3858,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         <div class="container<?php echo ($current_view === 'placeholder' && $can_create_projects && !empty($_SESSION['project_onboarding_required'])) ? ' project-onboarding-hidden' : ''; ?>">
             <?php if ($current_view === 'login'): ?>
             <div class="content-padding login-page">
-                <h1>Savvy Expense Optimizer</h1>
+                <h1>Savvy Saver</h1>
                 <p class="subtitle">Sign in with your username and password.</p>
             
             <?php if (!empty($_SESSION['awaiting_role'])): ?>
@@ -4132,7 +4132,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             }
 
             function updateActiveProjectHeader(projectSource) {
-                const baseTitle = 'Savvy Expense Optimizer';
+                const baseTitle = 'Savvy Saver';
 
                 let projectName = '';
                 if (typeof projectSource === 'string') {
