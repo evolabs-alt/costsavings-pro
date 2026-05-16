@@ -3949,7 +3949,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <thead>
                         <tr>
                             <th class="select-row">
-                                <input type="checkbox" id="selectAllVendors" aria-label="Select all vendors">
+                                <input type="checkbox" id="selectAllVendors" aria-label="Select all vendors matching current filters">
                             </th>
                             <th class="item-number">Item #</th>
                             <th class="vendor-name">Vendor</th>
@@ -4519,37 +4519,42 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 cancelled: 'Cancelled',
             };
 
-            function getVendorRowCheckboxes() {
-                return Array.from(document.querySelectorAll('#calculatorRows tr .row-select-checkbox')).filter(function(cb) {
-                    const row = cb.closest('tr');
-                    return !!(row && row.style.display !== 'none');
-                });
+            function formatVendorsSelectedLabel(count) {
+                const n = Number(count) || 0;
+                return n === 1 ? '1 vendor selected' : (n + ' vendors selected');
             }
 
             function getSelectedVendorRows() {
-                return getVendorRowCheckboxes()
-                    .filter(function(cb) { return cb.checked; })
-                    .map(function(cb) { return cb.closest('tr'); })
-                    .filter(Boolean);
+                const filteredSet = new Set(getFilteredVendorRows(vendorCurrentFilter));
+                return Array.from(document.querySelectorAll('#calculatorRows tr')).filter(function(row) {
+                    if (!filteredSet.has(row)) return false;
+                    const cb = row.querySelector('.row-select-checkbox');
+                    return !!(cb && cb.checked);
+                });
             }
 
             function updateSelectAllCheckboxState() {
                 const selectAll = document.getElementById('selectAllVendors');
                 if (!selectAll) return;
-                const checkboxes = getVendorRowCheckboxes();
-                const selectedCount = checkboxes.filter(function(cb) { return cb.checked; }).length;
-                if (!checkboxes.length) {
+                const filtered = getFilteredVendorRows(vendorCurrentFilter);
+                if (!filtered.length) {
                     selectAll.checked = false;
                     selectAll.indeterminate = false;
                     return;
                 }
-                selectAll.checked = selectedCount === checkboxes.length;
-                selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+                let selectedCount = 0;
+                filtered.forEach(function(row) {
+                    const cb = row.querySelector('.row-select-checkbox');
+                    if (cb && cb.checked) selectedCount++;
+                });
+                selectAll.checked = selectedCount === filtered.length;
+                selectAll.indeterminate = selectedCount > 0 && selectedCount < filtered.length;
             }
 
             function setAllRowSelection(checked) {
-                getVendorRowCheckboxes().forEach(function(cb) {
-                    cb.checked = !!checked;
+                getFilteredVendorRows(vendorCurrentFilter).forEach(function(row) {
+                    const cb = row.querySelector('.row-select-checkbox');
+                    if (cb) cb.checked = !!checked;
                 });
                 updateSelectAllCheckboxState();
             }
@@ -4618,7 +4623,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 body.innerHTML = ''
                     + '<div class="bulk-confirm-summary">'
                     + '<div><strong>Action:</strong> ' + payload.label + '</div>'
-                    + '<div><strong>Selected records:</strong> ' + selectedCount + '</div>'
+                    + '<div><strong>' + formatVendorsSelectedLabel(selectedCount) + '</strong></div>'
                     + '</div>';
                 pendingBulkActionData = payload;
                 openAppModal(overlay);
@@ -4676,7 +4681,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 calculateConfirmedSavings();
                 clearRowSelection();
                 saveCalculatorData();
-                showSnackbar('Applied bulk action to ' + selectedRows.length + ' vendor record(s).', 'success');
+                showSnackbar(formatVendorsSelectedLabel(selectedRows.length) + '. Bulk action applied.', 'success');
             }
 
             function managerOptionsHtml(selectedId) {
@@ -4992,18 +4997,22 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const endIdx = startIdx + VENDOR_PAGE_SIZE;
                 const pageRows = filteredRows.slice(startIdx, endIdx);
                 const visibleSet = new Set(pageRows);
+                const filteredSet = new Set(filteredRows);
 
                 allRows.forEach(function(row) {
-                    const show = visibleSet.has(row);
-                    row.style.display = show ? '' : 'none';
-                    if (!show) {
+                    if (!filteredSet.has(row)) {
                         const cb = row.querySelector('.row-select-checkbox');
                         if (cb) cb.checked = false;
                     }
                 });
 
+                allRows.forEach(function(row) {
+                    row.style.display = visibleSet.has(row) ? '' : 'none';
+                });
+
                 updateRowNumbers();
                 renderVendorPagination(filteredRows.length, totalPages);
+                updateSelectAllCheckboxState();
             }
 
             function goToVendorPage(page) {
@@ -5719,6 +5728,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 if (selectAll) {
                     selectAll.addEventListener('change', function() {
                         setAllRowSelection(selectAll.checked);
+                        if (selectAll.checked) {
+                            const n = getFilteredVendorRows(vendorCurrentFilter).length;
+                            showSnackbar(formatVendorsSelectedLabel(n), 'success');
+                        }
                     });
                 }
                 const bulkActionType = document.getElementById('bulkActionType');
