@@ -201,6 +201,20 @@ class VendorService
         return $out;
     }
 
+    /** @param mixed $v */
+    private static function jsonSafeFloat($v): float
+    {
+        if ($v === null || $v === '') {
+            return 0.0;
+        }
+        if (is_string($v) && !is_numeric($v)) {
+            return 0.0;
+        }
+        $f = (float) $v;
+
+        return is_finite($f) ? $f : 0.0;
+    }
+
     /**
      * @param array<string, mixed> $row
      * @return array<string, mixed>
@@ -214,9 +228,9 @@ class VendorService
         return [
             'id' => (int) $row['id'],
             'vendor_name' => $row['vendor_name'],
-            'cost_per_period' => (float) $row['cost_per_period'],
+            'cost_per_period' => self::jsonSafeFloat($row['cost_per_period'] ?? 0),
             'frequency' => $row['frequency'],
-            'annual_cost' => (float) $row['annual_cost'],
+            'annual_cost' => self::jsonSafeFloat($row['annual_cost'] ?? 0),
             'status' => $status,
             'status_label' => self::statusLabel($status),
             'cancel_keep' => $legacy['cancel_keep'],

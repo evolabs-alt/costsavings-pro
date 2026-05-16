@@ -913,44 +913,66 @@ function handleSaveCostCalculator() {
 }
 
 function handleLoadCostCalculator() {
-    header('Content-Type: application/json');
+    header('Content-Type: application/json; charset=UTF-8');
 
     if (empty($_SESSION['user_id'])) {
-        echo json_encode(['success' => false, 'error' => 'User not logged in', 'items' => []]);
+        echo json_encode(['success' => false, 'error' => 'User not logged in', 'items' => []], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
-    $pdo = getDBConnection();
-    $activeProjectId = requireActiveProjectId($pdo);
-    if ($activeProjectId === null) {
-        echo json_encode(['success' => true, 'items' => []]);
-        exit;
-    }
-    $items = VendorService::loadVisibleItems(
-        $pdo,
-        (int) $_SESSION['user_id'],
-        (int) $_SESSION['org_id'],
-        $activeProjectId,
-        $_SESSION['role'] ?? 'member'
-    );
-    $uid = (int) $_SESSION['user_id'];
-    $counts = VendorChatService::unreadCountsForUserProject(
-        $pdo,
-        (int) $_SESSION['org_id'],
-        $activeProjectId,
-        $uid,
-        (string) ($_SESSION['role'] ?? 'member')
-    );
-    foreach ($items as &$it) {
-        if (!is_array($it)) {
-            continue;
+    try {
+        $pdo = getDBConnection();
+        $activeProjectId = requireActiveProjectId($pdo);
+        if ($activeProjectId === null) {
+            echo json_encode(['success' => true, 'items' => []], JSON_UNESCAPED_UNICODE);
+            exit;
         }
-        $iid = (int) ($it['id'] ?? 0);
-        $it['vendor_chat_unread'] = $counts[$iid] ?? 0;
-    }
-    unset($it);
+        $items = VendorService::loadVisibleItems(
+            $pdo,
+            (int) $_SESSION['user_id'],
+            (int) $_SESSION['org_id'],
+            $activeProjectId,
+            $_SESSION['role'] ?? 'member'
+        );
+        $uid = (int) $_SESSION['user_id'];
+        $counts = VendorChatService::unreadCountsForUserProject(
+            $pdo,
+            (int) $_SESSION['org_id'],
+            $activeProjectId,
+            $uid,
+            (string) ($_SESSION['role'] ?? 'member')
+        );
+        foreach ($items as &$it) {
+            if (!is_array($it)) {
+                continue;
+            }
+            $iid = (int) ($it['id'] ?? 0);
+            $it['vendor_chat_unread'] = $counts[$iid] ?? 0;
+        }
+        unset($it);
 
-    echo json_encode(['success' => true, 'items' => $items]);
+        $payload = ['success' => true, 'items' => $items];
+        $flags = JSON_UNESCAPED_UNICODE;
+        if (defined('JSON_INVALID_UTF8_SUBSTITUTE')) {
+            $flags |= JSON_INVALID_UTF8_SUBSTITUTE;
+        }
+        $json = json_encode($payload, $flags);
+        if ($json === false) {
+            error_log('handleLoadCostCalculator json_encode failed: ' . json_last_error_msg());
+            echo json_encode(
+                ['success' => false, 'error' => 'Could not encode vendor data for load.', 'items' => []],
+                JSON_UNESCAPED_UNICODE
+            );
+            exit;
+        }
+        echo $json;
+    } catch (Throwable $e) {
+        error_log('handleLoadCostCalculator: ' . $e->getMessage());
+        echo json_encode(
+            ['success' => false, 'error' => 'Could not load calculator data.', 'items' => []],
+            JSON_UNESCAPED_UNICODE
+        );
+    }
     exit;
 }
 
