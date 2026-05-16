@@ -434,22 +434,19 @@ function migrateCostCalculatorSchema(PDO $pdo) {
             $pdo->exec("ALTER TABLE `cost_calculator_items` MODIFY COLUMN `status` ENUM('pending','question','unknown','keep','mark_for_cancellation','cancelled') NOT NULL DEFAULT 'pending'");
         }
 
-        // Backfill status from legacy cancel_keep/cancelled_status for pending rows only when
-        // legacy fields imply a non-pending state, or the row predates explicit pending semantics
-        // (manager was assigned). CSV imports intentionally use pending + NULL manager and must
-        // not be rewritten here.
+        // Backfill status from legacy cancel_keep/cancelled_status for rows still marked pending
+        // only when legacy fields imply cancel / cancelled — do NOT rewrite pending rows merely
+        // because a manager is assigned (explicit Pending is valid after bulk/status UX).
         $pdo->exec("UPDATE `cost_calculator_items`
             SET `status` = CASE
                 WHEN (`cancel_keep` IN ('0','Cancel')) AND `cancelled_status` = 1 THEN 'cancelled'
                 WHEN (`cancel_keep` IN ('0','Cancel')) THEN 'mark_for_cancellation'
-                WHEN `manager_user_id` IS NOT NULL THEN 'keep'
                 ELSE `status`
             END
             WHERE `status` = 'pending'
             AND (
                 (`cancel_keep` IN ('0','Cancel'))
                 OR (`cancelled_status` = 1)
-                OR (`manager_user_id` IS NOT NULL)
             )");
 
         try {
