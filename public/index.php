@@ -4601,9 +4601,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
                 if (action === 'manager') {
                     const mgr = document.getElementById('bulkManagerValue');
-                    if (!mgr || !mgr.value) return null;
-                    const managerName = mgr.options[mgr.selectedIndex] ? mgr.options[mgr.selectedIndex].text : mgr.value;
-                    return { action: action, value: mgr.value, label: 'Update manager to ' + managerName };
+                    if (!mgr) return null;
+                    const val = mgr.value;
+                    const label = val === ''
+                        ? 'Clear manager assignment'
+                        : ('Update manager to ' + (mgr.options[mgr.selectedIndex] ? mgr.options[mgr.selectedIndex].text : val));
+                    return { action: action, value: val, label: label };
                 }
                 if (action === 'delete') {
                     return { action: action, value: null, label: 'Delete selected vendor rows' };
@@ -4655,7 +4658,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 } else if (payload.action === 'manager') {
                     selectedRows.forEach(function(row) {
                         const mgrSel = row.querySelector('.manager-select');
-                        if (mgrSel && !mgrSel.disabled) mgrSel.value = payload.value;
+                        if (mgrSel && !mgrSel.disabled) {
+                            mgrSel.value = payload.value;
+                            syncMemberStatusEditability(row);
+                        }
                     });
                 } else if (payload.action === 'status') {
                     selectedRows.forEach(function(row) {
@@ -5198,7 +5204,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 btn.hidden = (getRowStatus(row) !== 'mark_for_cancellation');
             }
 
-            /** For org members: only the assigned manager may edit status and cancellation deadline. */
+            /** For org members: assigned rows are editable only by that manager; unassigned rows are editable by any member who can see them (bulk triage). */
             function syncMemberStatusEditability(row) {
                 if (!row) return;
                 const statusSel = row.querySelector('.row-status-select');
@@ -5223,8 +5229,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const rowIdEl = row.querySelector('.row-db-id');
                 const dbId = rowIdEl && rowIdEl.value ? parseInt(rowIdEl.value, 10) : 0;
                 const mgrSel = row.querySelector('.manager-select');
-                const managerId = mgrSel && mgrSel.value ? parseInt(mgrSel.value, 10) : null;
-                const isMine = (dbId === 0) || (managerId !== null && !isNaN(managerId) && managerId === CURRENT_USER_ID);
+                const managerVal = mgrSel ? String(mgrSel.value || '').trim() : '';
+                const managerIdParsed = managerVal !== '' ? parseInt(managerVal, 10) : NaN;
+                const hasAssignedManager = managerVal !== '' && !isNaN(managerIdParsed);
+                const unassignedManager = !hasAssignedManager;
+                const isMine = (dbId === 0) || unassignedManager || (hasAssignedManager && managerIdParsed === CURRENT_USER_ID);
                 const locked = !isMine;
                 if (statusSel) {
                     statusSel.disabled = locked;
@@ -5293,7 +5302,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     const notes = notesTextarea ? notesTextarea.value.trim() : '';
                     const annualCost = annualCostDisplay ? parseFloat(annualCostDisplay.textContent.replace(/[^0-9.-]/g, '')) || 0 : 0;
                     const idVal = rowIdEl && rowIdEl.value ? parseInt(rowIdEl.value, 10) : null;
-                    const managerId = mgrSel && mgrSel.value ? parseInt(mgrSel.value, 10) : null;
+                    const managerRaw = mgrSel ? String(mgrSel.value || '').trim() : '';
+                    const managerParsed = managerRaw !== '' ? parseInt(managerRaw, 10) : NaN;
+                    const managerOk = managerRaw !== '' && !isNaN(managerParsed) && managerParsed > 0;
                     const visibility = visSel ? visSel.value : 'public';
                     const cancelDl = deadlineIn && deadlineIn.value ? deadlineIn.value : '';
                     const lastPay = lastPayIn && lastPayIn.value ? lastPayIn.value : '';
@@ -5312,10 +5323,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             purpose_of_subscription: notes,
                             visibility: visibility,
                             cancellation_deadline: cancelDl,
-                            last_payment_date: lastPay
+                            last_payment_date: lastPay,
+                            manager_user_id: managerOk ? managerParsed : null
                         };
                         if (idVal) { o.id = idVal; }
-                        if (managerId) { o.manager_user_id = managerId; }
                         items.push(o);
                     }
                 });

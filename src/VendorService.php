@@ -256,6 +256,32 @@ class VendorService
     }
 
     /**
+     * Manager on admin save: explicit null / empty / 0 in payload clears assignment.
+     * If `manager_user_id` is omitted (legacy clients), default to the acting admin user.
+     *
+     * @param array<string, mixed> $item
+     */
+    private static function resolveManagerUserIdForAdminSave(PDO $pdo, int $orgId, array $item, int $adminUserId): ?int
+    {
+        if (!array_key_exists('manager_user_id', $item)) {
+            return $adminUserId > 0 ? $adminUserId : null;
+        }
+        $raw = $item['manager_user_id'];
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        $mgr = (int) $raw;
+        if ($mgr <= 0) {
+            return null;
+        }
+        if (!self::userInOrg($pdo, $mgr, $orgId)) {
+            return null;
+        }
+
+        return $mgr;
+    }
+
+    /**
      * @param array<int, array<string, mixed>> $items
      * @return array{success:bool, error?:string, cancelKeep?:string}
      */
@@ -311,13 +337,7 @@ class VendorService
                 $cc .= '-' . $legacy['cancel_keep'];
                 $purpose = $item['purpose_of_subscription'] ?? $item['notes'] ?? '';
                 $vis = ($item['visibility'] ?? 'public') === 'confidential' ? 'confidential' : 'public';
-                $mgr = isset($item['manager_user_id']) ? (int) $item['manager_user_id'] : null;
-                if ($mgr !== null && $mgr > 0 && !self::userInOrg($pdo, $mgr, $orgId)) {
-                    $mgr = null;
-                }
-                if ($mgr === null || $mgr <= 0) {
-                    $mgr = $adminUserId;
-                }
+                $mgr = self::resolveManagerUserIdForAdminSave($pdo, $orgId, $item, $adminUserId);
                 $deadline = self::normDate($item['cancellation_deadline'] ?? null);
                 $lastPay = self::normDate($item['last_payment_date'] ?? null);
                 $rowId = isset($item['id']) ? (int) $item['id'] : 0;
@@ -409,7 +429,7 @@ class VendorService
             $email = self::getUserEmail($pdo, $userId);
 
             $existing = $pdo->prepare(
-                'SELECT id FROM cost_calculator_items WHERE org_id = ? AND project_id = ? AND manager_user_id = ?'
+                'SELECT id FROM cost_calculator_items WHERE org_id = ? AND project_id = ? AND (manager_user_id IS NULL OR manager_user_id = ?)'
             );
             $existing->execute([$orgId, $projectId, $userId]);
             $allowedIds = [];
@@ -422,7 +442,7 @@ class VendorService
 
             $upd = $pdo->prepare(
                 'UPDATE cost_calculator_items SET vendor_name=?, cost_per_period=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?, user_email=?, user_id=?
-                 WHERE id=? AND org_id=? AND project_id=? AND manager_user_id=?'
+                 WHERE id=? AND org_id=? AND project_id=? AND (manager_user_id IS NULL OR manager_user_id=?)'
             );
 
             $ins = $pdo->prepare(
@@ -491,7 +511,7 @@ class VendorService
 
             foreach (array_keys($allowedIds) as $aid) {
                 if (!isset($payloadIds[$aid])) {
-                    $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE id = ? AND org_id = ? AND project_id = ? AND manager_user_id = ?');
+                    $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE id = ? AND org_id = ? AND project_id = ? AND (manager_user_id IS NULL OR manager_user_id = ?)');
                     $del->execute([$aid, $orgId, $projectId, $userId]);
                 }
             }
