@@ -1199,3 +1199,45 @@ function handleProjectCreate() {
     echo json_encode(['success' => true, 'project_id' => $newProjectId]);
     exit;
 }
+
+function handleProjectDelete() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
+        exit;
+    }
+    if (!OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
+        echo json_encode(['success' => false, 'error' => 'Only a super admin can delete projects.']);
+        exit;
+    }
+    $projectId = (int) ($_POST['project_id'] ?? 0);
+    $pdo = getDBConnection();
+    $orgId = (int) $_SESSION['org_id'];
+    $userId = (int) $_SESSION['user_id'];
+    $role = (string) ($_SESSION['role'] ?? 'member');
+
+    $result = ProjectService::deleteProject($pdo, $orgId, $projectId, $userId, $role);
+    if (!($result['success'] ?? false)) {
+        echo json_encode($result);
+        exit;
+    }
+
+    $newActive = ProjectService::resolveActiveProjectId(
+        $pdo,
+        $orgId,
+        $userId,
+        $role,
+        isset($_SESSION['active_project_id']) ? (int) $_SESSION['active_project_id'] : null
+    );
+    if ($newActive !== null) {
+        $_SESSION['active_project_id'] = $newActive;
+    } else {
+        unset($_SESSION['active_project_id']);
+    }
+
+    echo json_encode([
+        'success' => true,
+        'active_project_id' => $newActive,
+    ]);
+    exit;
+}

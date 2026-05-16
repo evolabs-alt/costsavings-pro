@@ -128,6 +128,79 @@ class ProjectService
     }
 
     /**
+     * Permanently remove a project and all data scoped to it.
+     *
+     * @return array{success:bool,error?:string}
+     */
+    public static function deleteProject(PDO $pdo, int $orgId, int $projectId, int $userId, string $role): array
+    {
+        if ($projectId <= 0) {
+            return ['success' => false, 'error' => 'Invalid project.'];
+        }
+        if (!self::canAccessProject($pdo, $projectId, $orgId, $userId, $role)) {
+            return ['success' => false, 'error' => 'You do not have access to this project.'];
+        }
+        if (self::orgProjectCount($pdo, $orgId) <= 1) {
+            return ['success' => false, 'error' => 'Cannot delete the organization\'s only project.'];
+        }
+
+        $pdo->beginTransaction();
+        try {
+            $idSt = $pdo->prepare('SELECT id FROM cost_calculator_items WHERE org_id = ? AND project_id = ?');
+            $idSt->execute([$orgId, $projectId]);
+            $vendorItemIds = [];
+            while ($row = $idSt->fetch(PDO::FETCH_ASSOC)) {
+                $vendorItemIds[] = (int) ($row['id'] ?? 0);
+            }
+
+            self::deleteWhereIdIn($pdo, 'reminder_sent', 'vendor_item_id', $vendorItemIds);
+            self::deleteWhereIdIn($pdo, 'vendor_item_chat_reads', 'vendor_item_id', $vendorItemIds);
+
+            $delChat = $pdo->prepare('DELETE FROM vendor_item_chat_messages WHERE org_id = ? AND project_id = ?');
+            $delChat->execute([$orgId, $projectId]);
+
+            $delRaw = $pdo->prepare('DELETE FROM vendor_raw_transactions WHERE org_id = ? AND project_id = ?');
+            $delRaw->execute([$orgId, $projectId]);
+
+            $delCc = $pdo->prepare('DELETE FROM cost_calculator_items WHERE org_id = ? AND project_id = ?');
+            $delCc->execute([$orgId, $projectId]);
+
+            $delProj = $pdo->prepare('DELETE FROM projects WHERE id = ? AND org_id = ?');
+            $delProj->execute([$projectId, $orgId]);
+            if ($delProj->rowCount() < 1) {
+                $pdo->rollBack();
+                return ['success' => false, 'error' => 'Project could not be deleted.'];
+            }
+
+            $pdo->commit();
+            return ['success' => true];
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            error_log('ProjectService::deleteProject: ' . $e->getMessage());
+            return ['success' => false, 'error' => 'Could not delete project.'];
+        }
+    }
+
+    /**
+     * @param array<int,int|string> $ids
+     */
+    private static function deleteWhereIdIn(PDO $pdo, string $table, string $column, array $ids, int $chunkSize = 300): void
+    {
+        $clean = array_values(array_unique(array_filter(array_map('intval', $ids), function ($v) {
+            return $v > 0;
+        })));
+        if (count($clean) === 0) {
+            return;
+        }
+        for ($i = 0, $n = count($clean); $i < $n; $i += $chunkSize) {
+            $chunk = array_slice($clean, $i, $chunkSize);
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $st = $pdo->prepare("DELETE FROM `{$table}` WHERE `{$column}` IN ($placeholders)");
+            $st->execute($chunk);
+        }
+    }
+
+    /**
      * Ensures old org-scoped rows are attached to the first project when needed.
      */
     public static function backfillNullProjectRows(PDO $pdo, int $orgId, int $projectId): void

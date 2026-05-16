@@ -116,6 +116,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'project_set_active':
                 handleProjectSetActive();
                 break;
+            case 'project_delete':
+                handleProjectDelete();
+                break;
         }
     }
 }
@@ -3805,6 +3808,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <ul class="app-submenu" id="appProjectSubmenu" role="menu" aria-label="Project actions">
                                 <?php if ($can_create_projects): ?>
                                 <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appCreateProjectBtn" data-open-modal="appModalProjectWizard">Create New Project</button></li>
+                                <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appDeleteProjectBtn">Delete project…</button></li>
                                 <?php endif; ?>
                                 <li role="none">
                                     <label class="app-submenu-item" for="projectSwitcherSelect">
@@ -4057,6 +4061,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             <script>
             let rowCount = 0;
             let currentActiveProjectId = null;
+            let deleteProjectTargetId = 0;
+            let deleteProjectExpectedName = '';
             const isAdminUser = <?php echo $is_admin ? 'true' : 'false'; ?>;
             const canCreateProjects = <?php echo $can_create_projects ? 'true' : 'false'; ?>;
 
@@ -4093,6 +4099,36 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         }
                     })
                     .catch(function() {});
+            }
+
+            function syncDeleteProjectConfirmState() {
+                var btn = document.getElementById('deleteProjectSubmitBtn');
+                var inp = document.getElementById('deleteProjectConfirmInput');
+                if (!btn || !inp) return;
+                var ok = deleteProjectExpectedName !== '' && inp.value.trim() === deleteProjectExpectedName;
+                btn.disabled = !ok;
+            }
+
+            function openDeleteProjectModal() {
+                var sel = document.getElementById('projectSwitcherSelect');
+                if (!sel || sel.options.length <= 1) {
+                    showSnackbar('Cannot delete the only project in your organization.', 'error');
+                    return;
+                }
+                var opt = sel.options[sel.selectedIndex];
+                var pid = parseInt(sel.value, 10) || 0;
+                if (!pid) {
+                    showSnackbar('Select a project to delete.', 'error');
+                    return;
+                }
+                deleteProjectTargetId = pid;
+                deleteProjectExpectedName = opt ? String(opt.textContent || opt.text || '').trim() : '';
+                var disp = document.getElementById('deleteProjectNameDisplay');
+                if (disp) disp.textContent = deleteProjectExpectedName;
+                var inp = document.getElementById('deleteProjectConfirmInput');
+                if (inp) inp.value = '';
+                syncDeleteProjectConfirmState();
+                openAppModal('appModalDeleteProject');
             }
 
             function updateActiveProjectHeader(projectSource) {
@@ -5646,6 +5682,39 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         submitProjectWizardForm();
                     });
                 }
+                const deleteProjectBtn = document.getElementById('appDeleteProjectBtn');
+                if (deleteProjectBtn) {
+                    deleteProjectBtn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        openDeleteProjectModal();
+                    });
+                }
+                const deleteProjectConfirmInput = document.getElementById('deleteProjectConfirmInput');
+                if (deleteProjectConfirmInput) {
+                    deleteProjectConfirmInput.addEventListener('input', syncDeleteProjectConfirmState);
+                }
+                const deleteProjectSubmitBtn = document.getElementById('deleteProjectSubmitBtn');
+                if (deleteProjectSubmitBtn) {
+                    deleteProjectSubmitBtn.addEventListener('click', function() {
+                        if (deleteProjectSubmitBtn.disabled || !deleteProjectTargetId) return;
+                        deleteProjectSubmitBtn.disabled = true;
+                        postJson({ action: 'project_delete', project_id: deleteProjectTargetId })
+                            .then(function(d) {
+                                if (!d || !d.success) {
+                                    deleteProjectSubmitBtn.disabled = false;
+                                    showSnackbar((d && d.error) || 'Could not delete project.', 'error');
+                                    syncDeleteProjectConfirmState();
+                                    return;
+                                }
+                                window.location.reload();
+                            })
+                            .catch(function() {
+                                deleteProjectSubmitBtn.disabled = false;
+                                showSnackbar('Could not delete project.', 'error');
+                                syncDeleteProjectConfirmState();
+                            });
+                    });
+                }
                 const selectAll = document.getElementById('selectAllVendors');
                 if (selectAll) {
                     selectAll.addEventListener('change', function() {
@@ -6504,6 +6573,26 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <button type="submit">Create</button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+    <div class="app-modal-overlay" id="appModalDeleteProject" role="dialog" aria-modal="true" aria-labelledby="appModalDeleteProjectTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalDeleteProjectTitle">Delete project</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <p style="margin:0 0 10px;line-height:1.5;">You are about to permanently delete <strong id="deleteProjectNameDisplay"></strong>. All vendor lines, chat history, and uploaded raw transactions tied to this project will be removed. This cannot be undone.</p>
+                <p style="margin:0 0 10px;font-size:14px;color:#4b5563;">Type the project name exactly to confirm.</p>
+                <label style="display:grid;gap:6px;margin-bottom:12px;">
+                    <span class="visually-hidden">Confirm project name</span>
+                    <input type="text" id="deleteProjectConfirmInput" autocomplete="off" placeholder="Project name">
+                </label>
+                <div class="bulk-actions-buttons" style="margin-top:4px;">
+                    <button type="button" class="btn-secondary app-modal-close">Cancel</button>
+                    <button type="button" id="deleteProjectSubmitBtn" disabled style="border-color:#b91c1c;color:#b91c1c;background:#fff;">Delete project</button>
+                </div>
             </div>
         </div>
     </div>
