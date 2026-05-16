@@ -4679,10 +4679,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 applyVendorTablePagination(vendorCurrentPage);
                 calculateAnnualSavings();
                 calculateConfirmedSavings();
+                const bulkItemsSnapshot = collectCostCalculatorItemsFromDom();
                 clearRowSelection();
-                saveCalculatorData({ silent: true }).then(function(saveResult) {
+                saveCalculatorData({ silent: true, items: bulkItemsSnapshot }).then(function(saveResult) {
                     if (saveResult && saveResult.success) {
                         showSnackbar(formatVendorsSelectedLabel(selectedRows.length) + '. Bulk action applied.', 'success');
+                    } else if (saveResult && saveResult.aborted) {
+                        showSnackbar('Save was interrupted by a newer change. Check vendor data and save again if needed.', 'error');
                     } else {
                         showSnackbar((saveResult && saveResult.error) || 'Could not save changes. Wait for the table to finish loading, then try again.', 'error');
                     }
@@ -4913,6 +4916,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             let calculatorLoadInProgress = false;
             /** Serialize saves: server replaces all rows per request; overlapping saves must not complete out of order. */
             let saveQueue = Promise.resolve();
+            /** Abort stale in-flight save HTTP requests so an older payload cannot commit after a newer save was sent (bulk vs autosave races). */
+            let calculatorSaveFetchController = null;
             const AI_PURPOSE_PREFIX = <?php echo json_encode(\CostSavings\VendorPurposeService::AI_PURPOSE_UI_PREFIX, JSON_UNESCAPED_UNICODE); ?>;
             function syncPurposeAiBadgeDataset(textarea, val) {
                 if (!textarea) return;
@@ -4935,11 +4940,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const opts = (options && typeof options === 'object') ? options : {};
                 const keepalive = !!opts.keepalive;
                 const silent = !!opts.silent || keepalive;
+                const itemsPayload = Array.isArray(opts.items) ? opts.items : null;
                 if (calculatorLoadInProgress && !keepalive) {
                     return Promise.resolve({ success: false, error: 'Still loading vendor data; save skipped.' });
                 }
                 saveQueue = saveQueue.then(function () {
-                    return performSaveCalculatorData(keepalive, silent);
+                    return performSaveCalculatorData(keepalive, silent, itemsPayload);
                 }).catch(function (e) {
                     console.error('Calculator save queue:', e);
                     return { success: false, error: String(e && e.message ? e.message : e) };
@@ -5263,11 +5269,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 return year + '-' + month + '-' + day;
             }
             
-            function performSaveCalculatorData(keepalive, silent) {
+            function collectCostCalculatorItemsFromDom() {
                 const rows = document.querySelectorAll('#calculatorRows tr');
                 const items = [];
-                
-                rows.forEach(row => {
+                rows.forEach(function(row) {
                     const vendorInput = row.querySelector('input[name="vendor[]"]');
                     const costInput = row.querySelector('.cost-input');
                     const frequencySelect = row.querySelector('.frequency-select');
@@ -5314,15 +5319,34 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         items.push(o);
                     }
                 });
-                
+                return items;
+            }
+
+            function performSaveCalculatorData(keepalive, silent, prebuiltItems) {
+                const items = Array.isArray(prebuiltItems) ? prebuiltItems : collectCostCalculatorItemsFromDom();
                 const payload = { action: 'save_cost_calculator', items: items };
-                
-                return fetch(window.location.href, {
+
+                if (!keepalive && calculatorSaveFetchController) {
+                    try {
+                        calculatorSaveFetchController.abort();
+                    } catch (abortErr) {}
+                }
+                const fetchController = (!keepalive && typeof AbortController !== 'undefined') ? new AbortController() : null;
+                if (fetchController) {
+                    calculatorSaveFetchController = fetchController;
+                }
+
+                const fetchOpts = {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json; charset=UTF-8' },
                     body: JSON.stringify(payload),
                     keepalive: keepalive
-                })
+                };
+                if (fetchController) {
+                    fetchOpts.signal = fetchController.signal;
+                }
+
+                return fetch(window.location.href, fetchOpts)
                 .then(response => {
                     if (!response.ok) {
                         throw new Error('Network response was not ok');
@@ -5341,6 +5365,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     return { success: false, error: (data && data.error) || 'Unknown error' };
                 })
                 .catch(error => {
+                    if (error && error.name === 'AbortError') {
+                        return { success: false, aborted: true, error: 'Save superseded by a newer request' };
+                    }
                     console.error('Error saving:', error);
                     if (!silent) {
                         alert('Error saving data. Please check console for details.');
