@@ -4680,8 +4680,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 calculateAnnualSavings();
                 calculateConfirmedSavings();
                 clearRowSelection();
-                saveCalculatorData();
-                showSnackbar(formatVendorsSelectedLabel(selectedRows.length) + '. Bulk action applied.', 'success');
+                saveCalculatorData({ silent: true }).then(function(saveResult) {
+                    if (saveResult && saveResult.success) {
+                        showSnackbar(formatVendorsSelectedLabel(selectedRows.length) + '. Bulk action applied.', 'success');
+                    } else {
+                        showSnackbar((saveResult && saveResult.error) || 'Could not save changes. Wait for the table to finish loading, then try again.', 'error');
+                    }
+                });
             }
 
             function managerOptionsHtml(selectedId) {
@@ -4931,12 +4936,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const keepalive = !!opts.keepalive;
                 const silent = !!opts.silent || keepalive;
                 if (calculatorLoadInProgress && !keepalive) {
-                    return;
+                    return Promise.resolve({ success: false, error: 'Still loading vendor data; save skipped.' });
                 }
                 saveQueue = saveQueue.then(function () {
                     return performSaveCalculatorData(keepalive, silent);
                 }).catch(function (e) {
                     console.error('Calculator save queue:', e);
+                    return { success: false, error: String(e && e.message ? e.message : e) };
                 });
                 return saveQueue;
             }
@@ -5324,20 +5330,22 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     return response.json();
                 })
                 .then(data => {
-                    if (data.success) {
+                    if (data && data.success) {
                         console.log('Data saved successfully');
-                    } else {
-                        console.error('Error saving data:', data.error);
-                        if (!silent) {
-                            alert('Error saving data: ' + (data.error || 'Unknown error'));
-                        }
+                        return { success: true };
                     }
+                    console.error('Error saving data:', data && data.error);
+                    if (!silent) {
+                        alert('Error saving data: ' + ((data && data.error) || 'Unknown error'));
+                    }
+                    return { success: false, error: (data && data.error) || 'Unknown error' };
                 })
                 .catch(error => {
                     console.error('Error saving:', error);
                     if (!silent) {
                         alert('Error saving data. Please check console for details.');
                     }
+                    return { success: false, error: error.message || 'Network error' };
                 });
             }
             
