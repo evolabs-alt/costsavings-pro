@@ -3,26 +3,264 @@
 namespace CostSavings;
 
 /**
- * Parses QuickBooks-style "Cost Savings - Transaction List by Vendor" CSV exports.
+ * Parses QuickBooks-style CSV exports:
+ * - Transaction Detail by Account (primary)
+ * - Transaction List by Vendor (legacy)
  */
 class CsvImport
 {
-    private const HEADER_NEEDLE = ',Date,Transaction type';
+    private const VENDOR_HEADER_NEEDLE = ',Date,Transaction type';
+    private const ACCOUNT_HEADER_DATE = 'transaction date';
+    private const ACCOUNT_HEADER_TYPE = 'transaction type';
+
+    /**
+     * @return 'account'|'vendor'|'unknown'
+     */
+    public static function detectFormat(string $csvText): string
+    {
+        $lines = preg_split('/\r\n|\r|\n/', $csvText);
+        foreach ($lines as $line) {
+            if (stripos($line, self::VENDOR_HEADER_NEEDLE) !== false) {
+                return 'vendor';
+            }
+            $lower = strtolower($line);
+            if (strpos($lower, self::ACCOUNT_HEADER_DATE) !== false
+                && strpos($lower, self::ACCOUNT_HEADER_TYPE) !== false) {
+                return 'account';
+            }
+        }
+
+        return 'unknown';
+    }
+
+    /**
+     * @return array<int, array{name:string, transaction_count:int}>
+     */
+    public static function listAccounts(string $csvText): array
+    {
+        $ctx = self::resolveAccountContext($csvText);
+        if ($ctx === null) {
+            return [];
+        }
+
+        $accounts = [];
+        $seen = [];
+        foreach ($ctx['account_counts'] as $name => $count) {
+            if (!isset($seen[$name])) {
+                $seen[$name] = true;
+                $accounts[] = [
+                    'name' => $name,
+                    'transaction_count' => $count,
+                ];
+            }
+        }
+
+        return $accounts;
+    }
 
     /**
      * Summary vendor rows use the chronologically latest transaction amount as cost_per_period.
      *
+     * @param array<int, string>|null $selectedAccounts When set (account format), only these GL accounts are included.
      * @return array{
      *   summary: array<int, array{vendor_name:string,cost_per_period:float,frequency:string,annual_cost:float,last_payment_date:?string}>,
      *   raw: array<int, array{vendor_name:string,transaction_date:string,amount:float,transaction_type:string,account:string,memo:string}>
      * }
      */
-    public static function parse(string $csvText): array
+    public static function parse(string $csvText, ?array $selectedAccounts = null): array
+    {
+        $format = self::detectFormat($csvText);
+        if ($format === 'account') {
+            return self::parseAccountFormat($csvText, $selectedAccounts);
+        }
+        if ($format === 'vendor') {
+            return self::parseVendorFormat($csvText);
+        }
+
+        return ['summary' => [], 'raw' => []];
+    }
+
+    /**
+     * @param array<int, string>|null $selectedAccounts
+     * @return array{summary: array, raw: array}
+     */
+    private static function parseAccountFormat(string $csvText, ?array $selectedAccounts): array
+    {
+        $ctx = self::resolveAccountContext($csvText);
+        if ($ctx === null) {
+            return ['summary' => [], 'raw' => []];
+        }
+
+        $filter = null;
+        if ($selectedAccounts !== null) {
+            $filter = [];
+            foreach ($selectedAccounts as $a) {
+                $key = trim((string) $a);
+                if ($key !== '') {
+                    $filter[$key] = true;
+                }
+            }
+        }
+
+        $payeeRows = [];
+        $rawRows = [];
+
+        foreach ($ctx['transactions'] as $txn) {
+            if ($filter !== null && !isset($filter[$txn['account']])) {
+                continue;
+            }
+            $payee = $txn['payee'];
+            if (!isset($payeeRows[$payee])) {
+                $payeeRows[$payee] = [];
+            }
+            $payeeRows[$payee][] = ['date' => $txn['date'], 'amount' => $txn['amount']];
+            $rawRows[] = [
+                'vendor_name' => $payee,
+                'transaction_date' => $txn['date'],
+                'amount' => $txn['amount'],
+                'transaction_type' => $txn['transaction_type'],
+                'account' => $txn['account'],
+                'memo' => $txn['memo'],
+            ];
+        }
+
+        $summary = [];
+        foreach ($payeeRows as $payee => $rows) {
+            if (count($rows) > 0) {
+                $summary[] = self::buildVendorRow($payee, $rows);
+            }
+        }
+
+        return ['summary' => $summary, 'raw' => $rawRows];
+    }
+
+    /**
+     * @return array{
+     *   header_map: array<string, int>,
+     *   account_counts: array<string, int>,
+     *   account_order: array<int, string>,
+     *   transactions: array<int, array{account:string, payee:string, date:string, amount:float, transaction_type:string, memo:string}>
+     * }|null
+     */
+    private static function resolveAccountContext(string $csvText): ?array
     {
         $lines = preg_split('/\r\n|\r|\n/', $csvText);
         $headerIdx = -1;
         foreach ($lines as $i => $line) {
-            if (stripos($line, self::HEADER_NEEDLE) !== false) {
+            $lower = strtolower($line);
+            if (strpos($lower, self::ACCOUNT_HEADER_DATE) !== false
+                && strpos($lower, self::ACCOUNT_HEADER_TYPE) !== false) {
+                $headerIdx = $i;
+                break;
+            }
+        }
+        if ($headerIdx < 0) {
+            return null;
+        }
+
+        $headers = str_getcsv($lines[$headerIdx] ?? '');
+        $headerMap = self::buildHeaderMap($headers);
+
+        $accountCounts = [];
+        $accountOrder = [];
+        $transactions = [];
+        $currentAccount = null;
+
+        for ($i = $headerIdx + 1; $i < count($lines); $i++) {
+            $line = $lines[$i];
+            if (trim($line) === '') {
+                continue;
+            }
+            $parsed = str_getcsv($line);
+            $first = isset($parsed[0]) ? trim($parsed[0], " \t\n\r\0\x0B\"") : '';
+            $dateStr = isset($parsed[1]) ? trim($parsed[1]) : '';
+            $isTotal = stripos($first, 'Total for ') === 0;
+
+            if ($isTotal) {
+                $currentAccount = null;
+                continue;
+            }
+
+            if ($first !== '' && $dateStr === '') {
+                $currentAccount = $first;
+                if (!array_key_exists($currentAccount, $accountCounts)) {
+                    $accountCounts[$currentAccount] = 0;
+                    $accountOrder[] = $currentAccount;
+                }
+                continue;
+            }
+
+            if ($dateStr === '' || $currentAccount === null) {
+                continue;
+            }
+
+            $txn = self::parseAccountTransactionRow($parsed, $headerMap, $currentAccount);
+            if ($txn === null) {
+                continue;
+            }
+
+            $accountCounts[$currentAccount]++;
+            $transactions[] = $txn;
+        }
+
+        $orderedCounts = [];
+        foreach ($accountOrder as $name) {
+            $orderedCounts[$name] = $accountCounts[$name] ?? 0;
+        }
+
+        return [
+            'header_map' => $headerMap,
+            'account_counts' => $orderedCounts,
+            'account_order' => $accountOrder,
+            'transactions' => $transactions,
+        ];
+    }
+
+    /**
+     * @param array<int, string> $parsed
+     * @param array<string, int> $headerMap
+     * @return array{account:string, payee:string, date:string, amount:float, transaction_type:string, memo:string}|null
+     */
+    private static function parseAccountTransactionRow(array $parsed, array $headerMap, string $currentAccount): ?array
+    {
+        $dateStr = self::csvField($parsed, $headerMap, ['transaction date', 'date']);
+        $amtRaw = self::csvField($parsed, $headerMap, ['amount']);
+        if ($dateStr === '' || $amtRaw === '') {
+            return null;
+        }
+        $dt = self::parseDate($dateStr);
+        if ($dt === null) {
+            return null;
+        }
+        $amt = self::parseAmount($amtRaw);
+        if ($amt === null) {
+            return null;
+        }
+
+        $payee = self::csvField($parsed, $headerMap, ['name']);
+        if ($payee === '') {
+            return null;
+        }
+
+        return [
+            'account' => $currentAccount,
+            'payee' => $payee,
+            'date' => $dt,
+            'amount' => abs($amt),
+            'transaction_type' => self::csvField($parsed, $headerMap, ['transaction type', 'type']),
+            'memo' => self::csvField($parsed, $headerMap, ['description', 'memo/description', 'memo', 'memo desc', 'memo/desc']),
+        ];
+    }
+
+    /**
+     * @return array{summary: array, raw: array}
+     */
+    private static function parseVendorFormat(string $csvText): array
+    {
+        $lines = preg_split('/\r\n|\r|\n/', $csvText);
+        $headerIdx = -1;
+        foreach ($lines as $i => $line) {
+            if (stripos($line, self::VENDOR_HEADER_NEEDLE) !== false) {
                 $headerIdx = $i;
                 break;
             }
@@ -192,8 +430,6 @@ class CsvImport
      */
     private static function inferFrequency(array $gaps): string
     {
-        // Vendors with only a single observed transaction are treated as
-        // one-off purchases rather than guessing a recurring cadence.
         if (count($gaps) === 0) {
             return 'one_off';
         }

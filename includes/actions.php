@@ -440,22 +440,100 @@ function handleInviteMember() {
     exit;
 }
 
-function handleImportVendorCsv() {
-    header('Content-Type: application/json');
+/**
+ * @return array{success:bool, raw?:string, error?:string}
+ */
+function readUploadedCsvFile(): array {
     if (empty($_SESSION['user_id'])) {
-        echo json_encode(['success' => false, 'error' => 'Not logged in']);
-        exit;
+        return ['success' => false, 'error' => 'Not logged in'];
     }
     if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
-        echo json_encode(['success' => false, 'error' => 'Upload failed']);
-        exit;
+        return ['success' => false, 'error' => 'Upload failed'];
     }
     $raw = file_get_contents($_FILES['csv_file']['tmp_name']);
     if ($raw === false || strlen($raw) > 5_000_000) {
-        echo json_encode(['success' => false, 'error' => 'File too large or unreadable']);
+        return ['success' => false, 'error' => 'File too large or unreadable'];
+    }
+
+    return ['success' => true, 'raw' => $raw];
+}
+
+/**
+ * @return array<int, string>
+ */
+function parseSelectedAccountsFromPost(): array {
+    $selected = [];
+    if (isset($_POST['selected_accounts']) && is_string($_POST['selected_accounts'])) {
+        $decoded = json_decode($_POST['selected_accounts'], true);
+        if (is_array($decoded)) {
+            foreach ($decoded as $name) {
+                $trimmed = trim((string) $name);
+                if ($trimmed !== '') {
+                    $selected[] = $trimmed;
+                }
+            }
+        }
+    }
+    if (count($selected) === 0 && isset($_POST['selected_accounts']) && is_array($_POST['selected_accounts'])) {
+        foreach ($_POST['selected_accounts'] as $name) {
+            $trimmed = trim((string) $name);
+            if ($trimmed !== '') {
+                $selected[] = $trimmed;
+            }
+        }
+    }
+
+    return $selected;
+}
+
+function handlePreviewCsvImport() {
+    header('Content-Type: application/json');
+    $upload = readUploadedCsvFile();
+    if (!($upload['success'] ?? false)) {
+        echo json_encode($upload);
         exit;
     }
-    $parsed = CsvImport::parse($raw);
+    $raw = (string) ($upload['raw'] ?? '');
+    $format = CsvImport::detectFormat($raw);
+    if ($format === 'unknown') {
+        echo json_encode(['success' => false, 'error' => 'Unrecognized CSV format']);
+        exit;
+    }
+    if ($format === 'vendor') {
+        echo json_encode(['success' => true, 'format' => 'vendor', 'accounts' => []]);
+        exit;
+    }
+    echo json_encode([
+        'success' => true,
+        'format' => 'account',
+        'accounts' => CsvImport::listAccounts($raw),
+    ]);
+    exit;
+}
+
+function handleImportVendorCsv() {
+    header('Content-Type: application/json');
+    $upload = readUploadedCsvFile();
+    if (!($upload['success'] ?? false)) {
+        echo json_encode($upload);
+        exit;
+    }
+    $raw = (string) ($upload['raw'] ?? '');
+    $format = CsvImport::detectFormat($raw);
+    if ($format === 'unknown') {
+        echo json_encode(['success' => false, 'error' => 'Unrecognized CSV format']);
+        exit;
+    }
+    if ($format === 'account') {
+        $selectedAccounts = parseSelectedAccountsFromPost();
+        if (count($selectedAccounts) === 0) {
+            echo json_encode(['success' => false, 'error' => 'No accounts selected']);
+            exit;
+        }
+        $parsed = CsvImport::parse($raw, $selectedAccounts);
+    } else {
+        $parsed = CsvImport::parse($raw);
+    }
     $summaryRows = isset($parsed['summary']) && is_array($parsed['summary']) ? $parsed['summary'] : [];
     $rawRows = isset($parsed['raw']) && is_array($parsed['raw']) ? $parsed['raw'] : [];
     if (count($summaryRows) === 0) {

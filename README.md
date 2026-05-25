@@ -7,7 +7,7 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
 - **Username + password login** — Sessions store `user_id`, `org_id`, and app role (`admin` / `member`). Transactional email via [Postmark](https://postmarkapp.com) ([includes/mail.php](includes/mail.php)).
 - **Organizations (up to 10 users)** — Admin invites members by email; registration completes at [public/register.php](public/register.php).
 - **Vendor grid** — Manager assignment, public/confidential visibility, purpose of subscription, cancellation deadline, last payment date; auto-save to `cost_calculator_items` (PDO / [src/VendorService.php](src/VendorService.php)).
-- **CSV import** — QuickBooks-style “Cost Savings - Transaction List by Vendor” exports ([src/CsvImport.php](src/CsvImport.php)).
+- **CSV import** — QuickBooks “Transaction Detail by Account” exports (primary): upload shows a checklist of GL account sections; only payees (Name column) under selected accounts are imported, with account stored on raw transactions ([src/CsvImport.php](src/CsvImport.php)). Legacy “Transaction List by Vendor” CSVs still import in one step without the account picker.
 - **Exports** — Excel (PhpSpreadsheet) and PDF (Dompdf) for vendor list and executive summary ([src/ExportService.php](src/ExportService.php)).
 - **Email reminders** — Cron script [public/cron_reminders.php](public/cron_reminders.php) for cancellation deadlines (T−7, T, T+7) and monthly renewal summaries.
 - **Ask AI** — Perplexity Chat Completions when `PERPLEXITY_API_KEY` is set; otherwise OpenAI (`OPENAI_API_KEY`). 50 requests per user per month ([src/AiService.php](src/AiService.php)); see `config.example.php` for `AI_MODEL`, `AI_MAX_TOKENS`, and `AI_TEMPERATURE`.

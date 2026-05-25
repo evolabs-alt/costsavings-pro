@@ -80,6 +80,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'invite_member':
                 handleInviteMember();
                 break;
+            case 'preview_csv_import':
+                handlePreviewCsvImport();
+                break;
             case 'import_vendor_csv':
                 handleImportVendorCsv();
                 break;
@@ -3251,6 +3254,35 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             margin-bottom: 12px;
         }
 
+        .csv-account-list {
+            max-height: 360px;
+            overflow-y: auto;
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            padding: 8px;
+            margin-bottom: 12px;
+        }
+
+        .csv-account-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 6px 4px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .csv-account-row label {
+            cursor: pointer;
+            flex: 1;
+        }
+
+        .csv-account-count {
+            color: #6b7280;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
         .app-modal-body .settings-block {
             margin-bottom: 16px;
             padding: 12px;
@@ -4229,8 +4261,165 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     activeCancelGuidanceItemId = 0;
                     activeCancelGuidanceVendorName = '';
                 }
+                if (overlay.id === 'appModalCsvAccounts') {
+                    pendingCsvFile = null;
+                }
                 if (!document.querySelector('.app-modal-overlay.is-open')) {
                     document.body.style.overflow = '';
+                }
+            }
+            var pendingCsvFile = null;
+            function updateCsvAccountSelectionStatus() {
+                var list = document.getElementById('csvAccountList');
+                var status = document.getElementById('csvAccountSelectionStatus');
+                var importBtn = document.getElementById('csvAccountImportBtn');
+                if (!list) return;
+                var boxes = list.querySelectorAll('input[type="checkbox"]');
+                var checked = 0;
+                var txnTotal = 0;
+                boxes.forEach(function(cb) {
+                    if (cb.checked) {
+                        checked++;
+                        txnTotal += parseInt(cb.getAttribute('data-txn-count') || '0', 10) || 0;
+                    }
+                });
+                if (status) {
+                    status.textContent = checked > 0
+                        ? (checked + ' account(s), ' + txnTotal + ' transaction(s)')
+                        : 'No accounts selected';
+                }
+                if (importBtn) importBtn.disabled = checked === 0;
+            }
+            function renderCsvAccountList(accounts) {
+                var list = document.getElementById('csvAccountList');
+                if (!list) return;
+                list.innerHTML = '';
+                (accounts || []).forEach(function(acct, idx) {
+                    var name = (acct && acct.name) ? String(acct.name) : '';
+                    var count = parseInt((acct && acct.transaction_count) || 0, 10) || 0;
+                    var row = document.createElement('div');
+                    row.className = 'csv-account-row';
+                    var id = 'csvAcct_' + idx;
+                    row.innerHTML =
+                        '<input type="checkbox" id="' + id + '" value="" data-txn-count="0">' +
+                        '<label for="' + id + '">' + aiEscapeHtml(name) +
+                        ' <span class="csv-account-count">(' + count + ')</span></label>';
+                    var cb = row.querySelector('input');
+                    cb.value = name;
+                    cb.setAttribute('data-txn-count', String(count));
+                    cb.addEventListener('change', updateCsvAccountSelectionStatus);
+                    list.appendChild(row);
+                });
+                updateCsvAccountSelectionStatus();
+            }
+            function runCsvImport(file, selectedAccounts) {
+                if (!file) {
+                    showSnackbar('No file to import', 'error');
+                    return Promise.resolve();
+                }
+                var fd = new FormData();
+                fd.append('action', 'import_vendor_csv');
+                fd.append('csv_file', file);
+                if (selectedAccounts && selectedAccounts.length > 0) {
+                    fd.append('selected_accounts', JSON.stringify(selectedAccounts));
+                }
+                return fetch(window.location.href, { method: 'POST', body: fd })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (d.success) {
+                            var rawCount = parseInt(d.raw_inserted || 0, 10) || 0;
+                            showSnackbar('Imported ' + (d.inserted || 0) + ' vendor(s), ' + rawCount + ' raw transactions', 'success');
+                            loadCalculatorData();
+                        } else {
+                            showSnackbar(d.error || 'Import failed', 'error');
+                        }
+                    })
+                    .catch(function() { showSnackbar('Import failed', 'error'); });
+            }
+            function handleCsvFileSelected(file, inputEl) {
+                if (!file) return;
+                var fd = new FormData();
+                fd.append('action', 'preview_csv_import');
+                fd.append('csv_file', file);
+                fetch(window.location.href, { method: 'POST', body: fd })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (!d.success) {
+                            showSnackbar(d.error || 'Could not read CSV', 'error');
+                            return;
+                        }
+                        if (d.format === 'vendor') {
+                            return runCsvImport(file, null);
+                        }
+                        if (d.format === 'account') {
+                            pendingCsvFile = file;
+                            renderCsvAccountList(d.accounts || []);
+                            openAppModal('appModalCsvAccounts');
+                            return;
+                        }
+                        showSnackbar('Unrecognized CSV format', 'error');
+                    })
+                    .catch(function() { showSnackbar('Could not read CSV', 'error'); })
+                    .finally(function() {
+                        if (inputEl) inputEl.value = '';
+                    });
+            }
+            function initCsvImportUi() {
+                var csvIn = document.getElementById('csvImportInput');
+                var csvBtn = document.getElementById('appImportCsvBtn');
+                if (csvBtn && csvIn && !csvBtn.dataset.csvBound) {
+                    csvBtn.dataset.csvBound = '1';
+                    csvBtn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        csvIn.click();
+                    });
+                }
+                if (csvIn && !csvIn.dataset.csvBound) {
+                    csvIn.dataset.csvBound = '1';
+                    csvIn.addEventListener('change', function() {
+                        handleCsvFileSelected(this.files[0], this);
+                    });
+                }
+                var csvModal = document.getElementById('appModalCsvAccounts');
+                if (!csvModal || csvModal.dataset.csvBound) {
+                    return;
+                }
+                csvModal.dataset.csvBound = '1';
+                var selectAllBtn = document.getElementById('csvAccountSelectAllBtn');
+                var clearBtn = document.getElementById('csvAccountClearBtn');
+                var importBtn = document.getElementById('csvAccountImportBtn');
+                var list = document.getElementById('csvAccountList');
+                if (selectAllBtn && list) {
+                    selectAllBtn.addEventListener('click', function() {
+                        list.querySelectorAll('input[type="checkbox"]').forEach(function(cb) { cb.checked = true; });
+                        updateCsvAccountSelectionStatus();
+                    });
+                }
+                if (clearBtn && list) {
+                    clearBtn.addEventListener('click', function() {
+                        list.querySelectorAll('input[type="checkbox"]').forEach(function(cb) { cb.checked = false; });
+                        updateCsvAccountSelectionStatus();
+                    });
+                }
+                if (importBtn) {
+                    importBtn.addEventListener('click', function() {
+                        if (!pendingCsvFile || !list) return;
+                        var selected = [];
+                        list.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) {
+                            if (cb.value) selected.push(cb.value);
+                        });
+                        if (selected.length === 0) {
+                            showSnackbar('Select at least one account', 'error');
+                            return;
+                        }
+                        importBtn.disabled = true;
+                        runCsvImport(pendingCsvFile, selected).then(function() {
+                            pendingCsvFile = null;
+                            closeAppModal(document.getElementById('appModalCsvAccounts'));
+                        }).finally(function() {
+                            updateCsvAccountSelectionStatus();
+                        });
+                    });
                 }
             }
             function aiEscapeHtml(s) {
@@ -4394,14 +4583,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 document.addEventListener('keydown', function(e) {
                     if (e.key === 'Escape') closeAll();
                 });
-                var csvIn = document.getElementById('csvImportInput');
-                var csvBtn = document.getElementById('appImportCsvBtn');
-                if (csvBtn && csvIn) {
-                    csvBtn.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        csvIn.click();
-                    });
-                }
+                initCsvImportUi();
             }
             const TEAM_MEMBERS = <?php echo $team_members_json; ?>;
             const IS_ADMIN = <?php echo $is_admin ? 'true' : 'false'; ?>;
@@ -5867,29 +6049,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         vendorChatUnreadPollTimer = null;
                     }
                 });
-                var csvIn = document.getElementById('csvImportInput');
-                if (csvIn) {
-                    csvIn.addEventListener('change', function() {
-                        var f = this.files[0];
-                        if (!f) return;
-                        var fd = new FormData();
-                        fd.append('action', 'import_vendor_csv');
-                        fd.append('csv_file', f);
-                        fetch(window.location.href, { method: 'POST', body: fd })
-                            .then(function(r) { return r.json(); })
-                            .then(function(d) {
-                                if (d.success) {
-                                    const rawCount = parseInt(d.raw_inserted || 0, 10) || 0;
-                                    showSnackbar('Imported ' + (d.inserted || 0) + ' vendor(s), ' + rawCount + ' raw transactions', 'success');
-                                    loadCalculatorData();
-                                } else {
-                                    showSnackbar(d.error || 'Import failed', 'error');
-                                }
-                            })
-                            .catch(function() { showSnackbar('Import failed', 'error'); });
-                        this.value = '';
-                    });
-                }
+                initCsvImportUi();
                 function aiEscapeHtml(s) {
                     var d = document.createElement('div');
                     d.textContent = s;
@@ -6656,6 +6816,28 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         </div>
     </div>
     <?php endif; ?>
+
+    <div class="app-modal-overlay" id="appModalCsvAccounts" role="dialog" aria-modal="true" aria-labelledby="appModalCsvAccountsTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalCsvAccountsTitle">Select accounts to import</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <p style="margin:0 0 10px;font-size:14px;color:#4b5563;line-height:1.5;">Choose which GL accounts to include. Vendor rows are grouped by payee (Name) from the selected accounts only.</p>
+                <div class="data-actions">
+                    <button type="button" class="btn-secondary" id="csvAccountSelectAllBtn">Select all</button>
+                    <button type="button" class="btn-secondary" id="csvAccountClearBtn">Clear</button>
+                    <span id="csvAccountSelectionStatus" style="font-size:13px;color:#4b5563;"></span>
+                </div>
+                <div class="csv-account-list" id="csvAccountList" role="group" aria-label="GL accounts"></div>
+                <div style="display:flex;gap:8px;justify-content:flex-end;">
+                    <button type="button" class="btn-secondary app-modal-close" id="csvAccountCancelBtn">Cancel</button>
+                    <button type="button" id="csvAccountImportBtn" disabled>Import selected</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <div class="app-modal-overlay" id="appModalAI" role="dialog" aria-modal="true" aria-labelledby="appModalAITitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
