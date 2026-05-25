@@ -559,7 +559,7 @@ function handleImportVendorCsv() {
             'status' => VendorService::STATUS_PENDING,
             'cancel_keep' => 'Keep',
             'cancelled_status' => 0,
-            'purpose_of_subscription' => $purposeMap[mb_strtolower(trim((string) $row['vendor_name']), 'UTF-8')] ?? '',
+            'purpose_of_subscription' => $purposeMap[VendorService::normalizeVendorName((string) $row['vendor_name'])] ?? '',
             'notes' => '',
             'visibility' => 'confidential',
             'manager_user_id' => null,

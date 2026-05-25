@@ -227,7 +227,7 @@ class ProjectService
         $st->execute([$orgId, $projectId]);
         $map = [];
         while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
-            $name = mb_strtolower(trim((string) ($row['vendor_name'] ?? '')), 'UTF-8');
+            $name = StringUtil::strtolower((string) ($row['vendor_name'] ?? ''));
             $purpose = trim((string) ($row['purpose_of_subscription'] ?? ''));
             if ($name !== '' && $purpose !== '') {
                 $map[$name] = $purpose;

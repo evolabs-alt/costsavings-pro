@@ -749,7 +749,7 @@ class VendorService
 
     public static function normalizeVendorName(string $vendorName): string
     {
-        return mb_strtolower(trim($vendorName), 'UTF-8');
+        return StringUtil::strtolower($vendorName);
     }
 
     /**
