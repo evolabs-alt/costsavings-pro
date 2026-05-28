@@ -1300,6 +1300,51 @@ function handleProjectCreate() {
     exit;
 }
 
+function handleCopyProjectPurposes() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
+        exit;
+    }
+    if (!OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
+        echo json_encode(['success' => false, 'error' => 'Only a super admin can copy project purposes.']);
+        exit;
+    }
+    $fromProjectId = (int) ($_POST['from_project_id'] ?? 0);
+    $toProjectId = (int) ($_POST['to_project_id'] ?? 0);
+    if ($fromProjectId <= 0 || $toProjectId <= 0) {
+        echo json_encode(['success' => false, 'error' => 'Source and target projects are required.']);
+        exit;
+    }
+    if ($fromProjectId === $toProjectId) {
+        echo json_encode(['success' => false, 'error' => 'Source and target projects must be different.']);
+        exit;
+    }
+    $pdo = getDBConnection();
+    $userId = (int) $_SESSION['user_id'];
+    $orgId = (int) ($_SESSION['org_id'] ?? 0);
+    $role = (string) ($_SESSION['role'] ?? 'member');
+    if ($orgId < 1) {
+        echo json_encode(['success' => false, 'error' => 'Organization could not be loaded.']);
+        exit;
+    }
+    if (!ProjectService::canAccessProject($pdo, $fromProjectId, $orgId, $userId, $role)
+        || !ProjectService::canAccessProject($pdo, $toProjectId, $orgId, $userId, $role)) {
+        echo json_encode(['success' => false, 'error' => 'You do not have access to one or both projects.']);
+        exit;
+    }
+    $result = ProjectService::copyPurposesBetweenProjects(
+        $pdo,
+        $orgId,
+        $fromProjectId,
+        $toProjectId,
+        $userId,
+        $role
+    );
+    echo json_encode($result);
+    exit;
+}
+
 function handleProjectDelete() {
     header('Content-Type: application/json');
     if (empty($_SESSION['user_id'])) {

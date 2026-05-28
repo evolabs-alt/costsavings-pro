@@ -122,6 +122,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'project_delete':
                 handleProjectDelete();
                 break;
+            case 'copy_project_purposes':
+                handleCopyProjectPurposes();
+                break;
         }
     }
 }
@@ -4179,9 +4182,249 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 document.title = projectName !== '' ? (baseTitle + ' - ' + projectName) : baseTitle;
             }
 
+            var postProjectCreateFlow = {
+                active: false,
+                projectId: 0,
+                projectName: '',
+                dataMode: 'upload_after',
+                previousActiveProjectId: 0,
+                step: null,
+                importCompleted: false
+            };
+
+            function postCreateFlowStepLabel(stepNum) {
+                var name = postProjectCreateFlow.projectName || 'your project';
+                return 'Setting up ' + name + ' — step ' + stepNum + ' of 3';
+            }
+
+            function setPostCreateSubtitle(elId, stepNum) {
+                var el = document.getElementById(elId);
+                if (el) el.textContent = postCreateFlowStepLabel(stepNum);
+            }
+
+            function fetchActiveProjectVendorCount() {
+                var fd = new FormData();
+                fd.append('action', 'load_cost_calculator');
+                return fetch(window.location.href, { method: 'POST', body: fd, credentials: 'same-origin' })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (!data || !data.success || !Array.isArray(data.items)) return 0;
+                        return data.items.filter(function(item) {
+                            return String(item.vendor_name || '').trim() !== '';
+                        }).length;
+                    })
+                    .catch(function() { return 0; });
+            }
+
+            function resetPostCreatePurposeModal() {
+                var block = document.getElementById('postCreatePurposeSelectBlock');
+                var proceedBtn = document.getElementById('postCreatePurposeProceedBtn');
+                var yesBtn = document.getElementById('postCreatePurposeYesBtn');
+                var select = document.getElementById('postCreatePurposeSource');
+                if (block) block.style.display = 'none';
+                if (proceedBtn) proceedBtn.style.display = 'none';
+                if (yesBtn) yesBtn.style.display = '';
+                if (select) select.innerHTML = '';
+            }
+
+            function populatePostCreatePurposeSourceSelect() {
+                var select = document.getElementById('postCreatePurposeSource');
+                if (!select) return Promise.resolve();
+                return postJson({ action: 'project_list' }).then(function(d) {
+                    select.innerHTML = '';
+                    var firstOpt = null;
+                    (d.projects || []).forEach(function(p) {
+                        var pid = parseInt(p.id, 10) || 0;
+                        if (pid <= 0 || pid === postProjectCreateFlow.projectId) return;
+                        var opt = document.createElement('option');
+                        opt.value = String(pid);
+                        opt.textContent = p.name || ('Project ' + pid);
+                        select.appendChild(opt);
+                        if (!firstOpt) firstOpt = opt;
+                    });
+                    var prev = postProjectCreateFlow.previousActiveProjectId;
+                    if (prev > 0 && prev !== postProjectCreateFlow.projectId) {
+                        select.value = String(prev);
+                    } else if (firstOpt) {
+                        select.value = firstOpt.value;
+                    }
+                });
+            }
+
+            function openPostCreatePurposeModal() {
+                resetPostCreatePurposeModal();
+                setPostCreateSubtitle('postCreatePurposeSubtitle', 2);
+                openAppModal('appModalPostCreatePurpose');
+            }
+
+            function openPostCreateInviteModal() {
+                setPostCreateSubtitle('postCreateInviteSubtitle', 3);
+                openAppModal('appModalPostCreateInvite');
+            }
+
+            function proceedToPurposeOrInvite() {
+                fetchActiveProjectVendorCount().then(function(count) {
+                    if (count === 0) {
+                        showSnackbar('Import vendors first to copy purposes from another project.', 'info');
+                        postProjectCreateFlow.step = 'invite';
+                        openPostCreateInviteModal();
+                        return;
+                    }
+                    postProjectCreateFlow.step = 'purpose';
+                    openPostCreatePurposeModal();
+                });
+            }
+
+            function advancePostProjectCreateFlow() {
+                if (!postProjectCreateFlow.active) return;
+                var step = postProjectCreateFlow.step;
+                if (step === 'upload' || step === 'upload_waiting_import') {
+                    postProjectCreateFlow.step = 'purpose_check';
+                    proceedToPurposeOrInvite();
+                    return;
+                }
+                if (step === 'purpose' || step === 'purpose_done') {
+                    postProjectCreateFlow.step = 'invite';
+                    openPostCreateInviteModal();
+                    return;
+                }
+            }
+
+            function endPostProjectCreateFlow() {
+                if (!postProjectCreateFlow.active) return;
+                postProjectCreateFlow.active = false;
+                postProjectCreateFlow.step = null;
+                postProjectCreateFlow.importCompleted = false;
+                closeAppModal('appModalPostCreateUpload');
+                closeAppModal('appModalPostCreatePurpose');
+                closeAppModal('appModalPostCreateInvite');
+                resetPostCreatePurposeModal();
+                var form = document.getElementById('projectWizardForm');
+                if (form) form.reset();
+                var uploadRadio = document.getElementById('projectWizardDataModeUpload');
+                if (uploadRadio) uploadRadio.checked = true;
+                var startDateInput = document.getElementById('projectWizardStartDate');
+                if (startDateInput && !startDateInput.value) {
+                    startDateInput.value = new Date().toISOString().slice(0, 10);
+                }
+                showSnackbar('Project setup complete.', 'success');
+            }
+
+            function startPostProjectCreateFlow(opts) {
+                opts = opts || {};
+                postProjectCreateFlow.active = true;
+                postProjectCreateFlow.projectId = parseInt(opts.projectId, 10) || 0;
+                postProjectCreateFlow.projectName = opts.projectName || '';
+                postProjectCreateFlow.dataMode = opts.dataMode || 'upload_after';
+                postProjectCreateFlow.previousActiveProjectId = parseInt(opts.previousActiveProjectId, 10) || 0;
+                postProjectCreateFlow.importCompleted = false;
+                if (postProjectCreateFlow.dataMode === 'upload_after') {
+                    postProjectCreateFlow.step = 'upload';
+                    setPostCreateSubtitle('postCreateUploadSubtitle', 1);
+                    openAppModal('appModalPostCreateUpload');
+                } else {
+                    postProjectCreateFlow.step = 'purpose_check';
+                    proceedToPurposeOrInvite();
+                }
+            }
+
+            function initPostProjectCreateFlow() {
+                var chooseBtn = document.getElementById('postCreateUploadChooseBtn');
+                var skipBtn = document.getElementById('postCreateUploadSkipBtn');
+                var csvIn = document.getElementById('csvImportInput');
+                if (chooseBtn && csvIn) {
+                    chooseBtn.addEventListener('click', function() {
+                        closeAppModal('appModalPostCreateUpload');
+                        postProjectCreateFlow.step = 'upload_waiting_import';
+                        csvIn.click();
+                    });
+                }
+                if (skipBtn) {
+                    skipBtn.addEventListener('click', function() {
+                        closeAppModal('appModalPostCreateUpload');
+                        advancePostProjectCreateFlow();
+                    });
+                }
+                var purposeNo = document.getElementById('postCreatePurposeNoBtn');
+                var purposeYes = document.getElementById('postCreatePurposeYesBtn');
+                var purposeProceed = document.getElementById('postCreatePurposeProceedBtn');
+                if (purposeNo) {
+                    purposeNo.addEventListener('click', function() {
+                        closeAppModal('appModalPostCreatePurpose');
+                        postProjectCreateFlow.step = 'purpose_done';
+                        advancePostProjectCreateFlow();
+                    });
+                }
+                if (purposeYes) {
+                    purposeYes.addEventListener('click', function() {
+                        populatePostCreatePurposeSourceSelect().then(function() {
+                            var select = document.getElementById('postCreatePurposeSource');
+                            if (!select || select.options.length === 0) {
+                                showSnackbar('No other projects are available to copy purposes from.', 'info');
+                                return;
+                            }
+                            var block = document.getElementById('postCreatePurposeSelectBlock');
+                            var proceedBtn = document.getElementById('postCreatePurposeProceedBtn');
+                            purposeYes.style.display = 'none';
+                            if (block) block.style.display = 'grid';
+                            if (proceedBtn) proceedBtn.style.display = '';
+                        });
+                    });
+                }
+                if (purposeProceed) {
+                    purposeProceed.addEventListener('click', function() {
+                        var select = document.getElementById('postCreatePurposeSource');
+                        var fromId = select ? parseInt(select.value, 10) : 0;
+                        if (!fromId) {
+                            showSnackbar('Select a source project.', 'error');
+                            return;
+                        }
+                        purposeProceed.disabled = true;
+                        postJson({
+                            action: 'copy_project_purposes',
+                            from_project_id: fromId,
+                            to_project_id: postProjectCreateFlow.projectId
+                        }).then(function(d) {
+                            if (!d || !d.success) {
+                                showSnackbar((d && d.error) || 'Could not copy purposes.', 'error');
+                                return;
+                            }
+                            var matched = parseInt(d.matched || 0, 10) || 0;
+                            showSnackbar('Copied purposes for ' + matched + ' vendor(s).', 'success');
+                            loadCalculatorData();
+                            closeAppModal('appModalPostCreatePurpose');
+                            postProjectCreateFlow.step = 'purpose_done';
+                            advancePostProjectCreateFlow();
+                        }).catch(function() {
+                            showSnackbar('Could not copy purposes.', 'error');
+                        }).finally(function() {
+                            purposeProceed.disabled = false;
+                        });
+                    });
+                }
+                var inviteNo = document.getElementById('postCreateInviteNoBtn');
+                var inviteYes = document.getElementById('postCreateInviteYesBtn');
+                if (inviteNo) {
+                    inviteNo.addEventListener('click', function() {
+                        closeAppModal('appModalPostCreateInvite');
+                        endPostProjectCreateFlow();
+                    });
+                }
+                if (inviteYes) {
+                    inviteYes.addEventListener('click', function() {
+                        closeAppModal('appModalPostCreateInvite');
+                        postProjectCreateFlow.step = 'invite_open';
+                        openAppModal('appModalMembersInvite');
+                    });
+                }
+            }
+
             function submitProjectWizardForm() {
                 const form = document.getElementById('projectWizardForm');
                 if (!form) return;
+                const previousActiveProjectId = currentActiveProjectId || 0;
+                const dataMode = (document.querySelector('input[name="projectWizardDataMode"]:checked') || {}).value || 'upload_after';
+                const projectName = (document.getElementById('projectWizardName') || {}).value || '';
                 const memberSel = document.getElementById('projectWizardMembers');
                 const memberIds = [];
                 if (memberSel) {
@@ -4191,12 +4434,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
                 const payload = {
                     action: 'project_create',
-                    project_name: (document.getElementById('projectWizardName') || {}).value || '',
+                    project_name: projectName,
                     start_date: (document.getElementById('projectWizardStartDate') || {}).value || '',
                     end_date: (document.getElementById('projectWizardEndDate') || {}).value || '',
                     member_ids: memberIds,
-                    copy_from_active: ((document.querySelector('input[name="projectWizardDataMode"]:checked') || {}).value === 'copy_from_active' ? 1 : 0),
-                    source_project_id: ((document.querySelector('input[name="projectWizardDataMode"]:checked') || {}).value === 'copy_from_active' ? (currentActiveProjectId || 0) : 0),
+                    copy_from_active: (dataMode === 'copy_from_active' ? 1 : 0),
+                    source_project_id: (dataMode === 'copy_from_active' ? (currentActiveProjectId || 0) : 0),
                 };
                 postJson(payload)
                     .then(function(d) {
@@ -4204,11 +4447,24 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             showSnackbar((d && d.error) || 'Could not create project.', 'error');
                             return;
                         }
-                        showSnackbar("You're done! Project created.", 'success');
+                        showSnackbar('Project created.', 'success');
                         var mainAppContainer = document.querySelector('.container');
                         if (mainAppContainer) mainAppContainer.classList.remove('project-onboarding-hidden');
                         closeAppModal('appModalProjectWizard');
-                        loadProjectsIntoMenu().then(function() { loadCalculatorData(); });
+                        var loadPromise = loadProjectsIntoMenu().then(function() {
+                            var calc = loadCalculatorData();
+                            return calc || Promise.resolve();
+                        });
+                        loadPromise.then(function() {
+                            if (canCreateProjects) {
+                                startPostProjectCreateFlow({
+                                    projectId: d.project_id,
+                                    projectName: projectName,
+                                    dataMode: dataMode,
+                                    previousActiveProjectId: previousActiveProjectId
+                                });
+                            }
+                        });
                     })
                     .catch(function() {
                         showSnackbar('Could not create project.', 'error');
@@ -4262,7 +4518,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     activeCancelGuidanceVendorName = '';
                 }
                 if (overlay.id === 'appModalCsvAccounts') {
+                    if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import' && !postProjectCreateFlow.importCompleted) {
+                        advancePostProjectCreateFlow();
+                    }
                     pendingCsvFile = null;
+                }
+                if (overlay.id === 'appModalMembersInvite' && postProjectCreateFlow.active && postProjectCreateFlow.step === 'invite_open') {
+                    endPostProjectCreateFlow();
                 }
                 if (!document.querySelector('.app-modal-overlay.is-open')) {
                     document.body.style.overflow = '';
@@ -4315,6 +4577,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             function runCsvImport(file, selectedAccounts) {
                 if (!file) {
                     showSnackbar('No file to import', 'error');
+                    if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
+                        advancePostProjectCreateFlow();
+                    }
                     return Promise.resolve();
                 }
                 var fd = new FormData();
@@ -4329,15 +4594,40 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         if (d.success) {
                             var rawCount = parseInt(d.raw_inserted || 0, 10) || 0;
                             showSnackbar('Imported ' + (d.inserted || 0) + ' vendor(s), ' + rawCount + ' raw transactions', 'success');
-                            loadCalculatorData();
+                            var flowActive = postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import';
+                            if (flowActive) {
+                                postProjectCreateFlow.importCompleted = true;
+                            }
+                            var loadP = loadCalculatorData();
+                            if (flowActive) {
+                                return (loadP || Promise.resolve()).then(function() {
+                                    advancePostProjectCreateFlow();
+                                });
+                            }
                         } else {
                             showSnackbar(d.error || 'Import failed', 'error');
+                            if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
+                                advancePostProjectCreateFlow();
+                            }
                         }
                     })
-                    .catch(function() { showSnackbar('Import failed', 'error'); });
+                    .catch(function() {
+                        showSnackbar('Import failed', 'error');
+                        if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
+                            advancePostProjectCreateFlow();
+                        }
+                    });
             }
             function handleCsvFileSelected(file, inputEl) {
-                if (!file) return;
+                if (!file) {
+                    if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
+                        advancePostProjectCreateFlow();
+                    }
+                    return;
+                }
+                if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload') {
+                    postProjectCreateFlow.step = 'upload_waiting_import';
+                }
                 var fd = new FormData();
                 fd.append('action', 'preview_csv_import');
                 fd.append('csv_file', file);
@@ -4346,6 +4636,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     .then(function(d) {
                         if (!d.success) {
                             showSnackbar(d.error || 'Could not read CSV', 'error');
+                            if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
+                                advancePostProjectCreateFlow();
+                            }
                             return;
                         }
                         if (d.format === 'vendor') {
@@ -4358,8 +4651,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             return;
                         }
                         showSnackbar('Unrecognized CSV format', 'error');
+                        if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
+                            advancePostProjectCreateFlow();
+                        }
                     })
-                    .catch(function() { showSnackbar('Could not read CSV', 'error'); })
+                    .catch(function() {
+                        showSnackbar('Could not read CSV', 'error');
+                        if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
+                            advancePostProjectCreateFlow();
+                        }
+                    })
                     .finally(function() {
                         if (inputEl) inputEl.value = '';
                     });
@@ -4537,7 +4838,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         modal.addEventListener('click', function(e) { e.stopPropagation(); });
                     }
                     overlay.addEventListener('click', function(e) {
-                        if (e.target === overlay) closeAppModal(overlay);
+                        if (e.target !== overlay) return;
+                        if (overlay.classList.contains('post-create-flow-modal')) return;
+                        closeAppModal(overlay);
                     });
                     overlay.querySelectorAll('.app-modal-close').forEach(function(b) {
                         b.addEventListener('click', function() { closeAppModal(overlay); });
@@ -4546,6 +4849,20 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 document.addEventListener('keydown', function(e) {
                     if (e.key !== 'Escape') return;
                     document.querySelectorAll('.app-modal-overlay.is-open').forEach(function(ov) {
+                        if (postProjectCreateFlow.active && ov.classList.contains('post-create-flow-modal')) {
+                            if (ov.id === 'appModalPostCreateUpload') {
+                                closeAppModal(ov);
+                                advancePostProjectCreateFlow();
+                            } else if (ov.id === 'appModalPostCreatePurpose') {
+                                closeAppModal(ov);
+                                postProjectCreateFlow.step = 'purpose_done';
+                                advancePostProjectCreateFlow();
+                            } else if (ov.id === 'appModalPostCreateInvite') {
+                                closeAppModal(ov);
+                                endPostProjectCreateFlow();
+                            }
+                            return;
+                        }
                         closeAppModal(ov);
                     });
                 });
@@ -5578,7 +5895,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const formData = new FormData();
                 formData.append('action', 'load_cost_calculator');
                 
-                fetch(window.location.href, {
+                return fetch(window.location.href, {
                     method: 'POST',
                     body: formData
                 })
@@ -5877,6 +6194,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             // Initialize: Load data on page load; flush debounced saves before refresh/navigation
             document.addEventListener('DOMContentLoaded', function() {
                 initAppModals();
+                initPostProjectCreateFlow();
                 initNavSubmenus();
                 initPurposeColumnToggle();
                 initVendorColumnHeaderFilters();
@@ -6811,6 +7129,61 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <div class="bulk-actions-buttons" style="margin-top:4px;">
                     <button type="button" class="btn-secondary app-modal-close">Cancel</button>
                     <button type="button" id="deleteProjectSubmitBtn" disabled style="border-color:#b91c1c;color:#b91c1c;background:#fff;">Delete project</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay post-create-flow-modal" id="appModalPostCreateUpload" role="dialog" aria-modal="true" aria-labelledby="appModalPostCreateUploadTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalPostCreateUploadTitle">Import your data</h2>
+            </div>
+            <div class="app-modal-body">
+                <p id="postCreateUploadSubtitle" style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;"></p>
+                <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.5;">Upload a QuickBooks or vendor CSV to populate vendors for this project.</p>
+                <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+                    <button type="button" class="btn-secondary" id="postCreateUploadSkipBtn">Skip for now</button>
+                    <button type="button" id="postCreateUploadChooseBtn">Choose CSV file</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay post-create-flow-modal" id="appModalPostCreatePurpose" role="dialog" aria-modal="true" aria-labelledby="appModalPostCreatePurposeTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalPostCreatePurposeTitle">Copy purposes</h2>
+            </div>
+            <div class="app-modal-body">
+                <p id="postCreatePurposeSubtitle" style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;"></p>
+                <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.5;">Would you like to copy purposes from a previous project? Purposes are matched by vendor name.</p>
+                <div id="postCreatePurposeSelectBlock" style="display:none;margin-bottom:14px;">
+                    <label style="display:grid;gap:6px;font-size:14px;">
+                        <span>Source project</span>
+                        <select id="postCreatePurposeSource" style="max-width:100%;"></select>
+                    </label>
+                </div>
+                <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+                    <button type="button" class="btn-secondary" id="postCreatePurposeNoBtn">No</button>
+                    <button type="button" class="btn-secondary" id="postCreatePurposeYesBtn">Yes</button>
+                    <button type="button" id="postCreatePurposeProceedBtn" style="display:none;">Proceed</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay post-create-flow-modal" id="appModalPostCreateInvite" role="dialog" aria-modal="true" aria-labelledby="appModalPostCreateInviteTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalPostCreateInviteTitle">Invite users</h2>
+            </div>
+            <div class="app-modal-body">
+                <p id="postCreateInviteSubtitle" style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;"></p>
+                <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.5;">Would you like to invite users to your organization?</p>
+                <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+                    <button type="button" class="btn-secondary" id="postCreateInviteNoBtn">No</button>
+                    <button type="button" id="postCreateInviteYesBtn">Yes</button>
                 </div>
             </div>
         </div>

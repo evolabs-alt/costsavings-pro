@@ -265,6 +265,65 @@ class ProjectService
     }
 
     /**
+     * Copies purpose_of_subscription from source project rows onto target project rows with matching vendor names.
+     *
+     * @return array{success:bool, updated?:int, matched?:int, skipped_no_purpose?:int, error?:string}
+     */
+    public static function copyPurposesBetweenProjects(
+        PDO $pdo,
+        int $orgId,
+        int $fromProjectId,
+        int $toProjectId,
+        int $userId,
+        string $role
+    ): array {
+        if ($fromProjectId <= 0 || $toProjectId <= 0 || $fromProjectId === $toProjectId) {
+            return ['success' => false, 'error' => 'Invalid source or target project.'];
+        }
+        $purposeMap = self::purposeMapFromProject($pdo, $orgId, $fromProjectId);
+        if (count($purposeMap) === 0) {
+            return ['success' => true, 'updated' => 0, 'matched' => 0, 'skipped_no_purpose' => 0];
+        }
+        $st = $pdo->prepare(
+            'SELECT id, vendor_name FROM cost_calculator_items WHERE org_id = ? AND project_id = ?'
+        );
+        $st->execute([$orgId, $toProjectId]);
+        $updates = [];
+        $matched = 0;
+        $skippedNoPurpose = 0;
+        while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+            $norm = VendorService::normalizeVendorName((string) ($row['vendor_name'] ?? ''));
+            if ($norm === '') {
+                continue;
+            }
+            if (!isset($purposeMap[$norm])) {
+                ++$skippedNoPurpose;
+                continue;
+            }
+            $updates[] = [
+                'id' => (int) ($row['id'] ?? 0),
+                'purpose' => $purposeMap[$norm],
+            ];
+            ++$matched;
+        }
+        if (count($updates) === 0) {
+            return [
+                'success' => true,
+                'updated' => 0,
+                'matched' => 0,
+                'skipped_no_purpose' => $skippedNoPurpose,
+            ];
+        }
+        $result = VendorService::updatePurposesForVisibleRows($pdo, $orgId, $toProjectId, $userId, $role, $updates);
+        return [
+            'success' => true,
+            'updated' => (int) ($result['updated'] ?? 0),
+            'matched' => $matched,
+            'skipped_no_purpose' => $skippedNoPurpose,
+        ];
+    }
+
+    /**
      * @param array<int,int> $memberIds
      * @return array<int,int>
      */
