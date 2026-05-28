@@ -956,8 +956,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             top: 0;
         }
 
+        .vendor-raw-results th.amount-col,
+        .vendor-raw-results td.amount-col {
+            text-align: right;
+        }
+
         .cost-calculator-grid .cost-per-period {
             min-width: 100px;
+        }
+
+        .cost-calculator-grid .cost-input {
+            text-align: right;
         }
 
         .cost-calculator-grid .frequency {
@@ -4752,16 +4761,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             return;
                         }
                         var html = '<div class="vendor-raw-results"><table><thead><tr>'
-                            + '<th>Date</th><th>Amount</th><th>Transaction Type</th><th>Account</th><th>Memo/Description</th>'
+                            + '<th>Date</th><th class="amount-col">Amount</th><th>Transaction Type</th><th>Account</th><th>Memo/Description</th>'
                             + '</tr></thead><tbody>';
                         rows.forEach(function(row) {
                             var date = aiEscapeHtml(String(row.transaction_date || ''));
-                            var amountNum = parseFloat(row.amount || 0);
-                            var amount = '$' + (isNaN(amountNum) ? '0.00' : amountNum.toFixed(2));
+                            var amount = aiEscapeHtml(formatMoneyInteger(row.amount || 0));
                             var type = aiEscapeHtml(String(row.transaction_type || ''));
                             var account = aiEscapeHtml(String(row.account || ''));
                             var memo = aiEscapeHtml(String(row.memo || ''));
-                            html += '<tr><td>' + date + '</td><td>' + amount + '</td><td>' + type + '</td><td>' + account + '</td><td>' + memo + '</td></tr>';
+                            html += '<tr><td>' + date + '</td><td class="amount-col">' + amount + '</td><td>' + type + '</td><td>' + account + '</td><td>' + memo + '</td></tr>';
                         });
                         html += '</tbody></table></div>';
                         body.innerHTML = html;
@@ -5235,7 +5243,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         </div>
                     </td>
                     <td class="cost-per-period">
-                        <input type="text" name="cost[]" class="cost-input" placeholder="$0.00" data-row="${rowCount}" />
+                        <input type="text" name="cost[]" class="cost-input" placeholder="$0" data-row="${rowCount}" />
                     </td>
                     <td class="frequency">
                         <select name="frequency[]" class="frequency-select" data-row="${rowCount}">
@@ -5249,7 +5257,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         </select>
                     </td>
                     <td class="annual-cost">
-                        <span class="annual-cost-display" data-row="${rowCount}">$0.00</span>
+                        <span class="annual-cost-display" data-row="${rowCount}">$0</span>
                     </td>
                     <td class="manager-col">
                         <select class="manager-select" data-row="${rowCount}" ${IS_ADMIN ? '' : 'disabled'}>
@@ -5330,7 +5338,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const frequencySelect = row.querySelector('.frequency-select');
                 const annualCostDisplay = row.querySelector('.annual-cost-display');
                 
-                const cost = parseFloat(costInput.value.replace(/[^0-9.-]/g, '')) || 0;
+                const cost = parseMoneyInput(costInput.value);
                 const frequency = frequencySelect.value;
                 
                 let multiplier = 0;
@@ -5344,7 +5352,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
                 
                 const annualCost = cost * multiplier;
-                annualCostDisplay.textContent = formatCurrency(annualCost);
+                annualCostDisplay.textContent = formatMoneyInteger(annualCost);
                 
                 calculateAnnualSavings();
             }
@@ -5384,6 +5392,21 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 document.getElementById('confirmedSavings').textContent = formatCurrency(totalConfirmedSavings);
             }
             
+            function formatMoneyInteger(amount) {
+                var n = Math.round(Number(amount) || 0);
+                var sign = n < 0 ? '-' : '';
+                var abs = Math.abs(n);
+                return sign + '$' + String(abs).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            }
+
+            function parseMoneyInput(value) {
+                return parseFloat(String(value || '').replace(/[^0-9.-]/g, '')) || 0;
+            }
+
+            function formatCostInputValue(amount) {
+                return formatMoneyInteger(amount);
+            }
+
             function formatCurrency(amount) {
                 return '$' + amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
             }
@@ -5404,13 +5427,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             // Format cost input as currency on blur
             document.addEventListener('blur', function(e) {
                 if (e.target.classList.contains('cost-input')) {
-                    let value = e.target.value.replace(/[^0-9.-]/g, '');
-                    if (value) {
-                        const numValue = parseFloat(value);
-                        if (!isNaN(numValue)) {
-                            e.target.value = '$' + numValue.toFixed(2);
-                            calculateAnnualCost(e);
-                        }
+                    const numValue = parseMoneyInput(e.target.value);
+                    if (numValue) {
+                        e.target.value = formatCostInputValue(numValue);
+                        calculateAnnualCost(e);
                     }
                 }
             }, true);
@@ -5931,7 +5951,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     var cbtn = lastRow.querySelector('.vendor-chat-btn');
                                     if (cbtn) setVendorChatUnreadBadge(cbtn, uch);
 
-                                    if (costInput) costInput.value = item.cost_per_period > 0 ? '$' + parseFloat(item.cost_per_period).toFixed(2) : '';
+                                    if (costInput) costInput.value = item.cost_per_period > 0 ? formatCostInputValue(item.cost_per_period) : '';
                                     if (frequencySelect) frequencySelect.value = item.frequency || '';
                                     if (mgr) {
                                         const mid = item.manager_user_id ? String(item.manager_user_id) : '';
@@ -6706,16 +6726,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 return;
                             }
                             var html = '<div class="vendor-raw-results"><table><thead><tr>'
-                                + '<th>Date</th><th>Amount</th><th>Transaction Type</th><th>Account</th><th>Memo/Description</th>'
+                                + '<th>Date</th><th class="amount-col">Amount</th><th>Transaction Type</th><th>Account</th><th>Memo/Description</th>'
                                 + '</tr></thead><tbody>';
                             rows.forEach(function(row) {
                                 var date = aiEscapeHtml(String(row.transaction_date || ''));
-                                var amountNum = parseFloat(row.amount || 0);
-                                var amount = '$' + (isNaN(amountNum) ? '0.00' : amountNum.toFixed(2));
+                                var amount = aiEscapeHtml(formatMoneyInteger(row.amount || 0));
                                 var type = aiEscapeHtml(String(row.transaction_type || ''));
                                 var account = aiEscapeHtml(String(row.account || ''));
                                 var memo = aiEscapeHtml(String(row.memo || ''));
-                                html += '<tr><td>' + date + '</td><td>' + amount + '</td><td>' + type + '</td><td>' + account + '</td><td>' + memo + '</td></tr>';
+                                html += '<tr><td>' + date + '</td><td class="amount-col">' + amount + '</td><td>' + type + '</td><td>' + account + '</td><td>' + memo + '</td></tr>';
                             });
                             html += '</tbody></table></div>';
                             body.innerHTML = html;
