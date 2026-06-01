@@ -43,13 +43,14 @@ class VendorPurposeService
             return true;
         }
         $lower = strtolower($base);
+
         if (preg_match('/\binsufficient\b/i', $base)) {
             return true;
         }
         if (preg_match('/\bnot\s+enough\s+(?:data|information|info|search|results?)\b/i', $base)) {
             return true;
         }
-        if (preg_match('/\b(?:unable|could\s+not)\s+to\s+(?:determine|find|identify|locate|verify)\b/i', $base)) {
+        if (preg_match('/\b(?:unable|could\s+not|cannot|can\'t|did\s+not)\s+to\s+(?:determine|find|identify|locate|verify|confirm|establish)\b/i', $base)) {
             return true;
         }
         if (preg_match('/\bno\s+(?:reliable\s+)?(?:information|info|data)\b/i', $base)) {
@@ -58,10 +59,38 @@ class VendorPurposeService
         if (preg_match('/\b(?:information|data)\s+(?:is\s+)?(?:not\s+)?unavailable\b/i', $base)) {
             return true;
         }
-        if (preg_match('/\black\s+of\s+(?:information|data)\b/i', $base)) {
+        if (preg_match('/\black\s+of\s+(?:information|data|evidence|results?)\b/i', $base)) {
             return true;
         }
         if (preg_match('/\b(?:limited|insufficient)\s+(?:search\s+)?results?\b/i', $base)) {
+            return true;
+        }
+
+        // "No … found/identified/matched" templates (e.g. no clear vendor identified in search results).
+        if (preg_match('/\bno\s+(?:[\w\/-]+\s+){0,28}?(?:found|identified|matched|located|determined|available)\b/i', $base)) {
+            return true;
+        }
+        if (preg_match('/\bno\s+(?:clear|specific|relevant|credible|active|definitive|conclusive|direct|reliable|public|actionable|verifiable)\b/i', $base)) {
+            return true;
+        }
+        if (preg_match('/\bnot\s+(?:found|identified|available|determined|matched|located|verified)\b/i', $base)) {
+            return true;
+        }
+
+        // Search-result disclaimers ("… in search results", "from search results").
+        if (preg_match('/\bsearch\s+results?\b/i', $base)
+            && preg_match('/\b(?:no|not|without|unable|could\s+not|cannot|can\'t|did\s+not|unidentified|unverified)\b/i', $base)) {
+            return true;
+        }
+        if (preg_match('/\b(?:found|identified|matched|located)\s+(?:in|from|within)\s+(?:the\s+)?(?:provided\s+)?search\s+results?\b/i', $base)) {
+            return true;
+        }
+        if (preg_match('/\b(?:purpose|vendor|service|business|company)\s+(?:was\s+)?not\s+(?:found|identified)\b/i', $base)) {
+            return true;
+        }
+
+        // Generic non-answers ("Unknown publishing company", "Unknown vendor").
+        if (preg_match('/^unknown\b/i', $base)) {
             return true;
         }
 
@@ -72,6 +101,7 @@ class VendorPurposeService
             'not found',
             'no data',
             'no information',
+            'unknown',
         ], true);
     }
 

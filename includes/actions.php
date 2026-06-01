@@ -701,6 +701,9 @@ function handleAiUsageStats() {
 
 function handleAutoPopulatePurpose() {
     header('Content-Type: application/json');
+    if (function_exists('set_time_limit')) {
+        @set_time_limit(300);
+    }
     if (empty($_SESSION['user_id'])) {
         echo json_encode(['success' => false, 'error' => 'Not logged in']);
         exit;
@@ -764,7 +767,7 @@ function handleAutoPopulatePurpose() {
         $id = (int) ($r['id'] ?? 0);
         $purpose = trim((string) ($r['purpose'] ?? ''));
         $source = (string) ($r['source'] ?? '');
-        if ($id <= 0 || $purpose === '') {
+        if ($id <= 0 || $purpose === '' || VendorPurposeService::isUnusablePurposeText($purpose)) {
             continue;
         }
         $stored = VendorPurposeService::formatAutoPopulatedPurposeForStorage($purpose, $source);
@@ -784,10 +787,11 @@ function handleAutoPopulatePurpose() {
             continue;
         }
         $rid = (int) ($r['id'] ?? 0);
-        $copy = $r;
-        if (isset($updateById[$rid])) {
-            $copy['purpose'] = $updateById[$rid];
+        if ($rid <= 0 || !isset($updateById[$rid])) {
+            continue;
         }
+        $copy = $r;
+        $copy['purpose'] = $updateById[$rid];
         $resolvedForClient[] = $copy;
     }
     echo json_encode([

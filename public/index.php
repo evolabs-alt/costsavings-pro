@@ -4322,39 +4322,54 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 openAppModal('appModalPostCreateInvite');
             }
 
-            function runAutoPopulatePurposeForProject(projectId) {
-                var pid = parseInt(projectId, 10) || 0;
-                if (!pid) {
-                    return Promise.resolve({ success: false });
-                }
-                var fd2 = new FormData();
-                fd2.append('action', 'auto_populate_purpose');
-                fd2.append('project_id', String(pid));
-                fd2.append('rows', '[]');
-                return fetch(window.location.href, { method: 'POST', body: fd2, credentials: 'same-origin' })
-                    .then(function(r) { return r.json(); })
-                    .catch(function() { return { success: false }; });
-            }
-
             function proceedToPurposeOrInvite() {
-                fetchActiveProjectVendorCount().then(function(count) {
+                var projectId = parseInt(postProjectCreateFlow.projectId, 10) || parseInt(currentActiveProjectId, 10) || 0;
+                if (!projectId) {
+                    postProjectCreateFlow.step = 'invite';
+                    openPostCreateInviteModal();
+                    return;
+                }
+                var syncActive = postJson({ action: 'project_set_active', project_id: projectId }).then(function(d) {
+                    if (d && d.success) {
+                        currentActiveProjectId = projectId;
+                    }
+                }).catch(function() {});
+                syncActive.then(function() {
+                    return fetchActiveProjectVendorCount();
+                }).then(function(count) {
                     if (count === 0) {
                         showSnackbar('Import vendors first to copy from another project or use AI purpose populate.', 'info');
                         postProjectCreateFlow.step = 'invite';
                         openPostCreateInviteModal();
                         return;
                     }
-                    var projectId = postProjectCreateFlow.projectId || currentActiveProjectId || 0;
-                    showSnackbar('Populating purposes with AI…', 'info');
-                    runAutoPopulatePurposeForProject(projectId).then(function() {
+                    showSnackbar('Populating purposes with AI… This may take a minute.', 'info');
+                    var populateFn = typeof window.runProjectAutoPopulatePurpose === 'function'
+                        ? window.runProjectAutoPopulatePurpose
+                        : null;
+                    var populatePromise = populateFn
+                        ? populateFn(projectId, { silent: true })
+                        : Promise.resolve({ success: false, error: 'Auto populate is not ready yet.' });
+                    return populatePromise.then(function(d) {
+                        if (!d || !d.success) {
+                            showSnackbar((d && d.error) || 'Purpose auto-populate failed.', 'error');
+                        } else {
+                            var updated = typeof d.updated === 'number' ? d.updated : 0;
+                            if (updated > 0) {
+                                showSnackbar('Populated purposes for ' + updated + ' vendor(s).', 'success');
+                            } else if (!(d.resolved && d.resolved.length)) {
+                                showSnackbar('No purposes could be resolved for these vendors.', 'info');
+                            }
+                        }
                         return loadCalculatorData();
-                    }).then(function() {
-                        postProjectCreateFlow.step = 'purpose';
-                        openPostCreatePurposeModal();
-                    }).catch(function() {
-                        postProjectCreateFlow.step = 'purpose';
-                        openPostCreatePurposeModal();
                     });
+                }).then(function() {
+                    postProjectCreateFlow.step = 'purpose';
+                    openPostCreatePurposeModal();
+                }).catch(function() {
+                    showSnackbar('Could not finish purpose setup.', 'error');
+                    postProjectCreateFlow.step = 'purpose';
+                    openPostCreatePurposeModal();
                 });
             }
 
@@ -6970,8 +6985,22 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     if (!opts.silent) {
                         setAiUiBusy(true);
                     }
-                    return fetch(window.location.href, { method: 'POST', body: fd2 })
-                        .then(function(r) { return r.json(); })
+                    return fetch(window.location.href, { method: 'POST', body: fd2, credentials: 'same-origin' })
+                        .then(function(r) {
+                            return r.text().then(function(text) {
+                                var d = null;
+                                try {
+                                    d = text ? JSON.parse(text) : null;
+                                } catch (parseErr) {
+                                    d = null;
+                                }
+                                if (!r.ok) {
+                                    var err = (d && d.error) ? d.error : ('Request failed (HTTP ' + r.status + ').');
+                                    throw new Error(err);
+                                }
+                                return d;
+                            });
+                        })
                         .then(function(d) {
                             if (!opts.silent) {
                                 setAiUiBusy(false);
@@ -6985,13 +7014,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             }
                             return d || { success: false, error: 'Invalid response.' };
                         })
-                        .catch(function() {
+                        .catch(function(err) {
                             if (!opts.silent) {
                                 setAiUiBusy(false);
                             }
-                            return { success: false, error: 'Auto populate request failed.' };
+                            return {
+                                success: false,
+                                error: (err && err.message) ? err.message : 'Auto populate request failed.',
+                            };
                         });
                 }
+                window.runProjectAutoPopulatePurpose = runProjectAutoPopulatePurpose;
+                window.applyPurposeLookupResultsToUi = applyPurposeLookupResultsToUi;
                 function triggerAutoPopulatePurpose() {
                     appendAiChatMessage('user', 'Auto populate purpose');
                     setAiUiBusy(true);
