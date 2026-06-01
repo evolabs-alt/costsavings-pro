@@ -715,10 +715,34 @@ function handleAutoPopulatePurpose() {
     $orgId = (int) $_SESSION['org_id'];
     $userId = (int) $_SESSION['user_id'];
     $role = (string) ($_SESSION['role'] ?? 'member');
-    $activeProjectId = requireActiveProjectId($pdo);
-    if ($activeProjectId === null) {
+    $projectId = (int) ($_POST['project_id'] ?? 0);
+    if ($projectId <= 0) {
+        $activeProjectId = requireActiveProjectId($pdo);
+        $projectId = $activeProjectId ?? 0;
+    }
+    if ($projectId <= 0) {
         echo json_encode(['success' => false, 'error' => 'No active project selected']);
         exit;
+    }
+    if (!ProjectService::canAccessProject($pdo, $projectId, $orgId, $userId, $role)) {
+        echo json_encode(['success' => false, 'error' => 'You do not have access to this project.']);
+        exit;
+    }
+
+    if (count($rows) === 0) {
+        $st = $pdo->prepare(
+            'SELECT id, vendor_name FROM cost_calculator_items
+             WHERE org_id = ? AND project_id = ? AND TRIM(vendor_name) <> \'\''
+        );
+        $st->execute([$orgId, $projectId]);
+        $rows = [];
+        while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+            $id = (int) ($row['id'] ?? 0);
+            $vendorName = trim((string) ($row['vendor_name'] ?? ''));
+            if ($id > 0 && $vendorName !== '') {
+                $rows[] = ['id' => $id, 'vendor_name' => $vendorName];
+            }
+        }
     }
 
     $resolved = VendorPurposeService::resolveForVisibleRows($pdo, $orgId, $rows);
@@ -749,7 +773,7 @@ function handleAutoPopulatePurpose() {
         }
         $updates[] = ['id' => $id, 'purpose' => $stored];
     }
-    $apply = VendorService::updatePurposesForVisibleRows($pdo, $orgId, $activeProjectId, $userId, $role, $updates);
+    $apply = VendorService::updatePurposesForVisibleRows($pdo, $orgId, $projectId, $userId, $role, $updates);
     $updateById = [];
     foreach ($updates as $u) {
         $updateById[(int) $u['id']] = $u['purpose'];
@@ -1333,7 +1357,54 @@ function handleCopyProjectPurposes() {
         echo json_encode(['success' => false, 'error' => 'You do not have access to one or both projects.']);
         exit;
     }
+    $includeBlankPurposes = !empty($_POST['include_blank_purposes']);
     $result = ProjectService::copyPurposesBetweenProjects(
+        $pdo,
+        $orgId,
+        $fromProjectId,
+        $toProjectId,
+        $userId,
+        $role,
+        $includeBlankPurposes
+    );
+    echo json_encode($result);
+    exit;
+}
+
+function handleCopyProjectChats() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
+        exit;
+    }
+    if (!OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
+        echo json_encode(['success' => false, 'error' => 'Only a super admin can copy project chats.']);
+        exit;
+    }
+    $fromProjectId = (int) ($_POST['from_project_id'] ?? 0);
+    $toProjectId = (int) ($_POST['to_project_id'] ?? 0);
+    if ($fromProjectId <= 0 || $toProjectId <= 0) {
+        echo json_encode(['success' => false, 'error' => 'Source and target projects are required.']);
+        exit;
+    }
+    if ($fromProjectId === $toProjectId) {
+        echo json_encode(['success' => false, 'error' => 'Source and target projects must be different.']);
+        exit;
+    }
+    $pdo = getDBConnection();
+    $userId = (int) $_SESSION['user_id'];
+    $orgId = (int) ($_SESSION['org_id'] ?? 0);
+    $role = (string) ($_SESSION['role'] ?? 'member');
+    if ($orgId < 1) {
+        echo json_encode(['success' => false, 'error' => 'Organization could not be loaded.']);
+        exit;
+    }
+    if (!ProjectService::canAccessProject($pdo, $fromProjectId, $orgId, $userId, $role)
+        || !ProjectService::canAccessProject($pdo, $toProjectId, $orgId, $userId, $role)) {
+        echo json_encode(['success' => false, 'error' => 'You do not have access to one or both projects.']);
+        exit;
+    }
+    $result = VendorChatService::copyChatsBetweenProjects(
         $pdo,
         $orgId,
         $fromProjectId,

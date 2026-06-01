@@ -212,9 +212,9 @@ class ProjectService
     }
 
     /**
-     * @return array<int,string>
+     * @return array<string, string> normalized vendor name => purpose
      */
-    public static function purposeMapFromProject(PDO $pdo, int $orgId, int $projectId): array
+    public static function purposeMapFromProject(PDO $pdo, int $orgId, int $projectId, bool $includeBlankPurposes = false): array
     {
         if ($projectId <= 0) {
             return [];
@@ -227,10 +227,13 @@ class ProjectService
         $st->execute([$orgId, $projectId]);
         $map = [];
         while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
-            $name = StringUtil::strtolower((string) ($row['vendor_name'] ?? ''));
+            $norm = VendorService::normalizeVendorName((string) ($row['vendor_name'] ?? ''));
+            if ($norm === '') {
+                continue;
+            }
             $purpose = trim((string) ($row['purpose_of_subscription'] ?? ''));
-            if ($name !== '' && $purpose !== '') {
-                $map[$name] = $purpose;
+            if ($purpose !== '' || $includeBlankPurposes) {
+                $map[$norm] = $purpose;
             }
         }
         return $map;
@@ -275,12 +278,13 @@ class ProjectService
         int $fromProjectId,
         int $toProjectId,
         int $userId,
-        string $role
+        string $role,
+        bool $includeBlankPurposes = false
     ): array {
         if ($fromProjectId <= 0 || $toProjectId <= 0 || $fromProjectId === $toProjectId) {
             return ['success' => false, 'error' => 'Invalid source or target project.'];
         }
-        $purposeMap = self::purposeMapFromProject($pdo, $orgId, $fromProjectId);
+        $purposeMap = self::purposeMapFromProject($pdo, $orgId, $fromProjectId, $includeBlankPurposes);
         if (count($purposeMap) === 0) {
             return ['success' => true, 'updated' => 0, 'matched' => 0, 'skipped_no_purpose' => 0];
         }

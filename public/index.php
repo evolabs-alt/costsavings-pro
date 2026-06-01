@@ -125,6 +125,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'copy_project_purposes':
                 handleCopyProjectPurposes();
                 break;
+            case 'copy_project_chats':
+                handleCopyProjectChats();
+                break;
         }
     }
 }
@@ -2058,6 +2061,27 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             background: linear-gradient(135deg, #6b7280, #4b5563); 
         }
         
+        .org-role-info-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
+            padding: 0;
+            border: 1px solid #d1d5db;
+            border-radius: 50%;
+            background: #f9fafb;
+            color: #4b5563;
+            font-size: 14px;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .org-role-info-btn:hover,
+        .org-role-info-btn:focus-visible {
+            background: #eef2ff;
+            border-color: #a5b4fc;
+            color: #3730a3;
+        }
         .btn-secondary:hover { 
             box-shadow: 0 8px 25px rgba(107, 114, 128, 0.3);
         }
@@ -4198,7 +4222,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 dataMode: 'upload_after',
                 previousActiveProjectId: 0,
                 step: null,
-                importCompleted: false
+                importCompleted: false,
+                copyPurposes: null,
+                copyChats: null,
+                overwriteBlankPurposes: false
             };
 
             function postCreateFlowStepLabel(stepNum) {
@@ -4226,14 +4253,38 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             }
 
             function resetPostCreatePurposeModal() {
-                var block = document.getElementById('postCreatePurposeSelectBlock');
+                postProjectCreateFlow.copyPurposes = null;
+                postProjectCreateFlow.copyChats = null;
+                postProjectCreateFlow.overwriteBlankPurposes = false;
+                var questionsBlock = document.getElementById('postCreateCopyQuestionsBlock');
+                var sourceBlock = document.getElementById('postCreatePurposeSelectBlock');
+                var continueBtn = document.getElementById('postCreateCopyContinueBtn');
                 var proceedBtn = document.getElementById('postCreatePurposeProceedBtn');
-                var yesBtn = document.getElementById('postCreatePurposeYesBtn');
                 var select = document.getElementById('postCreatePurposeSource');
-                if (block) block.style.display = 'none';
+                var blankCb = document.getElementById('postCreateOverwriteBlankPurposes');
+                if (questionsBlock) questionsBlock.style.display = '';
+                if (sourceBlock) sourceBlock.style.display = 'none';
+                if (continueBtn) continueBtn.style.display = '';
                 if (proceedBtn) proceedBtn.style.display = 'none';
-                if (yesBtn) yesBtn.style.display = '';
                 if (select) select.innerHTML = '';
+                if (blankCb) blankCb.checked = false;
+                document.querySelectorAll('input[name="postCreateCopyPurposes"]').forEach(function(r) { r.checked = false; });
+                document.querySelectorAll('input[name="postCreateCopyChats"]').forEach(function(r) { r.checked = false; });
+            }
+
+            function postCreateCopyAnswersChosen() {
+                var purposeRadio = document.querySelector('input[name="postCreateCopyPurposes"]:checked');
+                var chatRadio = document.querySelector('input[name="postCreateCopyChats"]:checked');
+                return !!(purposeRadio && chatRadio);
+            }
+
+            function readPostCreateCopyAnswers() {
+                var purposeRadio = document.querySelector('input[name="postCreateCopyPurposes"]:checked');
+                var chatRadio = document.querySelector('input[name="postCreateCopyChats"]:checked');
+                postProjectCreateFlow.copyPurposes = purposeRadio ? purposeRadio.value === 'yes' : null;
+                postProjectCreateFlow.copyChats = chatRadio ? chatRadio.value === 'yes' : null;
+                var blankCb = document.getElementById('postCreateOverwriteBlankPurposes');
+                postProjectCreateFlow.overwriteBlankPurposes = blankCb ? !!blankCb.checked : false;
             }
 
             function populatePostCreatePurposeSourceSelect() {
@@ -4271,16 +4322,39 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 openAppModal('appModalPostCreateInvite');
             }
 
+            function runAutoPopulatePurposeForProject(projectId) {
+                var pid = parseInt(projectId, 10) || 0;
+                if (!pid) {
+                    return Promise.resolve({ success: false });
+                }
+                var fd2 = new FormData();
+                fd2.append('action', 'auto_populate_purpose');
+                fd2.append('project_id', String(pid));
+                fd2.append('rows', '[]');
+                return fetch(window.location.href, { method: 'POST', body: fd2, credentials: 'same-origin' })
+                    .then(function(r) { return r.json(); })
+                    .catch(function() { return { success: false }; });
+            }
+
             function proceedToPurposeOrInvite() {
                 fetchActiveProjectVendorCount().then(function(count) {
                     if (count === 0) {
-                        showSnackbar('Import vendors first to copy purposes from another project.', 'info');
+                        showSnackbar('Import vendors first to copy from another project or use AI purpose populate.', 'info');
                         postProjectCreateFlow.step = 'invite';
                         openPostCreateInviteModal();
                         return;
                     }
-                    postProjectCreateFlow.step = 'purpose';
-                    openPostCreatePurposeModal();
+                    var projectId = postProjectCreateFlow.projectId || currentActiveProjectId || 0;
+                    showSnackbar('Populating purposes with AI…', 'info');
+                    runAutoPopulatePurposeForProject(projectId).then(function() {
+                        return loadCalculatorData();
+                    }).then(function() {
+                        postProjectCreateFlow.step = 'purpose';
+                        openPostCreatePurposeModal();
+                    }).catch(function() {
+                        postProjectCreateFlow.step = 'purpose';
+                        openPostCreatePurposeModal();
+                    });
                 });
             }
 
@@ -4354,29 +4428,38 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         advancePostProjectCreateFlow();
                     });
                 }
-                var purposeNo = document.getElementById('postCreatePurposeNoBtn');
-                var purposeYes = document.getElementById('postCreatePurposeYesBtn');
+                var copyContinueBtn = document.getElementById('postCreateCopyContinueBtn');
                 var purposeProceed = document.getElementById('postCreatePurposeProceedBtn');
-                if (purposeNo) {
-                    purposeNo.addEventListener('click', function() {
-                        closeAppModal('appModalPostCreatePurpose');
-                        postProjectCreateFlow.step = 'purpose_done';
-                        advancePostProjectCreateFlow();
-                    });
-                }
-                if (purposeYes) {
-                    purposeYes.addEventListener('click', function() {
+                if (copyContinueBtn) {
+                    copyContinueBtn.addEventListener('click', function() {
+                        if (!postCreateCopyAnswersChosen()) {
+                            showSnackbar('Answer both questions to continue.', 'error');
+                            return;
+                        }
+                        readPostCreateCopyAnswers();
+                        if (!postProjectCreateFlow.copyPurposes && !postProjectCreateFlow.copyChats) {
+                            closeAppModal('appModalPostCreatePurpose');
+                            postProjectCreateFlow.step = 'purpose_done';
+                            advancePostProjectCreateFlow();
+                            return;
+                        }
                         populatePostCreatePurposeSourceSelect().then(function() {
                             var select = document.getElementById('postCreatePurposeSource');
                             if (!select || select.options.length === 0) {
-                                showSnackbar('No other projects are available to copy purposes from.', 'info');
+                                showSnackbar('No other projects are available to copy from.', 'info');
                                 return;
                             }
-                            var block = document.getElementById('postCreatePurposeSelectBlock');
+                            var questionsBlock = document.getElementById('postCreateCopyQuestionsBlock');
+                            var sourceBlock = document.getElementById('postCreatePurposeSelectBlock');
                             var proceedBtn = document.getElementById('postCreatePurposeProceedBtn');
-                            purposeYes.style.display = 'none';
-                            if (block) block.style.display = 'grid';
+                            var blankRow = document.getElementById('postCreateBlankPurposeRow');
+                            if (questionsBlock) questionsBlock.style.display = 'none';
+                            if (sourceBlock) sourceBlock.style.display = 'grid';
+                            if (copyContinueBtn) copyContinueBtn.style.display = 'none';
                             if (proceedBtn) proceedBtn.style.display = '';
+                            if (blankRow) {
+                                blankRow.style.display = postProjectCreateFlow.copyPurposes ? '' : 'none';
+                            }
                         });
                     });
                 }
@@ -4388,24 +4471,50 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             showSnackbar('Select a source project.', 'error');
                             return;
                         }
+                        readPostCreateCopyAnswers();
+                        var toId = postProjectCreateFlow.projectId;
                         purposeProceed.disabled = true;
-                        postJson({
-                            action: 'copy_project_purposes',
-                            from_project_id: fromId,
-                            to_project_id: postProjectCreateFlow.projectId
-                        }).then(function(d) {
-                            if (!d || !d.success) {
-                                showSnackbar((d && d.error) || 'Could not copy purposes.', 'error');
-                                return;
-                            }
-                            var matched = parseInt(d.matched || 0, 10) || 0;
-                            showSnackbar('Copied purposes for ' + matched + ' vendor(s).', 'success');
-                            loadCalculatorData();
+                        var chain = Promise.resolve();
+                        if (postProjectCreateFlow.copyPurposes) {
+                            chain = chain.then(function() {
+                                return postJson({
+                                    action: 'copy_project_purposes',
+                                    from_project_id: fromId,
+                                    to_project_id: toId,
+                                    include_blank_purposes: postProjectCreateFlow.overwriteBlankPurposes ? 1 : 0
+                                }).then(function(d) {
+                                    if (!d || !d.success) {
+                                        throw new Error((d && d.error) || 'Could not copy purposes.');
+                                    }
+                                    var matched = parseInt(d.matched || 0, 10) || 0;
+                                    showSnackbar('Copied purposes for ' + matched + ' vendor(s).', 'success');
+                                });
+                            });
+                        }
+                        if (postProjectCreateFlow.copyChats) {
+                            chain = chain.then(function() {
+                                return postJson({
+                                    action: 'copy_project_chats',
+                                    from_project_id: fromId,
+                                    to_project_id: toId
+                                }).then(function(d) {
+                                    if (!d || !d.success) {
+                                        throw new Error((d && d.error) || 'Could not copy chats.');
+                                    }
+                                    var msgs = parseInt(d.copied_messages || 0, 10) || 0;
+                                    var vendors = parseInt(d.matched_vendors || 0, 10) || 0;
+                                    showSnackbar('Copied ' + msgs + ' chat message(s) across ' + vendors + ' vendor(s).', 'success');
+                                });
+                            });
+                        }
+                        chain.then(function() {
+                            return loadCalculatorData();
+                        }).then(function() {
                             closeAppModal('appModalPostCreatePurpose');
                             postProjectCreateFlow.step = 'purpose_done';
                             advancePostProjectCreateFlow();
-                        }).catch(function() {
-                            showSnackbar('Could not copy purposes.', 'error');
+                        }).catch(function(err) {
+                            showSnackbar(err && err.message ? err.message : 'Copy failed.', 'error');
                         }).finally(function() {
                             purposeProceed.disabled = false;
                         });
@@ -4445,7 +4554,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     action: 'project_create',
                     project_name: projectName,
                     start_date: (document.getElementById('projectWizardStartDate') || {}).value || '',
-                    end_date: (document.getElementById('projectWizardEndDate') || {}).value || '',
+                    end_date: '',
                     member_ids: memberIds,
                     copy_from_active: (dataMode === 'copy_from_active' ? 1 : 0),
                     source_project_id: (dataMode === 'copy_from_active' ? (currentActiveProjectId || 0) : 0),
@@ -6214,6 +6323,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             // Initialize: Load data on page load; flush debounced saves before refresh/navigation
             document.addEventListener('DOMContentLoaded', function() {
                 initAppModals();
+                var orgRoleInfoBtn = document.getElementById('orgRoleInfoBtn');
+                if (orgRoleInfoBtn) {
+                    orgRoleInfoBtn.addEventListener('click', function() {
+                        openAppModal('appModalOrgRolesInfo');
+                    });
+                }
                 initPostProjectCreateFlow();
                 initNavSubmenus();
                 initPurposeColumnToggle();
@@ -6849,30 +6964,48 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         });
                 }
                 fetchAiUsageStats();
-                function triggerAutoPopulatePurpose() {
-                    appendAiChatMessage('user', 'Auto populate purpose');
-                    var rows = collectVisibleVendorRowsForPurposeLookup();
-                    if (!rows.length) {
-                        appendAiChatMessage('assistant', 'No saved vendor rows found on screen.', false);
-                        showSnackbar('No saved vendor rows found on screen.', 'error');
-                        return;
+                function runProjectAutoPopulatePurpose(projectId, opts) {
+                    opts = opts || {};
+                    var pid = parseInt(projectId, 10) || currentActiveProjectId || 0;
+                    if (!pid) {
+                        return Promise.resolve({ success: false, error: 'No project selected.' });
                     }
                     var fd2 = new FormData();
                     fd2.append('action', 'auto_populate_purpose');
-                    fd2.append('rows', JSON.stringify(rows));
-                    setAiUiBusy(true);
-                    fetch(window.location.href, { method: 'POST', body: fd2 })
+                    fd2.append('project_id', String(pid));
+                    fd2.append('rows', '[]');
+                    if (!opts.silent) {
+                        setAiUiBusy(true);
+                    }
+                    return fetch(window.location.href, { method: 'POST', body: fd2 })
                         .then(function(r) { return r.json(); })
                         .then(function(d) {
-                            setAiUiBusy(false);
-                            if (d.success) {
-                                var appliedRows = filterResolvedRowsById(d.resolved || [], d.applied_ids || []);
-                                applyPurposeLookupResultsToUi(appliedRows);
-                                if (appliedRows.length) {
-                                    // Programmatic textarea updates do not fire blur/input listeners; persist immediately.
+                            if (!opts.silent) {
+                                setAiUiBusy(false);
+                            }
+                            if (d && d.success) {
+                                applyPurposeLookupResultsToUi(d.resolved || []);
+                                if ((d.resolved || []).length) {
                                     clearTimeout(saveTimeout);
                                     saveCalculatorData({ silent: true });
                                 }
+                            }
+                            return d || { success: false, error: 'Invalid response.' };
+                        })
+                        .catch(function() {
+                            if (!opts.silent) {
+                                setAiUiBusy(false);
+                            }
+                            return { success: false, error: 'Auto populate request failed.' };
+                        });
+                }
+                function triggerAutoPopulatePurpose() {
+                    appendAiChatMessage('user', 'Auto populate purpose');
+                    setAiUiBusy(true);
+                    runProjectAutoPopulatePurpose(currentActiveProjectId, { silent: true })
+                        .then(function(d) {
+                            setAiUiBusy(false);
+                            if (d.success) {
                                 var unresolved = Array.isArray(d.unresolved) ? d.unresolved.length : 0;
                                 var applied = typeof d.applied === 'number' ? d.applied : 0;
                                 var changed = typeof d.updated === 'number' ? d.updated : 0;
@@ -6894,14 +7027,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 );
                                 showSnackbar('Purpose auto-populate completed.', 'success');
                             } else {
-                                appendAiChatMessage('assistant', d.error || 'Auto populate failed.', false);
-                                showSnackbar(d.error || 'Auto populate failed.', 'error');
+                                var errMsg = d.error || 'Auto populate failed.';
+                                if (errMsg.indexOf('No') === 0 || errMsg.indexOf('no ') === 0) {
+                                    errMsg = 'No vendor rows found for this project.';
+                                }
+                                appendAiChatMessage('assistant', errMsg, false);
+                                showSnackbar(errMsg, 'error');
                             }
-                        })
-                        .catch(function() {
-                            setAiUiBusy(false);
-                            appendAiChatMessage('assistant', 'Request failed.', false);
-                            showSnackbar('Auto populate request failed.', 'error');
                         });
                 }
 
@@ -7009,7 +7141,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         </label>
                         <?php if (!empty($invite_can_choose_org_role)): ?>
                         <label style="display:grid;gap:6px;font-size:14px;">
-                            <span>Organization role</span>
+                            <span style="display:flex;align-items:center;gap:6px;">
+                                Organization role
+                                <button type="button" class="org-role-info-btn" id="orgRoleInfoBtn" aria-label="About organization roles" title="About organization roles">&#9432;</button>
+                            </span>
                             <select name="invite_role" style="max-width:280px;">
                                 <option value="member">Member</option>
                                 <option value="admin">Administrator (cannot create projects)</option>
@@ -7024,6 +7159,28 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             </div>
         </div>
     </div>
+
+    <?php if (!empty($invite_can_choose_org_role)): ?>
+    <div class="app-modal-overlay" id="appModalOrgRolesInfo" role="dialog" aria-modal="true" aria-labelledby="appModalOrgRolesInfoTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1" style="max-width:480px;">
+            <div class="app-modal-header">
+                <h2 id="appModalOrgRolesInfoTitle">Organization roles</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <?php foreach (\CostSavings\OrgRole::roleDescriptionsForInvite() as $roleDesc): ?>
+                <div style="margin-bottom:14px;">
+                    <strong style="display:block;font-size:14px;margin-bottom:4px;"><?php echo htmlspecialchars($roleDesc['title']); ?></strong>
+                    <p style="margin:0;font-size:14px;color:#374151;line-height:1.5;"><?php echo htmlspecialchars($roleDesc['description']); ?></p>
+                    <?php if (!empty($roleDesc['note'])): ?>
+                    <p style="margin:6px 0 0;font-size:13px;color:#6b7280;"><?php echo htmlspecialchars($roleDesc['note']); ?></p>
+                    <?php endif; ?>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <div class="app-modal-overlay" id="appModalMembersManage" role="dialog" aria-modal="true" aria-labelledby="appModalMembersManageTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
@@ -7105,9 +7262,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <label>Start date
                         <input type="date" id="projectWizardStartDate" required>
                     </label>
-                    <label>When will you start this project again?
-                        <input type="date" id="projectWizardEndDate">
-                    </label>
                     <label>
                         <input type="radio" name="projectWizardDataMode" id="projectWizardDataModeUpload" value="upload_after" checked>
                         I will upload data after creating this project.
@@ -7172,20 +7326,34 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
     <div class="app-modal-overlay post-create-flow-modal" id="appModalPostCreatePurpose" role="dialog" aria-modal="true" aria-labelledby="appModalPostCreatePurposeTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
-                <h2 id="appModalPostCreatePurposeTitle">Copy purposes</h2>
+                <h2 id="appModalPostCreatePurposeTitle">Copy from previous project</h2>
             </div>
             <div class="app-modal-body">
                 <p id="postCreatePurposeSubtitle" style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;"></p>
-                <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.5;">Would you like to copy purposes from a previous project? Purposes are matched by vendor name.</p>
+                <div id="postCreateCopyQuestionsBlock">
+                    <fieldset style="border:none;margin:0 0 14px;padding:0;">
+                        <legend style="font-size:14px;color:#374151;margin-bottom:8px;">Copy purposes from a previous project? Purposes are matched by vendor name.</legend>
+                        <label style="margin-right:14px;font-size:14px;"><input type="radio" name="postCreateCopyPurposes" value="yes"> Yes</label>
+                        <label style="font-size:14px;"><input type="radio" name="postCreateCopyPurposes" value="no"> No</label>
+                    </fieldset>
+                    <fieldset style="border:none;margin:0 0 14px;padding:0;">
+                        <legend style="font-size:14px;color:#374151;margin-bottom:8px;">Copy vendor chats from a previous project? Chats are matched by vendor name.</legend>
+                        <label style="margin-right:14px;font-size:14px;"><input type="radio" name="postCreateCopyChats" value="yes"> Yes</label>
+                        <label style="font-size:14px;"><input type="radio" name="postCreateCopyChats" value="no"> No</label>
+                    </fieldset>
+                </div>
                 <div id="postCreatePurposeSelectBlock" style="display:none;margin-bottom:14px;">
-                    <label style="display:grid;gap:6px;font-size:14px;">
+                    <label style="display:grid;gap:6px;font-size:14px;margin-bottom:10px;">
                         <span>Source project</span>
                         <select id="postCreatePurposeSource" style="max-width:100%;"></select>
                     </label>
+                    <label id="postCreateBlankPurposeRow" style="display:none;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;">
+                        <input type="checkbox" id="postCreateOverwriteBlankPurposes" style="margin-top:3px;">
+                        <span>Overwrite blank purposes from the selected project</span>
+                    </label>
                 </div>
                 <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
-                    <button type="button" class="btn-secondary" id="postCreatePurposeNoBtn">No</button>
-                    <button type="button" class="btn-secondary" id="postCreatePurposeYesBtn">Yes</button>
+                    <button type="button" id="postCreateCopyContinueBtn">Continue</button>
                     <button type="button" id="postCreatePurposeProceedBtn" style="display:none;">Proceed</button>
                 </div>
             </div>

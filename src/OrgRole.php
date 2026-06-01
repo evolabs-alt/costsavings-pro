@@ -40,4 +40,28 @@ final class OrgRole
                 return 'Member';
         }
     }
+
+    /**
+     * Role titles and descriptions for the invite UI help modal.
+     *
+     * @return array<int, array{title:string, description:string, note?:string}>
+     */
+    public static function roleDescriptionsForInvite(): array
+    {
+        return [
+            [
+                'title' => 'Member',
+                'description' => 'Sees public vendor rows plus confidential rows they manage. Can edit purposes on rows they manage.',
+            ],
+            [
+                'title' => 'Administrator',
+                'description' => 'Can invite users (as Member unless the inviter is a Super admin), manage members, and work with public vendor rows org-wide. Cannot create or delete projects.',
+            ],
+            [
+                'title' => 'Super admin',
+                'description' => 'Full organization access: create and delete projects, all vendor rows, choose invite role, and copy project data.',
+                'note' => 'Not assignable via invite; shown for context.',
+            ],
+        ];
+    }
 }

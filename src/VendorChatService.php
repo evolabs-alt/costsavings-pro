@@ -215,6 +215,106 @@ class VendorChatService
     }
 
     /**
+     * Copies vendor line chat threads from one project to another, matched by vendor name.
+     * Preserves original author, message text, and timestamps.
+     *
+     * @return array{success:bool, copied_messages?:int, matched_vendors?:int, error?:string}
+     */
+    public static function copyChatsBetweenProjects(
+        PDO $pdo,
+        int $orgId,
+        int $fromProjectId,
+        int $toProjectId,
+        int $userId,
+        string $role
+    ): array {
+        if ($fromProjectId <= 0 || $toProjectId <= 0 || $fromProjectId === $toProjectId) {
+            return ['success' => false, 'error' => 'Invalid source or target project.'];
+        }
+
+        $sourceMap = self::vendorItemIdsByNormalizedName($pdo, $orgId, $fromProjectId, $role);
+        $targetMap = self::vendorItemIdsByNormalizedName($pdo, $orgId, $toProjectId, $role);
+        if ($sourceMap === [] || $targetMap === []) {
+            return ['success' => true, 'copied_messages' => 0, 'matched_vendors' => 0];
+        }
+
+        $matchedVendors = 0;
+        $copiedMessages = 0;
+
+        try {
+            $selectMsgs = $pdo->prepare(
+                'SELECT user_id, username_snapshot, message, created_at
+                 FROM vendor_item_chat_messages
+                 WHERE org_id = ? AND project_id = ? AND vendor_item_id = ?
+                 ORDER BY created_at ASC, id ASC'
+            );
+            $insertMsg = $pdo->prepare(
+                'INSERT INTO vendor_item_chat_messages
+                (org_id, project_id, vendor_item_id, user_id, username_snapshot, message, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)'
+            );
+
+            foreach ($sourceMap as $norm => $sourceItemId) {
+                if (!isset($targetMap[$norm])) {
+                    continue;
+                }
+                $targetItemId = $targetMap[$norm];
+                $selectMsgs->execute([$orgId, $fromProjectId, $sourceItemId]);
+                $messages = $selectMsgs->fetchAll(PDO::FETCH_ASSOC);
+                if ($messages === []) {
+                    continue;
+                }
+                ++$matchedVendors;
+                foreach ($messages as $msg) {
+                    $insertMsg->execute([
+                        $orgId,
+                        $toProjectId,
+                        $targetItemId,
+                        (int) ($msg['user_id'] ?? 0),
+                        (string) ($msg['username_snapshot'] ?? ''),
+                        (string) ($msg['message'] ?? ''),
+                        (string) ($msg['created_at'] ?? date('Y-m-d H:i:s')),
+                    ]);
+                    ++$copiedMessages;
+                }
+            }
+
+            return [
+                'success' => true,
+                'copied_messages' => $copiedMessages,
+                'matched_vendors' => $matchedVendors,
+            ];
+        } catch (PDOException $e) {
+            error_log('VendorChatService::copyChatsBetweenProjects: ' . $e->getMessage());
+
+            return ['success' => false, 'error' => 'Could not copy vendor chats.'];
+        }
+    }
+
+    /**
+     * @return array<string, int> normalized vendor name => item id
+     */
+    private static function vendorItemIdsByNormalizedName(PDO $pdo, int $orgId, int $projectId, string $role): array
+    {
+        $visibilityFilter = OrgRole::isSuperAdmin($role) ? '' : ' AND visibility = \'public\'';
+        $st = $pdo->prepare(
+            'SELECT id, vendor_name FROM cost_calculator_items
+             WHERE org_id = ? AND project_id = ?' . $visibilityFilter
+        );
+        $st->execute([$orgId, $projectId]);
+        $map = [];
+        while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+            $norm = VendorService::normalizeVendorName((string) ($row['vendor_name'] ?? ''));
+            $id = (int) ($row['id'] ?? 0);
+            if ($norm !== '' && $id > 0) {
+                $map[$norm] = $id;
+            }
+        }
+
+        return $map;
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     private static function loadAccessibleVendorItem(
