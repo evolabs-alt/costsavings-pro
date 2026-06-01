@@ -319,7 +319,7 @@ class AiService
                     $aliases[] = $s;
                 }
             }
-            if ($vendor === '' || $purpose === '') {
+            if ($vendor === '' || $purpose === '' || VendorPurposeService::isUnusablePurposeText($purpose)) {
                 continue;
             }
             while (count($aliases) < 5) {

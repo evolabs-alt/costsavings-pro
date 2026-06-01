@@ -34,6 +34,48 @@ class VendorPurposeService
     }
 
     /**
+     * True when AI/cache returned a placeholder instead of a real purpose (field should stay blank).
+     */
+    public static function isUnusablePurposeText(string $purpose): bool
+    {
+        $base = trim(self::stripAiPurposeUiPrefix($purpose));
+        if ($base === '') {
+            return true;
+        }
+        $lower = strtolower($base);
+        if (preg_match('/\binsufficient\b/i', $base)) {
+            return true;
+        }
+        if (preg_match('/\bnot\s+enough\s+(?:data|information|info|search|results?)\b/i', $base)) {
+            return true;
+        }
+        if (preg_match('/\b(?:unable|could\s+not)\s+to\s+(?:determine|find|identify|locate|verify)\b/i', $base)) {
+            return true;
+        }
+        if (preg_match('/\bno\s+(?:reliable\s+)?(?:information|info|data)\b/i', $base)) {
+            return true;
+        }
+        if (preg_match('/\b(?:information|data)\s+(?:is\s+)?(?:not\s+)?unavailable\b/i', $base)) {
+            return true;
+        }
+        if (preg_match('/\black\s+of\s+(?:information|data)\b/i', $base)) {
+            return true;
+        }
+        if (preg_match('/\b(?:limited|insufficient)\s+(?:search\s+)?results?\b/i', $base)) {
+            return true;
+        }
+
+        return in_array($lower, [
+            'n/a',
+            'na',
+            'none',
+            'not found',
+            'no data',
+            'no information',
+        ], true);
+    }
+
+    /**
      * Format purpose for `cost_calculator_items.purpose_of_subscription` after auto-populate.
      */
     public static function formatAutoPopulatedPurposeForStorage(string $purpose, string $source): string
@@ -85,7 +127,7 @@ class VendorPurposeService
         foreach ($targets as $t) {
             $canon = self::canon($t['vendor_name']);
             $purpose = ($canon !== '' && isset($detailByCanon[$canon])) ? $detailByCanon[$canon] : '';
-            if ($purpose !== '') {
+            if ($purpose !== '' && !self::isUnusablePurposeText($purpose)) {
                 $resolved[] = [
                     'id' => $t['id'],
                     'vendor_name' => $t['vendor_name'],
@@ -106,6 +148,7 @@ class VendorPurposeService
         }
         $lookupNames = array_values(array_unique($lookupNames));
         $byCanonical = [];
+        $insufficientCanons = [];
         $lookupErrors = [];
         foreach (array_chunk($lookupNames, self::LIVE_LOOKUP_CHUNK_SIZE) as $chunk) {
             $ai = AiService::lookupVendorPurposesLive($chunk);
@@ -120,10 +163,16 @@ class VendorPurposeService
                 $vendor = trim((string) ($item['vendor'] ?? ''));
                 $purpose = trim((string) ($item['purpose'] ?? ''));
                 $aliases = isset($item['aliases']) && is_array($item['aliases']) ? $item['aliases'] : [];
-                if ($vendor === '' || $purpose === '') {
+                if ($vendor === '') {
                     continue;
                 }
                 $canon = self::canon($vendor);
+                if ($purpose === '' || self::isUnusablePurposeText($purpose)) {
+                    if ($canon !== '') {
+                        $insufficientCanons[$canon] = true;
+                    }
+                    continue;
+                }
                 $names = [];
                 foreach ($aliases as $a) {
                     $s = trim((string) $a);
@@ -198,7 +247,8 @@ class VendorPurposeService
             $stillLeft = [];
             foreach ($left as $u) {
                 $rid = (int) ($u['id'] ?? 0);
-                if ($rid > 0 && ($existing[$rid] ?? '') === '') {
+                $canon = self::canon((string) ($u['vendor_name'] ?? ''));
+                if ($rid > 0 && ($existing[$rid] ?? '') === '' && !isset($insufficientCanons[$canon])) {
                     $resolved[] = [
                         'id' => $rid,
                         'vendor_name' => (string) ($u['vendor_name'] ?? ''),
@@ -242,7 +292,7 @@ class VendorPurposeService
             }
             while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
                 $purpose = trim((string) ($row['purpose'] ?? ''));
-                if ($purpose === '') {
+                if ($purpose === '' || self::isUnusablePurposeText($purpose)) {
                     continue;
                 }
                 foreach (['name_1', 'name_2', 'name_3', 'name_4', 'name_5'] as $col) {
@@ -266,6 +316,9 @@ class VendorPurposeService
      */
     private static function upsertVendorDetail(PDO $pdo, array $names, string $purpose): void
     {
+        if (self::isUnusablePurposeText($purpose)) {
+            return;
+        }
         $canonNames = array_map([self::class, 'canon'], $names);
         $sql = 'SELECT id, name_1, name_2, name_3, name_4, name_5 FROM vendor_detail';
         $st = $pdo->query($sql);
