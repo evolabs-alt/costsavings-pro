@@ -196,7 +196,11 @@ class AiService
 
         if (!$out['ok']) {
             return array_merge(
-                ['success' => false, 'error' => 'AI request failed.', 'remaining' => $remaining],
+                [
+                    'success' => false,
+                    'error' => (string) ($out['error'] ?? 'AI request failed.'),
+                    'remaining' => $remaining,
+                ],
                 self::usageFields($limit, $cnt)
             );
         }
@@ -245,7 +249,10 @@ class AiService
         $url = defined('PERPLEXITY_API_URL') ? PERPLEXITY_API_URL : 'https://api.perplexity.ai/chat/completions';
         $out = self::postChatCompletion($url, PERPLEXITY_API_KEY, $payload);
         if (!$out['ok']) {
-            return ['success' => false, 'error' => 'Live vendor purpose lookup failed.'];
+            return [
+                'success' => false,
+                'error' => (string) ($out['error'] ?? 'Live vendor purpose lookup failed.'),
+            ];
         }
 
         $parsed = self::parseVendorPurposeLookupJson((string) ($out['text'] ?? ''));
@@ -372,26 +379,29 @@ class AiService
      */
     private static function postChatCompletion(string $url, string $bearer, array $payload): array
     {
-        $body = json_encode($payload);
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_POST => true,
-            CURLOPT_HTTPHEADER => [
+        if (!\function_exists('curl_init')) {
+            return ['ok' => false, 'error' => 'PHP cURL extension is not enabled.'];
+        }
+        $body = \json_encode($payload);
+        $ch = \curl_init($url);
+        \curl_setopt_array($ch, [
+            \CURLOPT_POST => true,
+            \CURLOPT_HTTPHEADER => [
                 'Content-Type: application/json',
                 'Authorization: Bearer ' . $bearer,
             ],
-            CURLOPT_POSTFIELDS => $body,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 60,
+            \CURLOPT_POSTFIELDS => $body,
+            \CURLOPT_RETURNTRANSFER => true,
+            \CURLOPT_TIMEOUT => 60,
         ]);
-        $resp = curl_exec($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        $resp = \curl_exec($ch);
+        $code = (int) \curl_getinfo($ch, \CURLINFO_HTTP_CODE);
+        \curl_close($ch);
 
         if ($resp === false || $code >= 400) {
             return ['ok' => false];
         }
-        $data = json_decode($resp, true);
+        $data = \json_decode($resp, true);
         $text = $data['choices'][0]['message']['content'] ?? '';
 
         return ['ok' => true, 'text' => $text];

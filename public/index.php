@@ -4543,19 +4543,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const previousActiveProjectId = currentActiveProjectId || 0;
                 const dataMode = (document.querySelector('input[name="projectWizardDataMode"]:checked') || {}).value || 'upload_after';
                 const projectName = (document.getElementById('projectWizardName') || {}).value || '';
-                const memberSel = document.getElementById('projectWizardMembers');
-                const memberIds = [];
-                if (memberSel) {
-                    Array.from(memberSel.selectedOptions || []).forEach(function(opt) {
-                        memberIds.push(parseInt(opt.value, 10));
-                    });
-                }
                 const payload = {
                     action: 'project_create',
                     project_name: projectName,
                     start_date: (document.getElementById('projectWizardStartDate') || {}).value || '',
                     end_date: '',
-                    member_ids: memberIds,
+                    member_ids: [],
                     copy_from_active: (dataMode === 'copy_from_active' ? 1 : 0),
                     source_project_id: (dataMode === 'copy_from_active' ? (currentActiveProjectId || 0) : 0),
                 };
@@ -7270,14 +7263,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <input type="radio" name="projectWizardDataMode" id="projectWizardDataModeCopy" value="copy_from_active">
                         Copy data from current active project.
                     </label>
-                    <label>Assign members
-                        <select id="projectWizardMembers" multiple size="6">
-                            <?php foreach ($team_members_rows as $tm): ?>
-                            <option value="<?php echo (int) ($tm['id'] ?? 0); ?>"><?php echo htmlspecialchars(($tm['display_name'] ?? $tm['username'] ?? 'Member') . ' (' . ($tm['email'] ?? '') . ')'); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </label>
-                    <p style="margin:0;color:#4b5563;font-size:13px;">Optional: tag teammates here for your records. Everyone in your organization can access every project.</p>
                     <div style="display:flex;gap:8px;justify-content:flex-end;">
                         <button type="button" class="btn-secondary app-modal-close project-wizard-cancel-btn">Cancel</button>
                         <button type="submit">Create</button>
