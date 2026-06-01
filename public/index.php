@@ -3783,6 +3783,45 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             border-top-color: var(--color-primary);
         }
 
+        .btn-inline-spinner {
+            width: 16px;
+            height: 16px;
+            margin-right: 8px;
+            vertical-align: -3px;
+        }
+
+        button.is-loading {
+            pointer-events: none;
+            opacity: 0.88;
+        }
+
+        .app-ai-populate-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 10050;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.82);
+        }
+
+        .app-ai-populate-overlay[hidden] {
+            display: none !important;
+        }
+
+        .app-ai-populate-overlay-inner {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 22px;
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+            font-size: 15px;
+            color: #374151;
+        }
+
         .role-option input[type="radio"] {
             accent-color: var(--color-primary);
         }
@@ -3805,6 +3844,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         <button type="button" class="close-btn" onclick="hideSnackbar()">&times;</button>
     </div>
 
+    <div id="appAiPopulateOverlay" class="app-ai-populate-overlay" hidden aria-live="polite" aria-busy="false">
+        <div class="app-ai-populate-overlay-inner">
+            <span class="loading-spinner btn-inline-spinner" aria-hidden="true"></span>
+            <span id="appAiPopulateOverlayText">Populating purposes with AI…</span>
+        </div>
+    </div>
+
     <script>
     // Snackbar Functions
     function showSnackbar(message, type = '') {
@@ -3822,6 +3868,55 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
     function hideSnackbar() {
         const snackbar = document.getElementById('snackbar');
         snackbar.classList.remove('show');
+    }
+
+    function setButtonLoading(btn, isLoading, loadingLabel) {
+        if (!btn) return;
+        if (isLoading) {
+            if (!btn.dataset.idleHtml) {
+                btn.dataset.idleHtml = btn.innerHTML;
+            }
+            btn.disabled = true;
+            btn.classList.add('is-loading');
+            btn.setAttribute('aria-busy', 'true');
+            btn.innerHTML = '<span class="loading-spinner btn-inline-spinner" aria-hidden="true"></span><span>'
+                + (loadingLabel || 'Loading…') + '</span>';
+        } else {
+            btn.classList.remove('is-loading');
+            btn.removeAttribute('aria-busy');
+            if (btn.dataset.idleHtml) {
+                btn.innerHTML = btn.dataset.idleHtml;
+            }
+        }
+    }
+
+    function showAiPopulateLoader(message) {
+        var overlay = document.getElementById('appAiPopulateOverlay');
+        var textEl = document.getElementById('appAiPopulateOverlayText');
+        if (textEl) {
+            if (!textEl.dataset.defaultText) {
+                textEl.dataset.defaultText = textEl.textContent;
+            }
+            if (message) {
+                textEl.textContent = message;
+            }
+        }
+        if (overlay) {
+            overlay.hidden = false;
+            overlay.setAttribute('aria-busy', 'true');
+            document.body.style.overflow = 'hidden';
+        }
+    }
+
+    function hideAiPopulateLoader() {
+        var overlay = document.getElementById('appAiPopulateOverlay');
+        if (overlay) {
+            overlay.hidden = true;
+            overlay.setAttribute('aria-busy', 'false');
+        }
+        if (!document.querySelector('.app-modal-overlay.is-open')) {
+            document.body.style.overflow = '';
+        }
     }
     </script>
 
@@ -4344,6 +4439,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         return;
                     }
                     showSnackbar('Populating purposes with AI… This may take a minute.', 'info');
+                    showAiPopulateLoader('Populating purposes with AI…');
                     clearTimeout(saveTimeout);
                     var populateFn = typeof window.runProjectAutoPopulatePurpose === 'function'
                         ? window.runProjectAutoPopulatePurpose
@@ -4356,7 +4452,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             return Promise.resolve({ success: false, error: 'Auto populate is not ready yet.' });
                         }
                         // Server persists purposes; skip client save + grid reload avoids overwriting DB.
-                        return populateFn(projectId, { silent: true, skipClientSave: true });
+                        return populateFn(projectId, { silent: true, skipClientSave: true, hideLoader: true });
                     });
                     return populatePromise.then(function(d) {
                         if (!d || !d.success) {
@@ -4383,6 +4479,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     showSnackbar('Could not finish purpose setup.', 'error');
                     postProjectCreateFlow.step = 'purpose';
                     openPostCreatePurposeModal();
+                }).finally(function() {
+                    hideAiPopulateLoader();
                 });
             }
 
@@ -4852,11 +4950,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             showSnackbar('Select at least one account', 'error');
                             return;
                         }
-                        importBtn.disabled = true;
+                        setButtonLoading(importBtn, true, 'Importing…');
                         runCsvImport(pendingCsvFile, selected).then(function() {
                             pendingCsvFile = null;
                             closeAppModal(document.getElementById('appModalCsvAccounts'));
                         }).finally(function() {
+                            setButtonLoading(importBtn, false);
                             updateCsvAccountSelectionStatus();
                         });
                     });
@@ -6998,6 +7097,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     if (!opts.silent) {
                         setAiUiBusy(true);
                     }
+                    if (!opts.hideLoader) {
+                        showAiPopulateLoader('Populating purposes with AI…');
+                    }
                     return fetch(window.location.href, { method: 'POST', body: fd2, credentials: 'same-origin' })
                         .then(function(r) {
                             return r.text().then(function(text) {
@@ -7037,6 +7139,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 success: false,
                                 error: (err && err.message) ? err.message : 'Auto populate request failed.',
                             };
+                        })
+                        .finally(function() {
+                            if (!opts.hideLoader) {
+                                hideAiPopulateLoader();
+                            }
                         });
                 }
                 window.runProjectAutoPopulatePurpose = runProjectAutoPopulatePurpose;
@@ -7046,6 +7153,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 };
                 function triggerAutoPopulatePurpose() {
                     appendAiChatMessage('user', 'Auto populate purpose');
+                    showSnackbar('Populating purposes with AI… This may take a minute.', 'info');
                     setAiUiBusy(true);
                     runProjectAutoPopulatePurpose(currentActiveProjectId, { silent: true })
                         .then(function(d) {
