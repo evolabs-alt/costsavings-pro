@@ -4344,12 +4344,20 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         return;
                     }
                     showSnackbar('Populating purposes with AI… This may take a minute.', 'info');
+                    clearTimeout(saveTimeout);
                     var populateFn = typeof window.runProjectAutoPopulatePurpose === 'function'
                         ? window.runProjectAutoPopulatePurpose
                         : null;
-                    var populatePromise = populateFn
-                        ? populateFn(projectId, { silent: true })
-                        : Promise.resolve({ success: false, error: 'Auto populate is not ready yet.' });
+                    var waitForSaves = typeof window.waitForCalculatorSaveIdle === 'function'
+                        ? window.waitForCalculatorSaveIdle()
+                        : Promise.resolve();
+                    var populatePromise = waitForSaves.then(function() {
+                        if (!populateFn) {
+                            return Promise.resolve({ success: false, error: 'Auto populate is not ready yet.' });
+                        }
+                        // Server persists purposes; skip client save + grid reload avoids overwriting DB.
+                        return populateFn(projectId, { silent: true, skipClientSave: true });
+                    });
                     return populatePromise.then(function(d) {
                         if (!d || !d.success) {
                             showSnackbar((d && d.error) || 'Purpose auto-populate failed.', 'error');
@@ -4361,7 +4369,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 showSnackbar('No purposes could be resolved for these vendors.', 'info');
                             }
                         }
-                        return loadCalculatorData();
+                        return loadCalculatorData().then(function() {
+                            if (d && Array.isArray(d.resolved) && d.resolved.length
+                                && typeof window.applyPurposeLookupResultsToUi === 'function') {
+                                window.applyPurposeLookupResultsToUi(d.resolved);
+                            }
+                        });
                     });
                 }).then(function() {
                     postProjectCreateFlow.step = 'purpose';
@@ -7005,11 +7018,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             if (!opts.silent) {
                                 setAiUiBusy(false);
                             }
-                            if (d && d.success) {
+                            if (d && d.success && !opts.skipClientSave) {
                                 applyPurposeLookupResultsToUi(d.resolved || []);
                                 if ((d.resolved || []).length) {
                                     clearTimeout(saveTimeout);
-                                    saveCalculatorData({ silent: true });
+                                    return saveCalculatorData({ silent: true }).then(function() {
+                                        return d;
+                                    });
                                 }
                             }
                             return d || { success: false, error: 'Invalid response.' };
@@ -7026,6 +7041,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
                 window.runProjectAutoPopulatePurpose = runProjectAutoPopulatePurpose;
                 window.applyPurposeLookupResultsToUi = applyPurposeLookupResultsToUi;
+                window.waitForCalculatorSaveIdle = function() {
+                    return saveQueue || Promise.resolve();
+                };
                 function triggerAutoPopulatePurpose() {
                     appendAiChatMessage('user', 'Auto populate purpose');
                     setAiUiBusy(true);
