@@ -4871,7 +4871,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             function initPostProjectCreateFlow() {
                 var chooseBtn = document.getElementById('postCreateUploadChooseBtn');
                 var skipBtn = document.getElementById('postCreateUploadSkipBtn');
-                var csvIn = document.getElementById('csvImportInput');
+                var csvIn = document.getElementById('postCreateCsvImportInput');
+                if (csvIn && !csvIn.dataset.csvBound) {
+                    csvIn.dataset.csvBound = '1';
+                    csvIn.addEventListener('change', function() {
+                        handleCsvFileSelected(this.files[0], this);
+                    });
+                }
                 if (chooseBtn && csvIn) {
                     chooseBtn.addEventListener('click', function() {
                         closeAppModal('appModalPostCreateUpload');
@@ -8513,10 +8519,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             </div>
             <div class="app-modal-body">
                 <p id="postCreateUploadSubtitle" style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;"></p>
-                <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.5;">Upload a QuickBooks or vendor CSV to populate vendors for this project.</p>
+                <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.5;">Upload a QuickBooks export CSV (Transaction Detail by Account or Transaction List by Vendor).</p>
                 <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
                     <button type="button" class="btn-secondary" id="postCreateUploadSkipBtn">Skip for now</button>
                     <button type="button" id="postCreateUploadChooseBtn">Choose CSV file</button>
+                    <input type="file" id="postCreateCsvImportInput" accept=".csv,text/csv" style="display:none;">
                 </div>
             </div>
         </div>
