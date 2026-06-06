@@ -5,6 +5,7 @@ require_once __DIR__ . '/pro_log.php';
 use CostSavings\AiService;
 use CostSavings\CsvImport;
 use CostSavings\ExportService;
+use CostSavings\MappedCsvImport;
 use CostSavings\OrgRole;
 use CostSavings\ProjectService;
 use CostSavings\VendorChatService;
@@ -486,6 +487,84 @@ function parseSelectedAccountsFromPost(): array {
     return $selected;
 }
 
+/**
+ * @return array<string, string|null>
+ */
+function parseColumnMappingFromPost(): array {
+    if (!isset($_POST['column_mapping']) || !is_string($_POST['column_mapping'])) {
+        return [];
+    }
+    $decoded = json_decode($_POST['column_mapping'], true);
+    if (!is_array($decoded)) {
+        return [];
+    }
+
+    $mapping = [];
+    foreach ($decoded as $key => $value) {
+        $fieldKey = trim((string) $key);
+        if ($fieldKey === '') {
+            continue;
+        }
+        if ($value === null) {
+            $mapping[$fieldKey] = null;
+            continue;
+        }
+        $mapping[$fieldKey] = trim((string) $value);
+    }
+
+    return $mapping;
+}
+
+/**
+ * @param array<int, array<string, mixed>> $summaryRows
+ * @param array<int, array<string, mixed>> $rawRows
+ * @return array<string, mixed>
+ */
+function importParsedVendorCsvData(array $summaryRows, array $rawRows, ?int $skippedRows = null): array {
+    $pdo = getDBConnection();
+    $orgId = (int) $_SESSION['org_id'];
+    $uid = (int) $_SESSION['user_id'];
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        return ['success' => false, 'error' => 'No active project selected'];
+    }
+    $purposeMap = ProjectService::purposeMapFromProject($pdo, $orgId, $activeProjectId);
+    $items = [];
+    foreach ($summaryRows as $row) {
+        $items[] = [
+            'vendor_name' => $row['vendor_name'],
+            'cost_per_period' => $row['cost_per_period'],
+            'frequency' => $row['frequency'],
+            'annual_cost' => $row['annual_cost'],
+            'status' => VendorService::STATUS_PENDING,
+            'cancel_keep' => 'Keep',
+            'cancelled_status' => 0,
+            'purpose_of_subscription' => $purposeMap[VendorService::normalizeVendorName((string) $row['vendor_name'])] ?? '',
+            'notes' => '',
+            'visibility' => 'confidential',
+            'manager_user_id' => null,
+            'cancellation_deadline' => null,
+            'last_payment_date' => $row['last_payment_date'],
+        ];
+    }
+    $res = VendorService::appendImportedRows($pdo, $orgId, $activeProjectId, $uid, $items);
+    if (!($res['success'] ?? false)) {
+        return $res;
+    }
+    $batchId = bin2hex(random_bytes(12));
+    $rawRes = VendorService::appendRawTransactions($pdo, $orgId, $activeProjectId, $uid, $batchId, $rawRows);
+    if (!($rawRes['success'] ?? false)) {
+        return $rawRes;
+    }
+    $res['raw_inserted'] = (int) ($rawRes['inserted'] ?? 0);
+    $res['upload_batch_id'] = $batchId;
+    if ($skippedRows !== null) {
+        $res['skipped_rows'] = $skippedRows;
+    }
+
+    return $res;
+}
+
 function handlePreviewCsvImport() {
     header('Content-Type: application/json');
     $upload = readUploadedCsvFile();
@@ -540,47 +619,51 @@ function handleImportVendorCsv() {
         echo json_encode(['success' => false, 'error' => 'No vendor blocks parsed']);
         exit;
     }
-    $pdo = getDBConnection();
-    $orgId = (int) $_SESSION['org_id'];
-    $uid = (int) $_SESSION['user_id'];
-    $activeProjectId = requireActiveProjectId($pdo);
-    if ($activeProjectId === null) {
-        echo json_encode(['success' => false, 'error' => 'No active project selected']);
+    echo json_encode(importParsedVendorCsvData($summaryRows, $rawRows));
+    exit;
+}
+
+function handlePreviewMappedCsvImport() {
+    header('Content-Type: application/json');
+    $upload = readUploadedCsvFile();
+    if (!($upload['success'] ?? false)) {
+        echo json_encode($upload);
         exit;
     }
-    $purposeMap = ProjectService::purposeMapFromProject($pdo, $orgId, $activeProjectId);
-    $items = [];
-    foreach ($summaryRows as $row) {
-        $items[] = [
-            'vendor_name' => $row['vendor_name'],
-            'cost_per_period' => $row['cost_per_period'],
-            'frequency' => $row['frequency'],
-            'annual_cost' => $row['annual_cost'],
-            'status' => VendorService::STATUS_PENDING,
-            'cancel_keep' => 'Keep',
-            'cancelled_status' => 0,
-            'purpose_of_subscription' => $purposeMap[VendorService::normalizeVendorName((string) $row['vendor_name'])] ?? '',
-            'notes' => '',
-            'visibility' => 'confidential',
-            'manager_user_id' => null,
-            'cancellation_deadline' => null,
-            'last_payment_date' => $row['last_payment_date'],
-        ];
-    }
-    $res = VendorService::appendImportedRows($pdo, $orgId, $activeProjectId, $uid, $items);
-    if (!($res['success'] ?? false)) {
-        echo json_encode($res);
+    $raw = (string) ($upload['raw'] ?? '');
+    echo json_encode(MappedCsvImport::readPreview($raw));
+    exit;
+}
+
+function handleImportMappedVendorCsv() {
+    header('Content-Type: application/json');
+    $upload = readUploadedCsvFile();
+    if (!($upload['success'] ?? false)) {
+        echo json_encode($upload);
         exit;
     }
-    $batchId = bin2hex(random_bytes(12));
-    $rawRes = VendorService::appendRawTransactions($pdo, $orgId, $activeProjectId, $uid, $batchId, $rawRows);
-    if (!($rawRes['success'] ?? false)) {
-        echo json_encode($rawRes);
+    $raw = (string) ($upload['raw'] ?? '');
+    $preview = MappedCsvImport::readPreview($raw);
+    if (!($preview['success'] ?? false)) {
+        echo json_encode($preview);
         exit;
     }
-    $res['raw_inserted'] = (int) ($rawRes['inserted'] ?? 0);
-    $res['upload_batch_id'] = $batchId;
-    echo json_encode($res);
+    $columns = isset($preview['columns']) && is_array($preview['columns']) ? $preview['columns'] : [];
+    $mapping = parseColumnMappingFromPost();
+    $mappingError = MappedCsvImport::validateMapping($columns, $mapping);
+    if ($mappingError !== null) {
+        echo json_encode(['success' => false, 'error' => $mappingError]);
+        exit;
+    }
+    $parsed = MappedCsvImport::parse($raw, $mapping);
+    $summaryRows = isset($parsed['summary']) && is_array($parsed['summary']) ? $parsed['summary'] : [];
+    $rawRows = isset($parsed['raw']) && is_array($parsed['raw']) ? $parsed['raw'] : [];
+    if (count($summaryRows) === 0) {
+        echo json_encode(['success' => false, 'error' => 'No valid rows parsed']);
+        exit;
+    }
+    $skippedRows = isset($parsed['skipped_rows']) ? (int) $parsed['skipped_rows'] : 0;
+    echo json_encode(importParsedVendorCsvData($summaryRows, $rawRows, $skippedRows));
     exit;
 }
 

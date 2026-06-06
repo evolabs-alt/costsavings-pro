@@ -127,7 +127,7 @@ class CsvImport
         $summary = [];
         foreach ($payeeRows as $payee => $rows) {
             if (count($rows) > 0) {
-                $summary[] = self::buildVendorRow($payee, $rows);
+                $summary[] = self::buildVendorSummary($payee, $rows);
             }
         }
 
@@ -287,7 +287,7 @@ class CsvImport
 
             if ($first !== '' && !$isTotal) {
                 if ($currentVendor !== null && count($rows) > 0) {
-                    $vendors[] = self::buildVendorRow($currentVendor, $rows);
+                    $vendors[] = self::buildVendorSummary($currentVendor, $rows);
                 }
                 $currentVendor = $first;
                 $rows = [];
@@ -296,7 +296,7 @@ class CsvImport
 
             if ($isTotal) {
                 if ($currentVendor !== null && count($rows) > 0) {
-                    $vendors[] = self::buildVendorRow($currentVendor, $rows);
+                    $vendors[] = self::buildVendorSummary($currentVendor, $rows);
                 }
                 $currentVendor = null;
                 $rows = [];
@@ -344,7 +344,7 @@ class CsvImport
         }
 
         if ($currentVendor !== null && count($rows) > 0) {
-            $vendors[] = self::buildVendorRow($currentVendor, $rows);
+            $vendors[] = self::buildVendorSummary($currentVendor, $rows);
         }
 
         return ['summary' => $vendors, 'raw' => $rawRows];
@@ -394,7 +394,7 @@ class CsvImport
      * @param array<int, array{date:string, amount:float}> $rows
      * @return array{vendor_name:string,cost_per_period:float,frequency:string,annual_cost:float,last_payment_date:?string}
      */
-    private static function buildVendorRow(string $vendorName, array $rows): array
+    public static function buildVendorSummary(string $vendorName, array $rows): array
     {
         usort($rows, function ($a, $b) {
             return strcmp($a['date'], $b['date']);
@@ -489,18 +489,20 @@ class CsvImport
         return ((float) $nums[$mid] + (float) $nums[$mid + 1]) / 2.0;
     }
 
-    private static function parseDate(string $s): ?string
+    public static function parseDate(string $s): ?string
     {
         $s = trim($s);
-        $dt = \DateTimeImmutable::createFromFormat('m/d/Y', $s);
-        if ($dt === false) {
-            return null;
+        foreach (['m/d/Y', 'Y-m-d', 'n/j/Y', 'd/m/Y'] as $fmt) {
+            $dt = \DateTimeImmutable::createFromFormat($fmt, $s);
+            if ($dt !== false) {
+                return $dt->format('Y-m-d');
+            }
         }
 
-        return $dt->format('Y-m-d');
+        return null;
     }
 
-    private static function parseAmount(string $s): ?float
+    public static function parseAmount(string $s): ?float
     {
         $s = preg_replace('/[^\d.\-]/', '', $s);
         if ($s === '' || $s === '-' || $s === '.') {

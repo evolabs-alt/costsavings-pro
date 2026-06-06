@@ -89,6 +89,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'import_vendor_csv':
                 handleImportVendorCsv();
                 break;
+            case 'preview_mapped_csv':
+                handlePreviewMappedCsvImport();
+                break;
+            case 'import_mapped_csv':
+                handleImportMappedVendorCsv();
+                break;
             case 'ai_ask':
                 handleAiAsk();
                 break;
@@ -3507,6 +3513,72 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             white-space: nowrap;
         }
 
+        .csv-mapping-form {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .csv-mapping-row {
+            display: grid;
+            grid-template-columns: minmax(140px, 180px) 1fr;
+            gap: 10px;
+            align-items: center;
+            font-size: 14px;
+        }
+
+        .csv-mapping-row label {
+            font-weight: 500;
+            color: #374151;
+        }
+
+        .csv-mapping-row select {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid var(--color-border);
+            border-radius: 6px;
+            font-size: 14px;
+            background: #fff;
+        }
+
+        .csv-mapping-row .csv-mapping-required {
+            color: #dc2626;
+        }
+
+        .csv-sample-preview-wrap {
+            max-height: 200px;
+            overflow: auto;
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+
+        .csv-sample-preview {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .csv-sample-preview th,
+        .csv-sample-preview td {
+            border: 1px solid var(--color-border);
+            padding: 4px 6px;
+            text-align: left;
+            white-space: nowrap;
+        }
+
+        .csv-sample-preview th {
+            background: #f3f4f6;
+            font-weight: 600;
+        }
+
+        .csv-mapping-meta {
+            font-size: 13px;
+            color: #4b5563;
+            margin-bottom: 12px;
+        }
+
         .app-modal-body .settings-block {
             margin-bottom: 16px;
             padding: 12px;
@@ -4178,6 +4250,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 <li role="none">
                                     <button type="button" role="menuitem" class="app-submenu-item" id="appImportCsvBtn">Import CSV</button>
                                     <input type="file" id="csvImportInput" accept=".csv,text/csv" style="display:none;">
+                                </li>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" id="appImportMappedCsvBtn">Custom CSV import</button>
+                                    <input type="file" id="mappedCsvImportInput" accept=".csv,text/csv" style="display:none;">
                                 </li>
                             </ul>
                         </li>
@@ -5020,6 +5096,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
             }
             var pendingCsvFile = null;
+            var pendingMappedCsvFile = null;
+            var pendingMappedCsvFileName = '';
+            var pendingMappedTargetFields = [];
             function updateCsvAccountSelectionStatus() {
                 var list = document.getElementById('csvAccountList');
                 var status = document.getElementById('csvAccountSelectionStatus');
@@ -5209,6 +5288,214 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         }).finally(function() {
                             setButtonLoading(importBtn, false);
                             updateCsvAccountSelectionStatus();
+                        });
+                    });
+                }
+            }
+            function collectCsvMappingFromForm() {
+                var form = document.getElementById('csvMappingForm');
+                if (!form) return {};
+                var mapping = {};
+                form.querySelectorAll('select[data-field-key]').forEach(function(sel) {
+                    var key = sel.getAttribute('data-field-key') || '';
+                    if (!key) return;
+                    var val = sel.value || '';
+                    mapping[key] = val === '' ? null : val;
+                });
+                return mapping;
+            }
+            function validateCsvMapping(targetFields) {
+                var mapping = collectCsvMappingFromForm();
+                var used = {};
+                for (var i = 0; i < targetFields.length; i++) {
+                    var field = targetFields[i];
+                    var key = field.key || '';
+                    var required = !!field.required;
+                    var val = mapping[key];
+                    var col = (val === null || val === undefined) ? '' : String(val).trim();
+                    if (required && col === '') {
+                        return { valid: false, error: 'Map all required fields before importing.' };
+                    }
+                    if (col === '') continue;
+                    if (used[col]) {
+                        return { valid: false, error: 'Each CSV column can only be mapped once.' };
+                    }
+                    used[col] = true;
+                }
+                return { valid: true, mapping: mapping };
+            }
+            function updateCsvMappingImportButton(targetFields) {
+                var importBtn = document.getElementById('csvMappingImportBtn');
+                if (!importBtn) return;
+                var result = validateCsvMapping(targetFields || []);
+                importBtn.disabled = !result.valid;
+            }
+            function renderCsvSamplePreview(columns, sampleRows) {
+                var wrap = document.getElementById('csvSamplePreviewWrap');
+                if (!wrap) return;
+                if (!columns || !columns.length) {
+                    wrap.innerHTML = '<p style="padding:8px;margin:0;font-size:13px;color:#6b7280;">No preview available.</p>';
+                    return;
+                }
+                var html = '<table class="csv-sample-preview"><thead><tr>';
+                columns.forEach(function(col) {
+                    html += '<th>' + aiEscapeHtml(col) + '</th>';
+                });
+                html += '</tr></thead><tbody>';
+                (sampleRows || []).forEach(function(row) {
+                    html += '<tr>';
+                    columns.forEach(function(col, idx) {
+                        var cell = (row && row[idx] !== undefined) ? row[idx] : '';
+                        html += '<td>' + aiEscapeHtml(String(cell)) + '</td>';
+                    });
+                    html += '</tr>';
+                });
+                html += '</tbody></table>';
+                wrap.innerHTML = html;
+            }
+            function renderCsvMappingForm(targetFields, columns, suggestedMapping) {
+                var form = document.getElementById('csvMappingForm');
+                if (!form) return;
+                form.innerHTML = '';
+                (targetFields || []).forEach(function(field) {
+                    var row = document.createElement('div');
+                    row.className = 'csv-mapping-row';
+                    var label = document.createElement('label');
+                    label.setAttribute('for', 'csvMap_' + field.key);
+                    label.innerHTML = aiEscapeHtml(field.label || field.key) +
+                        (field.required ? ' <span class="csv-mapping-required">*</span>' : '');
+                    var select = document.createElement('select');
+                    select.id = 'csvMap_' + field.key;
+                    select.setAttribute('data-field-key', field.key);
+                    if (!field.required) {
+                        var blank = document.createElement('option');
+                        blank.value = '';
+                        blank.textContent = '— Not mapped —';
+                        select.appendChild(blank);
+                    } else {
+                        var placeholder = document.createElement('option');
+                        placeholder.value = '';
+                        placeholder.textContent = 'Select column…';
+                        placeholder.disabled = true;
+                        placeholder.selected = true;
+                        select.appendChild(placeholder);
+                    }
+                    (columns || []).forEach(function(col) {
+                        var opt = document.createElement('option');
+                        opt.value = col;
+                        opt.textContent = col;
+                        select.appendChild(opt);
+                    });
+                    var suggested = suggestedMapping && suggestedMapping[field.key];
+                    if (suggested && columns.indexOf(suggested) !== -1) {
+                        select.value = suggested;
+                    }
+                    select.addEventListener('change', function() {
+                        updateCsvMappingImportButton(targetFields);
+                    });
+                    row.appendChild(label);
+                    row.appendChild(select);
+                    form.appendChild(row);
+                });
+                updateCsvMappingImportButton(targetFields);
+            }
+            function runMappedCsvImport(file, mapping) {
+                if (!file) {
+                    showSnackbar('No file to import', 'error');
+                    return Promise.resolve();
+                }
+                var fd = new FormData();
+                fd.append('action', 'import_mapped_csv');
+                fd.append('csv_file', file);
+                fd.append('column_mapping', JSON.stringify(mapping || {}));
+                return fetch(window.location.href, { method: 'POST', body: fd })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (d.success) {
+                            var rawCount = parseInt(d.raw_inserted || 0, 10) || 0;
+                            var skipped = parseInt(d.skipped_rows || 0, 10) || 0;
+                            var msg = 'Imported ' + (d.inserted || 0) + ' vendor(s), ' + rawCount + ' raw transactions';
+                            if (skipped > 0) {
+                                msg += ' (' + skipped + ' row(s) skipped)';
+                            }
+                            showSnackbar(msg, 'success');
+                            return loadCalculatorData();
+                        }
+                        showSnackbar(d.error || 'Import failed', 'error');
+                    })
+                    .catch(function() {
+                        showSnackbar('Import failed', 'error');
+                    });
+            }
+            function handleMappedCsvFileSelected(file, inputEl) {
+                if (!file) return;
+                pendingMappedCsvFileName = file.name || 'CSV file';
+                var fd = new FormData();
+                fd.append('action', 'preview_mapped_csv');
+                fd.append('csv_file', file);
+                fetch(window.location.href, { method: 'POST', body: fd })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (!d.success) {
+                            showSnackbar(d.error || 'Could not read CSV', 'error');
+                            return;
+                        }
+                        pendingMappedCsvFile = file;
+                        pendingMappedTargetFields = d.target_fields || [];
+                        var meta = document.getElementById('csvMappingMeta');
+                        if (meta) {
+                            meta.textContent = pendingMappedCsvFileName + ' — ' +
+                                (d.row_count_estimate || 0) + ' data row(s) detected';
+                        }
+                        renderCsvMappingForm(d.target_fields || [], d.columns || [], d.suggested_mapping || {});
+                        renderCsvSamplePreview(d.columns || [], d.sample_rows || []);
+                        openAppModal('appModalCsvMapping');
+                    })
+                    .catch(function() {
+                        showSnackbar('Could not read CSV', 'error');
+                    })
+                    .finally(function() {
+                        if (inputEl) inputEl.value = '';
+                    });
+            }
+            function initMappedCsvImportUi() {
+                var mappedIn = document.getElementById('mappedCsvImportInput');
+                var mappedBtn = document.getElementById('appImportMappedCsvBtn');
+                if (mappedBtn && mappedIn && !mappedBtn.dataset.csvBound) {
+                    mappedBtn.dataset.csvBound = '1';
+                    mappedBtn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        mappedIn.click();
+                    });
+                }
+                if (mappedIn && !mappedIn.dataset.csvBound) {
+                    mappedIn.dataset.csvBound = '1';
+                    mappedIn.addEventListener('change', function() {
+                        handleMappedCsvFileSelected(this.files[0], this);
+                    });
+                }
+                var mappingModal = document.getElementById('appModalCsvMapping');
+                if (!mappingModal || mappingModal.dataset.csvBound) {
+                    return;
+                }
+                mappingModal.dataset.csvBound = '1';
+                var importBtn = document.getElementById('csvMappingImportBtn');
+                if (importBtn) {
+                    importBtn.addEventListener('click', function() {
+                        if (!pendingMappedCsvFile) return;
+                        var validation = validateCsvMapping(pendingMappedTargetFields);
+                        if (!validation.valid) {
+                            showSnackbar(validation.error || 'Complete the column mapping', 'error');
+                            return;
+                        }
+                        setButtonLoading(importBtn, true, 'Importing…');
+                        runMappedCsvImport(pendingMappedCsvFile, validation.mapping).then(function() {
+                            pendingMappedCsvFile = null;
+                            pendingMappedCsvFileName = '';
+                            pendingMappedTargetFields = [];
+                            closeAppModal(document.getElementById('appModalCsvMapping'));
+                        }).finally(function() {
+                            setButtonLoading(importBtn, false);
                         });
                     });
                 }
@@ -5410,6 +5697,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     if (e.key === 'Escape') closeAll();
                 });
                 initCsvImportUi();
+                initMappedCsvImportUi();
             }
             const TEAM_MEMBERS = <?php echo $team_members_json; ?>;
             const IS_ADMIN = <?php echo $is_admin ? 'true' : 'false'; ?>;
@@ -7178,6 +7466,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     }
                 });
                 initCsvImportUi();
+                initMappedCsvImportUi();
                 function aiEscapeHtml(s) {
                     var d = document.createElement('div');
                     d.textContent = s;
@@ -8220,6 +8509,26 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <div style="display:flex;gap:8px;justify-content:flex-end;">
                     <button type="button" class="btn-secondary app-modal-close" id="csvAccountCancelBtn">Cancel</button>
                     <button type="button" id="csvAccountImportBtn" disabled>Import selected</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay" id="appModalCsvMapping" role="dialog" aria-modal="true" aria-labelledby="appModalCsvMappingTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalCsvMappingTitle">Map CSV columns</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <p style="margin:0 0 10px;font-size:14px;color:#4b5563;line-height:1.5;">Map vendor, date, and amount (required). Transaction type, memo, and account are optional.</p>
+                <div class="csv-mapping-meta" id="csvMappingMeta"></div>
+                <div class="csv-mapping-form" id="csvMappingForm" role="group" aria-label="Column mapping"></div>
+                <p style="margin:0 0 6px;font-size:13px;font-weight:600;color:#374151;">Sample data</p>
+                <div class="csv-sample-preview-wrap" id="csvSamplePreviewWrap"></div>
+                <div style="display:flex;gap:8px;justify-content:flex-end;">
+                    <button type="button" class="btn-secondary app-modal-close" id="csvMappingCancelBtn">Cancel</button>
+                    <button type="button" id="csvMappingImportBtn" disabled>Import</button>
                 </div>
             </div>
         </div>
