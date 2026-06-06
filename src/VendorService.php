@@ -443,12 +443,17 @@ class VendorService
             $email = self::getUserEmail($pdo, $userId);
 
             $existing = $pdo->prepare(
-                'SELECT id FROM cost_calculator_items WHERE org_id = ? AND project_id = ? AND (manager_user_id IS NULL OR manager_user_id = ?)'
+                'SELECT id, vendor_name, cost_per_period, frequency, annual_cost
+                 FROM cost_calculator_items
+                 WHERE org_id = ? AND project_id = ? AND (manager_user_id IS NULL OR manager_user_id = ?)'
             );
             $existing->execute([$orgId, $projectId, $userId]);
             $allowedIds = [];
+            $spendById = [];
             while ($r = $existing->fetch(PDO::FETCH_ASSOC)) {
-                $allowedIds[(int) $r['id']] = true;
+                $id = (int) $r['id'];
+                $allowedIds[$id] = true;
+                $spendById[$id] = $r;
             }
 
             $payloadIds = [];
@@ -457,11 +462,6 @@ class VendorService
             $upd = $pdo->prepare(
                 'UPDATE cost_calculator_items SET vendor_name=?, cost_per_period=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?, user_email=?, user_id=?
                  WHERE id=? AND org_id=? AND project_id=? AND (manager_user_id IS NULL OR manager_user_id=?)'
-            );
-
-            $ins = $pdo->prepare(
-                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
 
             foreach ($items as $item) {
@@ -478,15 +478,16 @@ class VendorService
                 $rowId = isset($item['id']) ? (int) $item['id'] : 0;
 
                 if ($rowId > 0) {
-                    if (!isset($allowedIds[$rowId])) {
+                    if (!isset($allowedIds[$rowId]) || !isset($spendById[$rowId])) {
                         continue;
                     }
+                    $spend = $spendById[$rowId];
                     $payloadIds[$rowId] = true;
                     $upd->execute([
-                        $item['vendor_name'] ?? '',
-                        (float) ($item['cost_per_period'] ?? 0),
-                        $item['frequency'] ?? '',
-                        (float) ($item['annual_cost'] ?? 0),
+                        (string) ($spend['vendor_name'] ?? ''),
+                        (float) ($spend['cost_per_period'] ?? 0),
+                        (string) ($spend['frequency'] ?? ''),
+                        (float) ($spend['annual_cost'] ?? 0),
                         $status,
                         self::cancelKeepToDb($legacy['cancel_keep']),
                         $legacy['cancelled_status'],
@@ -500,25 +501,6 @@ class VendorService
                         $orgId,
                         $projectId,
                         $userId,
-                    ]);
-                } else {
-                    $ins->execute([
-                        $orgId,
-                        $projectId,
-                        $userId,
-                        $email,
-                        $userId,
-                        $item['vendor_name'] ?? '',
-                        (float) ($item['cost_per_period'] ?? 0),
-                        $item['frequency'] ?? '',
-                        (float) ($item['annual_cost'] ?? 0),
-                        $status,
-                        self::cancelKeepToDb($legacy['cancel_keep']),
-                        $legacy['cancelled_status'],
-                        $vis,
-                        $purpose,
-                        $deadline,
-                        $lastPay,
                     ]);
                 }
             }

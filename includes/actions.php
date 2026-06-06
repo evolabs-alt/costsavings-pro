@@ -776,10 +776,57 @@ function handleAutoPopulatePurpose() {
         }
         $updates[] = ['id' => $id, 'purpose' => $stored];
     }
+
+    $previousPurposeById = [];
+    if (count($updates) > 0) {
+        $ids = [];
+        foreach ($updates as $u) {
+            $rid = (int) ($u['id'] ?? 0);
+            if ($rid > 0) {
+                $ids[] = $rid;
+            }
+        }
+        if ($ids !== []) {
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $st = $pdo->prepare(
+                'SELECT id, purpose_of_subscription FROM cost_calculator_items
+                 WHERE org_id = ? AND project_id = ? AND id IN (' . $placeholders . ')'
+            );
+            $st->execute(array_merge([$orgId, $projectId], $ids));
+            while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+                $rid = (int) ($row['id'] ?? 0);
+                if ($rid > 0) {
+                    $previousPurposeById[$rid] = (string) ($row['purpose_of_subscription'] ?? '');
+                }
+            }
+        }
+    }
+
     $apply = VendorService::updatePurposesForVisibleRows($pdo, $orgId, $projectId, $userId, $role, $updates);
     $updateById = [];
     foreach ($updates as $u) {
         $updateById[(int) $u['id']] = $u['purpose'];
+    }
+
+    foreach ($updates as $u) {
+        $rowId = (int) ($u['id'] ?? 0);
+        if ($rowId <= 0) {
+            continue;
+        }
+        $newPurpose = (string) ($u['purpose'] ?? '');
+        $oldPurpose = $previousPurposeById[$rowId] ?? '';
+        if ($newPurpose === $oldPurpose) {
+            continue;
+        }
+        VendorChatService::appendActionLogEntry(
+            $pdo,
+            $orgId,
+            $projectId,
+            $rowId,
+            0,
+            'AI',
+            VendorChatService::formatPurposeChangeMessage($oldPurpose, $newPurpose, 'Updated')
+        );
     }
     $resolvedForClient = [];
     foreach (($resolved['resolved'] ?? []) as $r) {
@@ -944,17 +991,19 @@ function handleSaveCostCalculator() {
     $webhookUrl = loadOrganizationWebhookUrl($pdo, $orgId);
     $previousStatusById = [];
     $previousStatusByVendor = [];
-    if ($webhookUrl !== '') {
-        $beforeItems = VendorService::loadVisibleItems($pdo, $uid, $orgId, $activeProjectId, (string) $role);
-        foreach ($beforeItems as $it) {
-            if (!is_array($it)) {
-                continue;
-            }
-            $oldStatus = VendorService::resolveStatusFromItem($it);
-            $oldId = isset($it['id']) ? (int) $it['id'] : 0;
-            if ($oldId > 0) {
-                $previousStatusById[$oldId] = $oldStatus;
-            }
+    $previousPurposeById = [];
+    $beforeItems = VendorService::loadVisibleItems($pdo, $uid, $orgId, $activeProjectId, (string) $role);
+    foreach ($beforeItems as $it) {
+        if (!is_array($it)) {
+            continue;
+        }
+        $oldStatus = VendorService::resolveStatusFromItem($it);
+        $oldId = isset($it['id']) ? (int) $it['id'] : 0;
+        if ($oldId > 0) {
+            $previousStatusById[$oldId] = $oldStatus;
+            $previousPurposeById[$oldId] = trim((string) ($it['purpose_of_subscription'] ?? $it['notes'] ?? ''));
+        }
+        if ($webhookUrl !== '') {
             $oldVendorKey = strtolower(trim((string) ($it['vendor_name'] ?? '')));
             if ($oldVendorKey !== '') {
                 if (!isset($previousStatusByVendor[$oldVendorKey]) || $oldStatus === VendorService::STATUS_MARK) {
@@ -1014,6 +1063,51 @@ function handleSaveCostCalculator() {
             postWebhookJson($webhookUrl, $payload);
         }
     }
+
+    if ($result['success'] ?? false) {
+        $actorName = trim((string) ($_SESSION['username'] ?? ''));
+        if ($actorName === '') {
+            $actorName = trim((string) ($_SESSION['user_email'] ?? ''));
+        }
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $rowId = isset($item['id']) ? (int) $item['id'] : 0;
+            if ($rowId <= 0 || !isset($previousStatusById[$rowId])) {
+                continue;
+            }
+
+            $newStatus = VendorService::resolveStatusFromItem($item);
+            $oldStatus = $previousStatusById[$rowId];
+            if ($newStatus !== $oldStatus) {
+                VendorChatService::appendActionLogEntry(
+                    $pdo,
+                    $orgId,
+                    $activeProjectId,
+                    $rowId,
+                    $uid,
+                    $actorName,
+                    VendorChatService::formatStatusChangeMessage($oldStatus, $newStatus)
+                );
+            }
+
+            $newPurpose = trim((string) ($item['purpose_of_subscription'] ?? $item['notes'] ?? ''));
+            $oldPurpose = $previousPurposeById[$rowId] ?? '';
+            if ($newPurpose !== $oldPurpose) {
+                VendorChatService::appendActionLogEntry(
+                    $pdo,
+                    $orgId,
+                    $activeProjectId,
+                    $rowId,
+                    $uid,
+                    $actorName,
+                    VendorChatService::formatPurposeChangeMessage($oldPurpose, $newPurpose)
+                );
+            }
+        }
+    }
+
     echo json_encode($result);
     exit;
 }
@@ -1186,6 +1280,50 @@ function handleAddVendorChatMessage() {
         $username,
         $message,
         (string) ($_SESSION['role'] ?? 'member')
+    );
+    echo json_encode($result);
+    exit;
+}
+
+function handleEditVendorChatMessage() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'User not logged in']);
+        exit;
+    }
+
+    $vendorItemId = (int) ($_POST['vendor_item_id'] ?? 0);
+    $messageId = (int) ($_POST['message_id'] ?? 0);
+    $message = trim((string) ($_POST['message'] ?? ''));
+    if ($vendorItemId <= 0) {
+        echo json_encode(['success' => false, 'error' => 'Vendor row id is required']);
+        exit;
+    }
+    if ($messageId <= 0) {
+        echo json_encode(['success' => false, 'error' => 'Message id is required']);
+        exit;
+    }
+    if ($message === '') {
+        echo json_encode(['success' => false, 'error' => 'Message is required']);
+        exit;
+    }
+
+    $pdo = getDBConnection();
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        echo json_encode(['success' => false, 'error' => 'No active project selected']);
+        exit;
+    }
+
+    $result = VendorChatService::editMessage(
+        $pdo,
+        (int) $_SESSION['org_id'],
+        $activeProjectId,
+        $vendorItemId,
+        $messageId,
+        (int) $_SESSION['user_id'],
+        (string) ($_SESSION['role'] ?? 'member'),
+        $message
     );
     echo json_encode($result);
     exit;

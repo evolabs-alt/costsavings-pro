@@ -50,17 +50,17 @@ final class OrgRole
     {
         return [
             [
-                'title' => 'Member',
-                'description' => 'Sees public vendor rows plus confidential rows they manage. Can edit purposes on rows they manage.',
+                'title' => 'Super admin',
+                'description' => 'Full organization access: create and delete projects, all vendor rows, choose invite role, and copy project data.',
+                'note' => 'Not assignable via invite; shown for context.',
             ],
             [
                 'title' => 'Administrator',
                 'description' => 'Can invite users (as Member unless the inviter is a Super admin), manage members, and work with public vendor rows org-wide. Cannot create or delete projects.',
             ],
             [
-                'title' => 'Super admin',
-                'description' => 'Full organization access: create and delete projects, all vendor rows, choose invite role, and copy project data.',
-                'note' => 'Not assignable via invite; shown for context.',
+                'title' => 'Member',
+                'description' => 'Sees public vendor rows plus confidential rows they manage. Can update status, purpose, and chat on rows they manage or unassigned rows; cannot change vendor, cost, or frequency.',
             ],
         ];
     }

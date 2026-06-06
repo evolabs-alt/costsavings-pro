@@ -74,6 +74,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'add_vendor_chat_message':
                 handleAddVendorChatMessage();
                 break;
+            case 'edit_vendor_chat_message':
+                handleEditVendorChatMessage();
+                break;
             case 'vendor_chat_unread_counts':
                 handleVendorChatUnreadCounts();
                 break;
@@ -1064,6 +1067,71 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
         }
 
+        .vendor-col-sort-btn {
+            flex: 0 0 auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            min-height: 28px;
+            padding: 2px 8px;
+            margin: 0;
+            border: 1px solid var(--color-border, #d7dce6);
+            border-radius: 6px;
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            cursor: pointer;
+            color: var(--color-primary, #0b58a3);
+            font-size: 13px;
+            font-weight: 600;
+            font-family: inherit;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .vendor-col-sort-btn--icon {
+            width: 28px;
+            height: 28px;
+            padding: 0;
+        }
+
+        .vendor-col-sort-btn .vendor-col-sort-icon {
+            font-size: 17px;
+            line-height: 1;
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
+        .vendor-col-sort-btn:hover {
+            border-color: #93c5fd;
+            box-shadow: 0 2px 6px rgba(11, 88, 163, 0.12);
+        }
+
+        .vendor-col-sort-btn.is-active {
+            background: rgba(11, 88, 163, 0.1);
+            border-color: var(--color-primary, #0b58a3);
+        }
+
+        .cost-calculator-grid thead .vendor-col-sort-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.5);
+            color: #ffffff;
+        }
+
+        .cost-calculator-grid thead .vendor-col-sort-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.75);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+        }
+
+        .cost-calculator-grid thead .vendor-col-sort-btn.is-active {
+            background: #ffffff;
+            border-color: #ffffff;
+            color: var(--color-primary, #0b58a3);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+        }
+
+        .cost-calculator-grid th.th-sortable {
+            padding: 6px;
+        }
+
         .vendor-col-filter-dropdown {
             position: absolute;
             top: calc(100% + 4px);
@@ -1085,6 +1153,30 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             box-sizing: border-box;
             /* thead has color:white; reset so controls and labels stay readable on white panel */
             color: #1e293b;
+        }
+
+        .vendor-col-filter-dropdown--search {
+            min-width: 220px;
+            max-height: none;
+            overflow: visible;
+        }
+
+        .vendor-col-filter-search-input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 6px 8px;
+            border: 1px solid var(--color-border, #d7dce6);
+            border-radius: 6px;
+            font-size: 13px;
+            font-family: inherit;
+            color: var(--color-text-primary, #161c2d);
+            background: #fff;
+        }
+
+        .vendor-col-filter-search-input:focus {
+            outline: none;
+            border-color: var(--color-secondary, #25a8e0);
+            box-shadow: 0 0 0 2px rgba(37, 168, 224, 0.2);
         }
 
         .vendor-col-filter-option {
@@ -1259,70 +1351,60 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             width: 100%;
         }
 
-        .status-key-details {
+        .th-label-with-info {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            min-width: 0;
+        }
+
+        .th-label-with-info--center {
+            justify-content: center;
             width: 100%;
-            margin: 4px 0 0;
+        }
+
+        .th-info-btn {
+            flex: 0 0 auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
             padding: 0;
-            border: none;
-            font-size: 13px;
-            color: #374151;
-        }
-
-        .status-key-summary {
+            margin: 0;
+            border: 1px solid rgba(255, 255, 255, 0.55);
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            color: #ffffff;
+            font-size: 11px;
+            line-height: 1;
+            font-weight: 700;
+            font-family: inherit;
             cursor: pointer;
-            font-weight: 600;
-            color: #4a3f6b;
-            list-style: none;
-            padding: 6px 0;
-            user-select: none;
-        }
-
-        .status-key-summary::-webkit-details-marker {
-            display: none;
-        }
-
-        .status-key-summary::before {
-            content: '';
-            display: inline-block;
-            width: 0;
-            height: 0;
-            margin-right: 6px;
-            border-style: solid;
-            border-width: 5px 0 5px 6px;
-            border-color: transparent transparent transparent #6b5b95;
             vertical-align: middle;
-            transform: rotate(0deg);
-            transition: transform 0.15s ease;
+            transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
         }
 
-        .status-key-details[open] .status-key-summary::before {
-            transform: rotate(90deg);
-        }
-
-        .status-key-summary:hover {
-            color: #6b5b95;
-        }
-
-        .status-key-summary:focus {
+        .th-info-btn:hover,
+        .th-info-btn:focus-visible {
+            background: rgba(255, 255, 255, 0.35);
+            border-color: rgba(255, 255, 255, 0.85);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
             outline: none;
         }
 
-        .status-key-summary:focus-visible {
-            outline: 2px solid #6b5b95;
-            outline-offset: 3px;
-            border-radius: 4px;
+        .column-help-intro {
+            margin: 0 0 12px;
+            font-size: 14px;
+            color: #374151;
+            line-height: 1.5;
         }
 
-        .status-key-body {
-            margin-top: 10px;
-            padding: 12px 14px;
-            background: #fff;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+        .column-help-intro:last-child {
+            margin-bottom: 0;
         }
 
-        .status-key-body dl {
+        .column-help-dl {
             margin: 0;
             display: grid;
             grid-template-columns: minmax(9rem, 12rem) 1fr;
@@ -1330,28 +1412,30 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             align-items: start;
         }
 
-        .status-key-body dt {
+        .column-help-dl dt {
             margin: 0;
             font-weight: 600;
             color: #1f2937;
+            font-size: 14px;
         }
 
-        .status-key-body dd {
+        .column-help-dl dd {
             margin: 0;
             color: #4b5563;
             line-height: 1.45;
+            font-size: 14px;
         }
 
         @media (max-width: 640px) {
-            .status-key-body dl {
+            .column-help-dl {
                 grid-template-columns: 1fr;
             }
 
-            .status-key-body dt {
+            .column-help-dl dt {
                 margin-top: 6px;
             }
 
-            .status-key-body dt:first-child {
+            .column-help-dl dt:first-child {
                 margin-top: 0;
             }
         }
@@ -1381,11 +1465,43 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             margin-top: 10px;
             display: flex;
             align-items: center;
-            justify-content: flex-end;
+            justify-content: space-between;
             gap: 8px;
         }
 
         .vendor-pagination[hidden] {
+            display: none;
+        }
+
+        .vendor-pagination-size {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .vendor-pagination-size-label {
+            font-size: 12px;
+            color: var(--color-text-secondary);
+            margin: 0;
+        }
+
+        .vendor-pagination-size-select {
+            font-size: 12px;
+            padding: 4px 8px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            background: #fff;
+            color: var(--color-text-primary, #374151);
+            cursor: pointer;
+        }
+
+        .vendor-pagination-nav {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .vendor-pagination-nav[hidden] {
             display: none;
         }
 
@@ -2771,6 +2887,78 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             opacity: 0.78;
         }
 
+        .vendor-chat-bubble-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 3px;
+        }
+
+        .vendor-chat-edit-btn {
+            border: none;
+            background: transparent;
+            color: inherit;
+            font-size: 11px;
+            font-weight: 600;
+            opacity: 0.85;
+            cursor: pointer;
+            padding: 0;
+            text-decoration: underline;
+        }
+
+        .vendor-chat-edit-btn:hover {
+            opacity: 1;
+        }
+
+        .vendor-chat-edit-area {
+            width: 100%;
+            min-height: 64px;
+            max-height: 140px;
+            resize: vertical;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 14px;
+            box-sizing: border-box;
+            font-family: inherit;
+        }
+
+        .vendor-chat-row.is-self .vendor-chat-edit-area {
+            border-color: rgba(255, 255, 255, 0.45);
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+        }
+
+        .vendor-chat-edit-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .vendor-chat-edit-save-btn,
+        .vendor-chat-edit-cancel-btn {
+            border: none;
+            border-radius: 999px;
+            padding: 5px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .vendor-chat-edit-save-btn {
+            background: #fff;
+            color: #4a3f6b;
+        }
+
+        .vendor-chat-edit-cancel-btn {
+            background: transparent;
+            color: inherit;
+            border: 1px solid currentColor;
+            opacity: 0.85;
+        }
+
         .vendor-chat-empty {
             min-height: 226px;
             border: 1px dashed #c4b5fd;
@@ -3847,7 +4035,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
     <div id="appAiPopulateOverlay" class="app-ai-populate-overlay" hidden aria-live="polite" aria-busy="false">
         <div class="app-ai-populate-overlay-inner">
             <span class="loading-spinner btn-inline-spinner" aria-hidden="true"></span>
-            <span id="appAiPopulateOverlayText">Populating purposes with AI…</span>
+            <span id="appAiPopulateOverlayText">Populating purposes with AI… For many vendors, this may take up to 3 minutes…</span>
         </div>
     </div>
 
@@ -4086,25 +4274,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <button type="button" class="bulk-action-btn" data-open-modal="appModalBulkActions">Bulk Actions</button>
                         <button type="button" id="togglePurposeColumnBtn" class="column-toggle-btn" aria-pressed="false">Show Purpose</button>
                     </div>
-                    <details class="status-key-details" id="vendorStatusKey">
-                        <summary class="status-key-summary">Status key</summary>
-                        <div class="status-key-body">
-                            <dl>
-                                <dt>Pending</dt>
-                                <dd>Not reviewed yet, or no decision recorded—use this until the team classifies the vendor.</dd>
-                                <dt>Question</dt>
-                                <dd>Needs a follow-up (stakeholder input, clarification, or discussion) before you commit to keep or cancel.</dd>
-                                <dt>Unknown</dt>
-                                <dd>Not enough context to decide—purpose, owner, or numbers are unclear (common right after import or with thin data).</dd>
-                                <dt>Keep</dt>
-                                <dd>Reviewed and you plan to continue this vendor or spend; no cancellation in progress.</dd>
-                                <dt>Mark for Cancellation</dt>
-                                <dd>Decision is to cancel; use the cancellation date field to track the target end until it is fully executed.</dd>
-                                <dt>Cancelled</dt>
-                                <dd>Cancellation is complete (or the contract ended); treat this spend as off for forward-looking savings.</dd>
-                            </dl>
-                        </div>
-                    </details>
                 </div>
                 
                 <div class="cost-calculator-table-wrapper">
@@ -4112,14 +4281,49 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <thead>
                         <tr>
                             <th class="select-row">
-                                <input type="checkbox" id="selectAllVendors" aria-label="Select all vendors matching current filters">
+                                <span class="th-label-with-info th-label-with-info--center">
+                                    <input type="checkbox" id="selectAllVendors" aria-label="Select all vendors matching current filters">
+                                    <button type="button" class="th-info-btn" data-column-help="select" aria-label="About select" title="About select">&#9432;</button>
+                                </span>
                             </th>
-                            <th class="item-number">Item #</th>
-                            <th class="vendor-name">Vendor</th>
-                            <th class="cost-per-period">Cost</th>
+                            <th class="item-number">
+                                <span class="th-label-with-info">
+                                    <span>Item #</span>
+                                    <button type="button" class="th-info-btn" data-column-help="item_number" aria-label="About item number" title="About item number">&#9432;</button>
+                                </span>
+                            </th>
+                            <th class="vendor-name th-with-filter th-sortable" data-vendor-sort-col="vendor">
+                                <div class="th-with-filter-inner">
+                                    <span class="th-label-with-info">
+                                        <button type="button" class="vendor-col-sort-btn" data-vendor-sort="vendor" aria-label="Sort by vendor" title="Sort by vendor">
+                                            <span class="vendor-col-sort-label">Vendor</span>
+                                            <span class="material-symbols-outlined vendor-col-sort-icon" aria-hidden="true">swap_vert</span>
+                                        </button>
+                                        <button type="button" class="th-info-btn" data-column-help="vendor" aria-label="About vendor" title="About vendor">&#9432;</button>
+                                    </span>
+                                    <button type="button" class="vendor-col-filter-btn" data-vendor-filter="vendor_name" title="Search vendors" aria-label="Search vendors by name" aria-haspopup="true" aria-expanded="false">
+                                        <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
+                                    </button>
+                                    <div class="vendor-col-filter-dropdown vendor-col-filter-dropdown--search" data-vendor-filter="vendor_name" hidden>
+                                        <input type="search" class="vendor-col-filter-search-input" placeholder="Search vendors..." aria-label="Search vendors by name" />
+                                        <div class="vendor-col-filter-actions">
+                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="vendor_name">Clear</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </th>
+                            <th class="cost-per-period">
+                                <span class="th-label-with-info">
+                                    <span>Cost</span>
+                                    <button type="button" class="th-info-btn" data-column-help="cost" aria-label="About cost" title="About cost">&#9432;</button>
+                                </span>
+                            </th>
                             <th class="frequency th-with-filter">
                                 <div class="th-with-filter-inner">
-                                    <span class="th-with-filter-caption">Freq</span>
+                                    <span class="th-label-with-info">
+                                        <span class="th-with-filter-caption">Freq</span>
+                                        <button type="button" class="th-info-btn" data-column-help="frequency" aria-label="About frequency" title="About frequency">&#9432;</button>
+                                    </span>
                                     <button type="button" class="vendor-col-filter-btn" data-vendor-filter="frequency" title="Filter by frequency" aria-label="Filter by frequency" aria-haspopup="true" aria-expanded="false">
                                         <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
                                     </button>
@@ -4131,10 +4335,24 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     </div>
                                 </div>
                             </th>
-                            <th class="annual-cost">Annual Cost</th>
-                            <th class="manager-col th-with-filter">
+                            <th class="annual-cost th-sortable" data-vendor-sort-col="annual_cost">
+                                <span class="th-label-with-info">
+                                    <button type="button" class="vendor-col-sort-btn" data-vendor-sort="annual_cost" aria-label="Sort by annual cost" title="Sort by annual cost">
+                                        <span class="vendor-col-sort-label">Annual Cost</span>
+                                        <span class="material-symbols-outlined vendor-col-sort-icon" aria-hidden="true">swap_vert</span>
+                                    </button>
+                                    <button type="button" class="th-info-btn" data-column-help="annual_cost" aria-label="About annual cost" title="About annual cost">&#9432;</button>
+                                </span>
+                            </th>
+                            <th class="manager-col th-with-filter th-sortable" data-vendor-sort-col="manager">
                                 <div class="th-with-filter-inner">
-                                    <span class="th-with-filter-caption">Manager</span>
+                                    <span class="th-label-with-info">
+                                        <span class="th-with-filter-caption">Manager</span>
+                                        <button type="button" class="th-info-btn" data-column-help="manager" aria-label="About manager" title="About manager">&#9432;</button>
+                                    </span>
+                                    <button type="button" class="vendor-col-sort-btn vendor-col-sort-btn--icon" data-vendor-sort="manager" aria-label="Sort by manager" title="Sort by manager">
+                                        <span class="material-symbols-outlined vendor-col-sort-icon" aria-hidden="true">swap_vert</span>
+                                    </button>
                                     <button type="button" class="vendor-col-filter-btn" data-vendor-filter="manager" title="Filter by manager" aria-label="Filter by manager" aria-haspopup="true" aria-expanded="false">
                                         <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
                                     </button>
@@ -4146,9 +4364,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     </div>
                                 </div>
                             </th>
-                            <th class="visibility-col th-with-filter">
+                            <th class="visibility-col th-with-filter th-sortable" data-vendor-sort-col="visibility">
                                 <div class="th-with-filter-inner">
-                                    <span class="th-with-filter-caption">Visibility</span>
+                                    <span class="th-label-with-info">
+                                        <span class="th-with-filter-caption">Visibility</span>
+                                        <button type="button" class="th-info-btn" data-column-help="visibility" aria-label="About visibility" title="About visibility">&#9432;</button>
+                                    </span>
+                                    <button type="button" class="vendor-col-sort-btn vendor-col-sort-btn--icon" data-vendor-sort="visibility" aria-label="Sort by visibility" title="Sort by visibility">
+                                        <span class="material-symbols-outlined vendor-col-sort-icon" aria-hidden="true">swap_vert</span>
+                                    </button>
                                     <button type="button" class="vendor-col-filter-btn" data-vendor-filter="visibility" title="Filter by visibility" aria-label="Filter by visibility" aria-haspopup="true" aria-expanded="false">
                                         <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
                                     </button>
@@ -4160,9 +4384,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     </div>
                                 </div>
                             </th>
-                            <th class="row-status th-with-filter" title="Vendor status: Pending, Question, Unknown, Keep, Mark for Cancellation, or Cancelled">
+                            <th class="row-status th-with-filter th-sortable" data-vendor-sort-col="status">
                                 <div class="th-with-filter-inner">
-                                    <span class="th-with-filter-caption">Status</span>
+                                    <span class="th-label-with-info">
+                                        <span class="th-with-filter-caption">Status</span>
+                                        <button type="button" class="th-info-btn" data-column-help="status" aria-label="About status" title="About status">&#9432;</button>
+                                    </span>
+                                    <button type="button" class="vendor-col-sort-btn vendor-col-sort-btn--icon" data-vendor-sort="status" aria-label="Sort by status" title="Sort by status">
+                                        <span class="material-symbols-outlined vendor-col-sort-icon" aria-hidden="true">swap_vert</span>
+                                    </button>
                                     <button type="button" class="vendor-col-filter-btn" data-vendor-filter="status" title="Filter by status" aria-label="Filter by column status" aria-haspopup="true" aria-expanded="false">
                                         <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
                                     </button>
@@ -4174,10 +4404,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     </div>
                                 </div>
                             </th>
-                            <th class="notes">Purpose</th>
+                            <th class="notes">
+                                <span class="th-label-with-info">
+                                    <span>Purpose</span>
+                                    <button type="button" class="th-info-btn" data-column-help="purpose" aria-label="About purpose" title="About purpose">&#9432;</button>
+                                </span>
+                            </th>
                             <th class="vendor-chat-col th-with-filter">
                                 <div class="th-with-filter-inner">
-                                    <span class="th-with-filter-caption">Chat</span>
+                                    <span class="th-label-with-info">
+                                        <span class="th-with-filter-caption">Chat</span>
+                                        <button type="button" class="th-info-btn" data-column-help="chat" aria-label="About chat" title="About chat">&#9432;</button>
+                                    </span>
                                     <button type="button" class="vendor-col-filter-btn" data-vendor-filter="chat_unread" title="Filter chat" aria-label="Filter by chat unread" aria-haspopup="true" aria-expanded="false">
                                         <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
                                     </button>
@@ -4196,17 +4434,30 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     </tbody>
                 </table>
                 <div id="vendorPagination" class="vendor-pagination" hidden>
-                    <button type="button" id="vendorPaginationPrev" class="vendor-pagination-btn" aria-label="Previous page" title="Previous page">
-                        <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
-                    </button>
-                    <div id="vendorPaginationStatus" class="vendor-pagination-status">Page 1 of 1</div>
-                    <button type="button" id="vendorPaginationNext" class="vendor-pagination-btn" aria-label="Next page" title="Next page">
-                        <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
-                    </button>
+                    <div class="vendor-pagination-size">
+                        <label for="vendorPageSizeSelect" class="vendor-pagination-size-label">Per page</label>
+                        <select id="vendorPageSizeSelect" class="vendor-pagination-size-select" aria-label="Rows per page">
+                            <option value="20" selected>20</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                            <option value="500">500</option>
+                        </select>
+                    </div>
+                    <div id="vendorPaginationNav" class="vendor-pagination-nav">
+                        <button type="button" id="vendorPaginationPrev" class="vendor-pagination-btn" aria-label="Previous page" title="Previous page">
+                            <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
+                        </button>
+                        <div id="vendorPaginationStatus" class="vendor-pagination-status">Page 1 of 1</div>
+                        <button type="button" id="vendorPaginationNext" class="vendor-pagination-btn" aria-label="Next page" title="Next page">
+                            <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+                        </button>
+                    </div>
                 </div>
                 
                 <div class="cost-calculator-actions">
+                    <?php if ($is_admin): ?>
                     <button type="button" class="add-row-btn" onclick="addCalculatorRow()">+ Add Row</button>
+                    <?php endif; ?>
                 </div>
                 
                 <div class="savings-summary">
@@ -4228,6 +4479,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             let deleteProjectExpectedName = '';
             const isAdminUser = <?php echo $is_admin ? 'true' : 'false'; ?>;
             const canCreateProjects = <?php echo $can_create_projects ? 'true' : 'false'; ?>;
+            const COLUMN_HELP = <?php echo json_encode(\CostSavings\ColumnHelp::entriesForJs(), JSON_UNESCAPED_UNICODE); ?>;
 
             function postJson(data) {
                 return fetch(window.location.href, {
@@ -4438,8 +4690,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         openPostCreateInviteModal();
                         return;
                     }
-                    showSnackbar('Populating purposes with AI… This may take a minute.', 'info');
-                    showAiPopulateLoader('Populating purposes with AI…');
+                    showSnackbar('Populating purposes with AI… For many vendors, this may take up to 3 minutes…', 'info');
+                    showAiPopulateLoader('Populating purposes with AI… For many vendors, this may take up to 3 minutes…');
                     clearTimeout(saveTimeout);
                     var populateFn = typeof window.runProjectAutoPopulatePurpose === 'function'
                         ? window.runProjectAutoPopulatePurpose
@@ -5060,6 +5312,26 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 document.addEventListener('touchmove', onMove, { passive: false });
                 document.addEventListener('touchend', onEnd);
             }
+            function openColumnHelp(key) {
+                const entry = COLUMN_HELP && COLUMN_HELP[key];
+                const titleEl = document.getElementById('appModalColumnHelpTitle');
+                const bodyEl = document.getElementById('appModalColumnHelpBody');
+                if (!entry || !titleEl || !bodyEl) return;
+                titleEl.textContent = entry.title || '';
+                bodyEl.innerHTML = entry.html || '';
+                openAppModal('appModalColumnHelp');
+            }
+
+            function initColumnHeaderHelp() {
+                document.querySelectorAll('[data-column-help]').forEach(function(btn) {
+                    btn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        const key = btn.getAttribute('data-column-help');
+                        if (key) openColumnHelp(key);
+                    });
+                });
+            }
+
             function initAppModals() {
                 document.querySelectorAll('[data-open-modal]').forEach(function(btn) {
                     btn.addEventListener('click', function() {
@@ -5210,9 +5482,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
             let activeCancelGuidanceItemId = 0;
             let activeCancelGuidanceVendorName = '';
-            const VENDOR_PAGE_SIZE = 20;
+            const VENDOR_PAGE_SIZE_OPTIONS = [20, 50, 100, 500];
+            let vendorPageSize = 20;
             let vendorCurrentPage = 1;
             let vendorCurrentFilter = 'all';
+
+            const VENDOR_SORTABLE_COLS = ['vendor', 'annual_cost', 'manager', 'visibility', 'status'];
+            let vendorSortColumn = null;
+            let vendorSortDirection = 'asc';
 
             const VENDOR_FILTER_COLS = ['frequency', 'manager', 'visibility', 'status', 'chat_unread'];
             let vendorColumnFilters = {
@@ -5222,6 +5499,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 status: new Set(),
                 chat_unread: new Set(),
             };
+            let vendorNameSearchQuery = '';
+            let vendorNameSearchDebounce = null;
 
             let vendorChatUnreadFilterReflowScheduled = false;
             function scheduleVendorTablePaginationIfChatUnreadFilter() {
@@ -5370,6 +5649,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
             function applyBulkAction(payload) {
                 if (!payload) return;
+                if (!IS_ADMIN && payload.action === 'frequency') {
+                    showSnackbar('Only administrators can change frequency.', 'error');
+                    return;
+                }
                 const selectedRows = getSelectedVendorRows();
                 if (!selectedRows.length) {
                     showSnackbar('Please select at least one vendor row.', 'error');
@@ -5456,6 +5739,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const tbody = document.getElementById('calculatorRows');
                 const row = document.createElement('tr');
                 row.setAttribute('data-row-id', rowCount);
+                const memberSpendLocked = IS_ADMIN ? '' : 'disabled readonly';
+                const memberFreqLocked = IS_ADMIN ? '' : 'disabled';
                 
                 row.innerHTML = `
                     <td class="select-row-cell">
@@ -5465,17 +5750,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <td class="vendor-name">
                         <input type="hidden" class="row-db-id" value="" />
                         <div class="vendor-cell-wrap">
-                            <input type="text" name="vendor[]" placeholder="Enter vendor name" />
+                            <input type="text" name="vendor[]" placeholder="Enter vendor name" ${memberSpendLocked} />
                             <button type="button" class="vendor-raw-btn" disabled title="View imported raw transaction history" aria-label="View imported raw transaction history">
                                 <span class="material-symbols-outlined vendor-raw-icon" aria-hidden="true">format_list_bulleted</span>
                             </button>
                         </div>
                     </td>
                     <td class="cost-per-period">
-                        <input type="text" name="cost[]" class="cost-input" placeholder="$0" data-row="${rowCount}" />
+                        <input type="text" name="cost[]" class="cost-input" placeholder="$0" data-row="${rowCount}" ${memberSpendLocked} />
                     </td>
                     <td class="frequency">
-                        <select name="frequency[]" class="frequency-select" data-row="${rowCount}">
+                        <select name="frequency[]" class="frequency-select" data-row="${rowCount}" ${memberFreqLocked}>
                             <option value="">Select</option>
                             <option value="weekly">Weekly</option>
                             <option value="monthly">Monthly</option>
@@ -5540,6 +5825,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 syncRowDeadlineVisibility(row);
                 syncRowCancellationGuidanceVisibility(row);
                 syncMemberStatusEditability(row);
+                syncMemberSpendFieldEditability(row);
                 const rowCheckbox = row.querySelector('.row-select-checkbox');
                 if (rowCheckbox) rowCheckbox.addEventListener('change', updateSelectAllCheckboxState);
 
@@ -5717,33 +6003,169 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 return 'all';
             }
 
-            function getFilteredVendorRows(filterValue) {
+            function rowPassesVendorFilters(row, filterValue) {
                 const filter = normalizeVendorFilter(filterValue);
+                const passesReport = filter === 'all' || getRowStatus(row) === filter;
+                return passesReport && rowMatchesColumnFilters(row);
+            }
+
+            function getFilteredVendorRows(filterValue) {
                 return Array.from(document.querySelectorAll('#calculatorRows tr')).filter(function(row) {
-                    const passesReport = filter === 'all' || getRowStatus(row) === filter;
-                    return passesReport && rowMatchesColumnFilters(row);
+                    return rowPassesVendorFilters(row, filterValue);
+                });
+            }
+
+            function getVendorRowTieBreakId(row) {
+                const idEl = row.querySelector('.row-db-id');
+                const dbId = idEl && idEl.value ? parseInt(idEl.value, 10) : 0;
+                if (dbId > 0) return dbId;
+                return parseInt(row.getAttribute('data-row-id'), 10) || 0;
+            }
+
+            function getVendorSortValue(row, col) {
+                if (col === 'vendor') {
+                    const vendorInput = row.querySelector('input[name="vendor[]"]');
+                    return (vendorInput ? vendorInput.value : '').trim().toLowerCase();
+                }
+                if (col === 'annual_cost') {
+                    const annualCostDisplay = row.querySelector('.annual-cost-display');
+                    return parseFloat((annualCostDisplay ? annualCostDisplay.textContent : '').replace(/[^0-9.-]/g, '')) || 0;
+                }
+                if (col === 'manager') {
+                    const mgrSel = row.querySelector('.manager-select');
+                    const mgrVal = mgrSel && mgrSel.value ? String(mgrSel.value).trim() : '';
+                    if (!mgrVal) {
+                        return { isUnassigned: true, text: '' };
+                    }
+                    const opt = mgrSel.options[mgrSel.selectedIndex];
+                    return { isUnassigned: false, text: (opt ? opt.text : '').trim().toLowerCase() };
+                }
+                if (col === 'visibility') {
+                    const visSel = row.querySelector('.visibility-select');
+                    const opt = visSel ? visSel.options[visSel.selectedIndex] : null;
+                    return (opt ? opt.text : 'Public').trim().toLowerCase();
+                }
+                if (col === 'status') {
+                    const status = getRowStatus(row);
+                    return (STATUS_COLUMN_FILTER_LABELS[status] || status).trim().toLowerCase();
+                }
+                return '';
+            }
+
+            function compareVendorRows(a, b) {
+                const col = vendorSortColumn;
+                if (!col) return 0;
+                const va = getVendorSortValue(a, col);
+                const vb = getVendorSortValue(b, col);
+                let cmp = 0;
+
+                if (col === 'annual_cost') {
+                    cmp = va - vb;
+                } else if (col === 'manager') {
+                    if (va.isUnassigned && !vb.isUnassigned) cmp = 1;
+                    else if (!va.isUnassigned && vb.isUnassigned) cmp = -1;
+                    else cmp = va.text.localeCompare(vb.text);
+                } else {
+                    cmp = String(va).localeCompare(String(vb));
+                }
+
+                if (vendorSortDirection === 'desc') cmp = -cmp;
+                if (cmp !== 0) return cmp;
+                return getVendorRowTieBreakId(a) - getVendorRowTieBreakId(b);
+            }
+
+            function sortVendorRowsInDom() {
+                if (!vendorSortColumn) return;
+                const tbody = document.getElementById('calculatorRows');
+                if (!tbody) return;
+                const allRows = Array.from(tbody.querySelectorAll('tr'));
+                if (!allRows.length) return;
+
+                const filtered = [];
+                const unfiltered = [];
+                allRows.forEach(function(row) {
+                    if (rowPassesVendorFilters(row, vendorCurrentFilter)) {
+                        filtered.push(row);
+                    } else {
+                        unfiltered.push(row);
+                    }
+                });
+
+                filtered.sort(compareVendorRows);
+                filtered.forEach(function(row) { tbody.appendChild(row); });
+                unfiltered.forEach(function(row) { tbody.appendChild(row); });
+            }
+
+            function updateVendorSortHeaderState() {
+                document.querySelectorAll('.vendor-col-sort-btn').forEach(function(btn) {
+                    const col = btn.getAttribute('data-vendor-sort');
+                    const th = btn.closest('th');
+                    const icon = btn.querySelector('.vendor-col-sort-icon');
+                    const isActive = col === vendorSortColumn;
+                    btn.classList.toggle('is-active', isActive);
+                    if (th) {
+                        th.setAttribute('aria-sort', isActive ? (vendorSortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
+                    }
+                    if (icon) {
+                        icon.textContent = isActive
+                            ? (vendorSortDirection === 'asc' ? 'arrow_upward' : 'arrow_downward')
+                            : 'swap_vert';
+                    }
+                });
+            }
+
+            function initVendorColumnSort() {
+                const colKey = 'costCalculatorVendorSortColumn';
+                const dirKey = 'costCalculatorVendorSortDirection';
+                const savedCol = localStorage.getItem(colKey);
+                const savedDir = localStorage.getItem(dirKey);
+                if (savedCol && VENDOR_SORTABLE_COLS.indexOf(savedCol) !== -1) {
+                    vendorSortColumn = savedCol;
+                    vendorSortDirection = savedDir === 'desc' ? 'desc' : 'asc';
+                }
+                updateVendorSortHeaderState();
+
+                document.querySelectorAll('.vendor-col-sort-btn').forEach(function(btn) {
+                    btn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        const col = btn.getAttribute('data-vendor-sort');
+                        if (!col || VENDOR_SORTABLE_COLS.indexOf(col) === -1) return;
+                        if (vendorSortColumn === col) {
+                            vendorSortDirection = vendorSortDirection === 'asc' ? 'desc' : 'asc';
+                        } else {
+                            vendorSortColumn = col;
+                            vendorSortDirection = 'asc';
+                        }
+                        localStorage.setItem(colKey, vendorSortColumn);
+                        localStorage.setItem(dirKey, vendorSortDirection);
+                        updateVendorSortHeaderState();
+                        applyVendorTablePagination(1);
+                    });
                 });
             }
 
             function renderVendorPagination(totalFilteredRows, totalPages) {
                 const wrapper = document.getElementById('vendorPagination');
+                const nav = document.getElementById('vendorPaginationNav');
                 const prevBtn = document.getElementById('vendorPaginationPrev');
                 const nextBtn = document.getElementById('vendorPaginationNext');
                 const status = document.getElementById('vendorPaginationStatus');
                 if (!wrapper || !prevBtn || !nextBtn || !status) return;
 
-                const shouldShow = totalFilteredRows > VENDOR_PAGE_SIZE;
-                wrapper.hidden = !shouldShow;
-                if (!shouldShow) {
+                wrapper.hidden = totalFilteredRows <= 0;
+                if (totalFilteredRows <= 0) {
+                    if (nav) nav.hidden = true;
                     prevBtn.disabled = true;
                     nextBtn.disabled = true;
                     status.textContent = 'Page 1 of 1';
                     return;
                 }
 
+                const hasMultiplePages = totalPages > 1;
+                if (nav) nav.hidden = !hasMultiplePages;
                 status.textContent = 'Page ' + vendorCurrentPage + ' of ' + totalPages;
-                prevBtn.disabled = vendorCurrentPage <= 1;
-                nextBtn.disabled = vendorCurrentPage >= totalPages;
+                prevBtn.disabled = !hasMultiplePages || vendorCurrentPage <= 1;
+                nextBtn.disabled = !hasMultiplePages || vendorCurrentPage >= totalPages;
             }
 
             function applyVendorTablePagination(page, filterValue) {
@@ -5754,13 +6176,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     vendorCurrentPage = page;
                 }
 
+                sortVendorRowsInDom();
+
                 const allRows = Array.from(document.querySelectorAll('#calculatorRows tr'));
                 const filteredRows = getFilteredVendorRows(vendorCurrentFilter);
-                const totalPages = Math.max(1, Math.ceil(filteredRows.length / VENDOR_PAGE_SIZE));
+                const totalPages = Math.max(1, Math.ceil(filteredRows.length / vendorPageSize));
                 vendorCurrentPage = Math.min(totalPages, Math.max(1, vendorCurrentPage));
 
-                const startIdx = (vendorCurrentPage - 1) * VENDOR_PAGE_SIZE;
-                const endIdx = startIdx + VENDOR_PAGE_SIZE;
+                const startIdx = (vendorCurrentPage - 1) * vendorPageSize;
+                const endIdx = startIdx + vendorPageSize;
                 const pageRows = filteredRows.slice(startIdx, endIdx);
                 const visibleSet = new Set(pageRows);
                 const filteredSet = new Set(filteredRows);
@@ -5813,6 +6237,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             }
 
             function rowMatchesColumnFilters(row) {
+                if (vendorNameSearchQuery) {
+                    const vendorInput = row.querySelector('input[name="vendor[]"]');
+                    const name = (vendorInput ? vendorInput.value : '').trim().toLowerCase();
+                    if (name.indexOf(vendorNameSearchQuery) === -1) return false;
+                }
                 if (vendorColumnFilters.frequency.size) {
                     if (!vendorColumnFilters.frequency.has(getRowFrequencyValue(row))) return false;
                 }
@@ -5848,7 +6277,70 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
             function updateVendorFilterButtonActive(col) {
                 const btn = document.querySelector('.vendor-col-filter-btn[data-vendor-filter="' + col + '"]');
-                if (btn) btn.classList.toggle('is-active', vendorColumnFilters[col].size > 0);
+                if (!btn) return;
+                if (col === 'vendor_name') {
+                    btn.classList.toggle('is-active', vendorNameSearchQuery.length > 0);
+                    return;
+                }
+                btn.classList.toggle('is-active', vendorColumnFilters[col].size > 0);
+            }
+
+            function applyVendorNameSearchFromInput(inputEl) {
+                vendorNameSearchQuery = (inputEl ? inputEl.value : '').trim().toLowerCase();
+                localStorage.setItem('costCalculatorVendorNameSearch', vendorNameSearchQuery);
+                applyVendorTablePagination(1);
+                updateVendorFilterButtonActive('vendor_name');
+            }
+
+            function initVendorNameSearchFilter() {
+                const btn = document.querySelector('.vendor-col-filter-btn[data-vendor-filter="vendor_name"]');
+                const dd = document.querySelector('.vendor-col-filter-dropdown[data-vendor-filter="vendor_name"]');
+                const searchInput = dd ? dd.querySelector('.vendor-col-filter-search-input') : null;
+                const clearBtn = document.querySelector('.vendor-col-filter-clear[data-vendor-filter="vendor_name"]');
+                if (!btn || !dd || !searchInput) return;
+
+                const saved = localStorage.getItem('costCalculatorVendorNameSearch');
+                if (saved) {
+                    vendorNameSearchQuery = saved.trim().toLowerCase();
+                    searchInput.value = saved;
+                }
+
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const wasOpen = !dd.hidden;
+                    closeAllVendorColumnFilterDropdowns();
+                    if (!wasOpen) {
+                        dd.hidden = false;
+                        btn.setAttribute('aria-expanded', 'true');
+                        searchInput.focus();
+                        searchInput.select();
+                    }
+                });
+
+                searchInput.addEventListener('input', function() {
+                    clearTimeout(vendorNameSearchDebounce);
+                    const inputEl = searchInput;
+                    vendorNameSearchDebounce = setTimeout(function() {
+                        applyVendorNameSearchFromInput(inputEl);
+                    }, 250);
+                });
+
+                searchInput.addEventListener('keydown', function(e) {
+                    e.stopPropagation();
+                });
+
+                if (clearBtn) {
+                    clearBtn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        searchInput.value = '';
+                        vendorNameSearchQuery = '';
+                        localStorage.removeItem('costCalculatorVendorNameSearch');
+                        applyVendorTablePagination(1);
+                        updateVendorFilterButtonActive('vendor_name');
+                    });
+                }
+
+                updateVendorFilterButtonActive('vendor_name');
             }
 
             function populateVendorColumnFilterList(col) {
@@ -5936,6 +6428,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     }
                     updateVendorFilterButtonActive(col);
                 });
+                initVendorNameSearchFilter();
             }
 
             function syncRowDeadlineVisibility(row) {
@@ -5950,6 +6443,46 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const btn = row.querySelector('.cancel-guidance-btn');
                 if (!btn) return;
                 btn.hidden = (getRowStatus(row) !== 'mark_for_cancellation');
+            }
+
+            const MEMBER_SPEND_LOCKED_TIP = 'Only administrators can change vendor, cost, or frequency';
+
+            function syncMemberSpendFieldEditability(row) {
+                if (!row) return;
+                const vendorInput = row.querySelector('input[name="vendor[]"]');
+                const costInput = row.querySelector('.cost-input');
+                const frequencySelect = row.querySelector('.frequency-select');
+                if (IS_ADMIN) {
+                    if (vendorInput) {
+                        vendorInput.disabled = false;
+                        vendorInput.readOnly = false;
+                        vendorInput.removeAttribute('title');
+                    }
+                    if (costInput) {
+                        costInput.disabled = false;
+                        costInput.readOnly = false;
+                        costInput.removeAttribute('title');
+                    }
+                    if (frequencySelect) {
+                        frequencySelect.disabled = false;
+                        frequencySelect.removeAttribute('title');
+                    }
+                    return;
+                }
+                if (vendorInput) {
+                    vendorInput.disabled = true;
+                    vendorInput.readOnly = true;
+                    vendorInput.title = MEMBER_SPEND_LOCKED_TIP;
+                }
+                if (costInput) {
+                    costInput.disabled = true;
+                    costInput.readOnly = true;
+                    costInput.title = MEMBER_SPEND_LOCKED_TIP;
+                }
+                if (frequencySelect) {
+                    frequencySelect.disabled = true;
+                    frequencySelect.title = MEMBER_SPEND_LOCKED_TIP;
+                }
             }
 
             /** For org members: assigned rows are editable only by that manager; unassigned rows are editable by any member who can see them (bulk triage). */
@@ -6220,6 +6753,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     syncRowDeadlineVisibility(lastRow);
                                     syncRowCancellationGuidanceVisibility(lastRow);
                                     syncMemberStatusEditability(lastRow);
+                                    syncMemberSpendFieldEditability(lastRow);
 
                                     if (notesTextarea) {
                                         var pVal = item.purpose_of_subscription || item.notes || '';
@@ -6439,10 +6973,29 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     localStorage.setItem(prefKey, nextVisible ? '1' : '0');
                 });
             }
+
+            function initVendorPageSizeSelect() {
+                const select = document.getElementById('vendorPageSizeSelect');
+                if (!select) return;
+                const prefKey = 'costCalculatorVendorPageSize';
+                const saved = parseInt(localStorage.getItem(prefKey), 10);
+                if (VENDOR_PAGE_SIZE_OPTIONS.indexOf(saved) !== -1) {
+                    vendorPageSize = saved;
+                    select.value = String(saved);
+                }
+                select.addEventListener('change', function() {
+                    const next = parseInt(select.value, 10);
+                    if (VENDOR_PAGE_SIZE_OPTIONS.indexOf(next) === -1) return;
+                    vendorPageSize = next;
+                    localStorage.setItem(prefKey, String(next));
+                    applyVendorTablePagination(1);
+                });
+            }
             
             // Initialize: Load data on page load; flush debounced saves before refresh/navigation
             document.addEventListener('DOMContentLoaded', function() {
                 initAppModals();
+                initColumnHeaderHelp();
                 var orgRoleInfoBtn = document.getElementById('orgRoleInfoBtn');
                 if (orgRoleInfoBtn) {
                     orgRoleInfoBtn.addEventListener('click', function() {
@@ -6452,6 +7005,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 initPostProjectCreateFlow();
                 initNavSubmenus();
                 initPurposeColumnToggle();
+                initVendorPageSizeSelect();
+                initVendorColumnSort();
                 initVendorColumnHeaderFilters();
                 loadProjectsIntoMenu();
                 syncBulkManagerOptions();
@@ -6642,28 +7197,144 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         minute: '2-digit',
                     });
                 }
+                function formatVendorChatStampText(msg) {
+                    var stamp = formatVendorChatTimestamp(msg.created_at);
+                    if (msg.edited_at) {
+                        stamp += ' · edited ' + formatVendorChatTimestamp(msg.edited_at);
+                    }
+                    return stamp;
+                }
+                function updateVendorChatBubbleFromMessage(bubble, msg) {
+                    if (!bubble || !msg) return;
+                    var body = bubble.querySelector('.vendor-chat-text');
+                    var stamp = bubble.querySelector('.vendor-chat-time');
+                    var editBtn = bubble.querySelector('.vendor-chat-edit-btn');
+                    if (body) body.textContent = String(msg.message || '');
+                    if (stamp) stamp.textContent = formatVendorChatStampText(msg);
+                    if (editBtn) {
+                        editBtn.hidden = !msg.can_edit;
+                        editBtn.disabled = !msg.can_edit;
+                    }
+                    bubble.dataset.messageText = String(msg.message || '');
+                }
+                function startVendorChatMessageEdit(row) {
+                    if (!row || row.classList.contains('is-editing')) return;
+                    var bubble = row.querySelector('.vendor-chat-bubble');
+                    if (!bubble) return;
+                    var body = bubble.querySelector('.vendor-chat-text');
+                    var editBtn = bubble.querySelector('.vendor-chat-edit-btn');
+                    if (!body) return;
+                    var originalText = bubble.dataset.messageText || body.textContent || '';
+                    row.classList.add('is-editing');
+                    if (editBtn) editBtn.hidden = true;
+                    body.hidden = true;
+                    var area = document.createElement('textarea');
+                    area.className = 'vendor-chat-edit-area';
+                    area.maxLength = 2000;
+                    area.value = originalText;
+                    var actions = document.createElement('div');
+                    actions.className = 'vendor-chat-edit-actions';
+                    var saveBtn = document.createElement('button');
+                    saveBtn.type = 'button';
+                    saveBtn.className = 'vendor-chat-edit-save-btn';
+                    saveBtn.textContent = 'Save';
+                    var cancelBtn = document.createElement('button');
+                    cancelBtn.type = 'button';
+                    cancelBtn.className = 'vendor-chat-edit-cancel-btn';
+                    cancelBtn.textContent = 'Cancel';
+                    actions.appendChild(cancelBtn);
+                    actions.appendChild(saveBtn);
+                    bubble.insertBefore(area, body.nextSibling);
+                    bubble.insertBefore(actions, area.nextSibling);
+                    area.focus();
+                    function finishEdit(restore) {
+                        row.classList.remove('is-editing');
+                        area.remove();
+                        actions.remove();
+                        body.hidden = false;
+                        if (restore) {
+                            body.textContent = originalText;
+                            if (editBtn) editBtn.hidden = false;
+                        }
+                    }
+                    cancelBtn.addEventListener('click', function() { finishEdit(true); });
+                    saveBtn.addEventListener('click', function() {
+                        var nextText = area.value.trim();
+                        if (!nextText) {
+                            showSnackbar('Message cannot be empty.', 'error');
+                            return;
+                        }
+                        var messageId = parseInt(row.getAttribute('data-message-id'), 10) || 0;
+                        if (!messageId || !activeVendorChatItemId) {
+                            showSnackbar('Could not identify message to edit.', 'error');
+                            return;
+                        }
+                        saveBtn.disabled = true;
+                        cancelBtn.disabled = true;
+                        area.disabled = true;
+                        var fd = new FormData();
+                        fd.append('action', 'edit_vendor_chat_message');
+                        fd.append('vendor_item_id', String(activeVendorChatItemId));
+                        fd.append('message_id', String(messageId));
+                        fd.append('message', nextText);
+                        fetch(window.location.href, { method: 'POST', body: fd })
+                            .then(function(r) { return r.json(); })
+                            .then(function(d) {
+                                if (!d || !d.success || !d.message) {
+                                    showSnackbar((d && d.error) || 'Could not update message.', 'error');
+                                    saveBtn.disabled = false;
+                                    cancelBtn.disabled = false;
+                                    area.disabled = false;
+                                    return;
+                                }
+                                finishEdit(false);
+                                updateVendorChatBubbleFromMessage(bubble, d.message);
+                                vendorChatLastSignature = '';
+                            })
+                            .catch(function() {
+                                showSnackbar('Could not update message.', 'error');
+                                saveBtn.disabled = false;
+                                cancelBtn.disabled = false;
+                                area.disabled = false;
+                            });
+                    });
+                }
                 function appendVendorChatMessage(msg) {
                     var log = document.getElementById('vendorChatLog');
-                    if (!log || !msg) return;
+                    if (!log || !msg) return null;
                     var row = document.createElement('div');
                     var mine = parseInt(msg.user_id || 0, 10) === CURRENT_USER_ID;
                     row.className = 'vendor-chat-row ' + (mine ? 'is-self' : 'is-other');
+                    row.setAttribute('data-message-id', String(msg.id || ''));
                     var bubble = document.createElement('div');
                     bubble.className = 'vendor-chat-bubble';
+                    bubble.dataset.messageText = String(msg.message || '');
+                    var head = document.createElement('div');
+                    head.className = 'vendor-chat-bubble-head';
                     var author = document.createElement('div');
                     author.className = 'vendor-chat-author';
                     author.textContent = String(msg.username || 'User');
+                    head.appendChild(author);
+                    if (msg.can_edit) {
+                        var editBtn = document.createElement('button');
+                        editBtn.type = 'button';
+                        editBtn.className = 'vendor-chat-edit-btn';
+                        editBtn.textContent = 'Edit';
+                        editBtn.addEventListener('click', function() { startVendorChatMessageEdit(row); });
+                        head.appendChild(editBtn);
+                    }
                     var body = document.createElement('div');
                     body.className = 'vendor-chat-text';
                     body.textContent = String(msg.message || '');
                     var stamp = document.createElement('div');
                     stamp.className = 'vendor-chat-time';
-                    stamp.textContent = formatVendorChatTimestamp(msg.created_at);
-                    bubble.appendChild(author);
+                    stamp.textContent = formatVendorChatStampText(msg);
+                    bubble.appendChild(head);
                     bubble.appendChild(body);
                     bubble.appendChild(stamp);
                     row.appendChild(bubble);
                     log.appendChild(row);
+                    return row;
                 }
                 function renderVendorChatMessages(messages) {
                     var log = document.getElementById('vendorChatLog');
@@ -6672,7 +7343,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     if (!Array.isArray(messages) || !messages.length) {
                         var empty = document.createElement('div');
                         empty.className = 'vendor-chat-empty';
-                        empty.textContent = 'No notes yet for this vendor. Start the conversation by adding the first note.';
+                        empty.textContent = 'No messages yet for this vendor. Notes and automatic status or purpose changes will appear here.';
                         log.appendChild(empty);
                         return;
                     }
@@ -6746,7 +7417,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             }
                             var messages = Array.isArray(d.messages) ? d.messages : [];
                             var signature = messages.map(function(m) {
-                                return String(m.id || '') + '|' + String(m.created_at || '');
+                                return String(m.id || '') + '|' + String(m.created_at || '') + '|' + String(m.edited_at || '') + '|' + String(m.message || '');
                             }).join(',');
                             if (signature === vendorChatLastSignature) {
                                 return;
@@ -7098,7 +7769,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         setAiUiBusy(true);
                     }
                     if (!opts.hideLoader) {
-                        showAiPopulateLoader('Populating purposes with AI…');
+                        showAiPopulateLoader('Populating purposes with AI… For many vendors, this may take up to 3 minutes…');
                     }
                     return fetch(window.location.href, { method: 'POST', body: fd2, credentials: 'same-origin' })
                         .then(function(r) {
@@ -7153,7 +7824,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 };
                 function triggerAutoPopulatePurpose() {
                     appendAiChatMessage('user', 'Auto populate purpose');
-                    showSnackbar('Populating purposes with AI… This may take a minute.', 'info');
+                    showSnackbar('Populating purposes with AI… For many vendors, this may take up to 3 minutes…', 'info');
                     setAiUiBusy(true);
                     runProjectAutoPopulatePurpose(currentActiveProjectId, { silent: true })
                         .then(function(d) {
@@ -7275,6 +7946,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
     </div>
 
     <?php if ($current_view === 'placeholder'): ?>
+    <div class="app-modal-overlay" id="appModalColumnHelp" role="dialog" aria-modal="true" aria-labelledby="appModalColumnHelpTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1" style="max-width:520px;">
+            <div class="app-modal-header">
+                <h2 id="appModalColumnHelpTitle"></h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body" id="appModalColumnHelpBody"></div>
+        </div>
+    </div>
+
     <div class="app-modal-overlay" id="appModalMembersInvite" role="dialog" aria-modal="true" aria-labelledby="appModalMembersInviteTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
@@ -7614,7 +8295,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <label for="bulkActionType">Choose action</label>
                     <select id="bulkActionType">
                         <option value="">Select action</option>
+                        <?php if ($is_admin): ?>
                         <option value="frequency">Update Frequency</option>
+                        <?php endif; ?>
                         <option value="status">Update Status</option>
                         <?php if ($is_admin): ?>
                         <option value="visibility">Update Visibility</option>

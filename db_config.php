@@ -482,6 +482,7 @@ function migrateCostCalculatorSchema(PDO $pdo) {
     migrateVendorDetailSchema($pdo);
     migrateVendorRawTransactionSchema($pdo);
     migrateVendorChatSchema($pdo);
+    migrateVendorChatEditSchema($pdo);
     migrateVendorChatReadStateSchema($pdo);
 }
 
@@ -577,6 +578,37 @@ function migrateVendorChatSchema(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     } catch (PDOException $e) {
         error_log('migrateVendorChatSchema: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Editable manual chat: flag action-log lines and track edit timestamps.
+ *
+ * @param PDO $pdo
+ */
+function migrateVendorChatEditSchema(PDO $pdo): void
+{
+    try {
+        $col = $pdo->query("SHOW COLUMNS FROM `vendor_item_chat_messages` LIKE 'is_action_log'")->fetch();
+        if (!$col) {
+            $pdo->exec('ALTER TABLE `vendor_item_chat_messages` ADD COLUMN `is_action_log` TINYINT(1) NOT NULL DEFAULT 0 AFTER `message`');
+        }
+        $col = $pdo->query("SHOW COLUMNS FROM `vendor_item_chat_messages` LIKE 'edited_at'")->fetch();
+        if (!$col) {
+            $pdo->exec('ALTER TABLE `vendor_item_chat_messages` ADD COLUMN `edited_at` DATETIME NULL AFTER `is_action_log`');
+        }
+        $pdo->exec(
+            "UPDATE `vendor_item_chat_messages` SET `is_action_log` = 1
+             WHERE `is_action_log` = 0
+               AND (
+                 `user_id` = 0
+                 OR `message` LIKE 'Changed status from%'
+                 OR `message` LIKE 'Changed purpose from%'
+                 OR `message` LIKE 'Updated purpose from%'
+               )"
+        );
+    } catch (PDOException $e) {
+        error_log('migrateVendorChatEditSchema: ' . $e->getMessage());
     }
 }
 

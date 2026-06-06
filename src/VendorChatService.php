@@ -9,6 +9,8 @@ class VendorChatService
 {
     private const MESSAGE_MAX_LENGTH = 2000;
 
+    private const EDIT_WINDOW_SECONDS = 3600;
+
     /**
      * @return array{success:bool, error?:string, messages?:array<int, array<string, mixed>>, vendor_name?:string}
      */
@@ -21,7 +23,7 @@ class VendorChatService
 
         try {
             $st = $pdo->prepare(
-                'SELECT id, vendor_item_id, user_id, username_snapshot, message, created_at
+                'SELECT id, vendor_item_id, user_id, username_snapshot, message, is_action_log, edited_at, created_at
                  FROM vendor_item_chat_messages
                  WHERE org_id = ? AND project_id = ? AND vendor_item_id = ?
                  ORDER BY created_at ASC, id ASC'
@@ -31,7 +33,7 @@ class VendorChatService
 
             $messages = [];
             foreach ($rows as $row) {
-                $messages[] = self::mapMessageRow($row);
+                $messages[] = self::mapMessageRow($row, $userId);
             }
 
             self::markThreadRead($pdo, $orgId, $projectId, $vendorItemId, $userId, $role);
@@ -83,8 +85,8 @@ class VendorChatService
         try {
             $ins = $pdo->prepare(
                 'INSERT INTO vendor_item_chat_messages
-                (org_id, project_id, vendor_item_id, user_id, username_snapshot, message)
-                VALUES (?, ?, ?, ?, ?, ?)'
+                (org_id, project_id, vendor_item_id, user_id, username_snapshot, message, is_action_log)
+                VALUES (?, ?, ?, ?, ?, ?, 0)'
             );
             $ins->execute([
                 $orgId,
@@ -97,7 +99,7 @@ class VendorChatService
 
             $msgId = (int) $pdo->lastInsertId();
             $st = $pdo->prepare(
-                'SELECT id, vendor_item_id, user_id, username_snapshot, message, created_at
+                'SELECT id, vendor_item_id, user_id, username_snapshot, message, is_action_log, edited_at, created_at
                  FROM vendor_item_chat_messages
                  WHERE id = ?'
             );
@@ -110,13 +112,190 @@ class VendorChatService
             return [
                 'success' => true,
                 'vendor_name' => (string) ($item['vendor_name'] ?? ''),
-                'message' => self::mapMessageRow($row),
+                'message' => self::mapMessageRow($row, $userId),
             ];
         } catch (PDOException $e) {
             error_log('VendorChatService::addMessage: ' . $e->getMessage());
 
             return ['success' => false, 'error' => 'Unable to save chat message'];
         }
+    }
+
+    /**
+     * Append an automatic action-log line to a vendor chat thread (server-side only).
+     * Failures are logged and do not throw.
+     */
+    public static function appendActionLogEntry(
+        PDO $pdo,
+        int $orgId,
+        int $projectId,
+        int $vendorItemId,
+        int $actorUserId,
+        string $actorName,
+        string $message
+    ): void {
+        if ($vendorItemId <= 0) {
+            return;
+        }
+
+        $cleanMessage = trim(str_replace("\r\n", "\n", $message));
+        if ($cleanMessage === '') {
+            return;
+        }
+        $msgLen = function_exists('mb_strlen') ? mb_strlen($cleanMessage, 'UTF-8') : strlen($cleanMessage);
+        if ($msgLen > self::MESSAGE_MAX_LENGTH) {
+            $cleanMessage = function_exists('mb_substr')
+                ? mb_substr($cleanMessage, 0, self::MESSAGE_MAX_LENGTH, 'UTF-8')
+                : substr($cleanMessage, 0, self::MESSAGE_MAX_LENGTH);
+        }
+
+        $actorName = trim($actorName);
+        if ($actorName === '') {
+            $actorName = $actorUserId > 0 ? self::resolveUsername($pdo, $actorUserId) : 'System';
+        }
+
+        try {
+            $st = $pdo->prepare(
+                'SELECT id FROM cost_calculator_items
+                 WHERE id = ? AND org_id = ? AND project_id = ?
+                 LIMIT 1'
+            );
+            $st->execute([$vendorItemId, $orgId, $projectId]);
+            if (!$st->fetchColumn()) {
+                return;
+            }
+
+            $ins = $pdo->prepare(
+                'INSERT INTO vendor_item_chat_messages
+                (org_id, project_id, vendor_item_id, user_id, username_snapshot, message, is_action_log)
+                VALUES (?, ?, ?, ?, ?, ?, 1)'
+            );
+            $ins->execute([
+                $orgId,
+                $projectId,
+                $vendorItemId,
+                max(0, $actorUserId),
+                $actorName,
+                $cleanMessage,
+            ]);
+        } catch (PDOException $e) {
+            error_log('VendorChatService::appendActionLogEntry: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * @return array{success:bool, error?:string, message?:array<string, mixed>, vendor_name?:string}
+     */
+    public static function editMessage(
+        PDO $pdo,
+        int $orgId,
+        int $projectId,
+        int $vendorItemId,
+        int $messageId,
+        int $userId,
+        string $role,
+        string $message
+    ): array {
+        $item = self::loadAccessibleVendorItem($pdo, $orgId, $projectId, $vendorItemId, $userId, $role);
+        if ($item === null) {
+            return ['success' => false, 'error' => 'Vendor row not found or access denied'];
+        }
+        if ($messageId <= 0) {
+            return ['success' => false, 'error' => 'Message id is required'];
+        }
+
+        $cleanMessage = trim(str_replace("\r\n", "\n", $message));
+        if ($cleanMessage === '') {
+            return ['success' => false, 'error' => 'Message is required'];
+        }
+        $msgLen = function_exists('mb_strlen') ? mb_strlen($cleanMessage, 'UTF-8') : strlen($cleanMessage);
+        if ($msgLen > self::MESSAGE_MAX_LENGTH) {
+            return ['success' => false, 'error' => 'Message exceeds maximum length of 2000 characters'];
+        }
+
+        try {
+            $st = $pdo->prepare(
+                'SELECT id, vendor_item_id, user_id, username_snapshot, message, is_action_log, edited_at, created_at
+                 FROM vendor_item_chat_messages
+                 WHERE id = ? AND org_id = ? AND project_id = ? AND vendor_item_id = ?
+                 LIMIT 1'
+            );
+            $st->execute([$messageId, $orgId, $projectId, $vendorItemId]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                return ['success' => false, 'error' => 'Message not found'];
+            }
+            if (!self::isMessageEditable($row, $userId)) {
+                return ['success' => false, 'error' => 'This message can no longer be edited'];
+            }
+
+            $existing = trim((string) ($row['message'] ?? ''));
+            if ($cleanMessage === $existing) {
+                return [
+                    'success' => true,
+                    'vendor_name' => (string) ($item['vendor_name'] ?? ''),
+                    'message' => self::mapMessageRow($row, $userId),
+                ];
+            }
+
+            $upd = $pdo->prepare(
+                'UPDATE vendor_item_chat_messages
+                 SET message = ?, edited_at = CURRENT_TIMESTAMP
+                 WHERE id = ? AND org_id = ? AND project_id = ? AND vendor_item_id = ?'
+            );
+            $upd->execute([$cleanMessage, $messageId, $orgId, $projectId, $vendorItemId]);
+
+            $st->execute([$messageId, $orgId, $projectId, $vendorItemId]);
+            $updated = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$updated) {
+                return ['success' => false, 'error' => 'Message updated but could not be loaded'];
+            }
+
+            return [
+                'success' => true,
+                'vendor_name' => (string) ($item['vendor_name'] ?? ''),
+                'message' => self::mapMessageRow($updated, $userId),
+            ];
+        } catch (PDOException $e) {
+            error_log('VendorChatService::editMessage: ' . $e->getMessage());
+
+            return ['success' => false, 'error' => 'Unable to update chat message'];
+        }
+    }
+
+    public static function formatStatusChangeMessage(string $fromStatus, string $toStatus): string
+    {
+        $from = VendorService::statusLabel($fromStatus);
+        $to = VendorService::statusLabel($toStatus);
+
+        return 'Changed status from ' . $from . ' to ' . $to . '.';
+    }
+
+    public static function formatPurposeChangeMessage(string $fromPurpose, string $toPurpose, string $verb = 'Changed'): string
+    {
+        $verb = trim($verb);
+        if ($verb === '') {
+            $verb = 'Changed';
+        }
+
+        return $verb . ' purpose from ' . self::formatPurposeForLog($fromPurpose)
+            . ' to ' . self::formatPurposeForLog($toPurpose) . '.';
+    }
+
+    private static function formatPurposeForLog(string $purpose): string
+    {
+        $text = trim(VendorPurposeService::stripAiPurposeUiPrefix($purpose));
+        if ($text === '') {
+            return '(empty)';
+        }
+
+        $maxSnippet = 400;
+        $len = function_exists('mb_strlen') ? mb_strlen($text, 'UTF-8') : strlen($text);
+        if ($len > $maxSnippet) {
+            $text = (function_exists('mb_substr') ? mb_substr($text, 0, $maxSnippet, 'UTF-8') : substr($text, 0, $maxSnippet)) . '…';
+        }
+
+        return $text;
     }
 
     /**
@@ -243,15 +422,15 @@ class VendorChatService
 
         try {
             $selectMsgs = $pdo->prepare(
-                'SELECT user_id, username_snapshot, message, created_at
+                'SELECT user_id, username_snapshot, message, is_action_log, edited_at, created_at
                  FROM vendor_item_chat_messages
                  WHERE org_id = ? AND project_id = ? AND vendor_item_id = ?
                  ORDER BY created_at ASC, id ASC'
             );
             $insertMsg = $pdo->prepare(
                 'INSERT INTO vendor_item_chat_messages
-                (org_id, project_id, vendor_item_id, user_id, username_snapshot, message, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)'
+                (org_id, project_id, vendor_item_id, user_id, username_snapshot, message, is_action_log, edited_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
 
             foreach ($sourceMap as $norm => $sourceItemId) {
@@ -273,6 +452,8 @@ class VendorChatService
                         (int) ($msg['user_id'] ?? 0),
                         (string) ($msg['username_snapshot'] ?? ''),
                         (string) ($msg['message'] ?? ''),
+                        (int) ($msg['is_action_log'] ?? 0),
+                        $msg['edited_at'] ?? null,
                         (string) ($msg['created_at'] ?? date('Y-m-d H:i:s')),
                     ]);
                     ++$copiedMessages;
@@ -416,17 +597,54 @@ class VendorChatService
 
     /**
      * @param array<string, mixed> $row
+     */
+    private static function isMessageEditable(array $row, int $currentUserId): bool
+    {
+        if ($currentUserId <= 0) {
+            return false;
+        }
+        if (!empty($row['is_action_log'])) {
+            return false;
+        }
+        if ((int) ($row['user_id'] ?? 0) !== $currentUserId) {
+            return false;
+        }
+
+        $createdRaw = (string) ($row['created_at'] ?? '');
+        if ($createdRaw === '') {
+            return false;
+        }
+        $createdTs = strtotime($createdRaw);
+        if ($createdTs === false) {
+            return false;
+        }
+
+        return (time() - $createdTs) <= self::EDIT_WINDOW_SECONDS;
+    }
+
+    /**
+     * @param array<string, mixed> $row
      * @return array<string, mixed>
      */
-    private static function mapMessageRow(array $row): array
+    private static function mapMessageRow(array $row, int $currentUserId = 0): array
     {
+        $editedAt = $row['edited_at'] ?? null;
+        if ($editedAt !== null && $editedAt !== '') {
+            $editedAt = (string) $editedAt;
+        } else {
+            $editedAt = null;
+        }
+
         return [
             'id' => (int) ($row['id'] ?? 0),
             'vendor_item_id' => (int) ($row['vendor_item_id'] ?? 0),
             'user_id' => (int) ($row['user_id'] ?? 0),
             'username' => (string) ($row['username_snapshot'] ?? ''),
             'message' => (string) ($row['message'] ?? ''),
+            'is_action_log' => !empty($row['is_action_log']),
+            'edited_at' => $editedAt,
             'created_at' => (string) ($row['created_at'] ?? ''),
+            'can_edit' => self::isMessageEditable($row, $currentUserId),
         ];
     }
 }
