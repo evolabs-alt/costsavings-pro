@@ -635,6 +635,39 @@ function handlePreviewMappedCsvImport() {
     exit;
 }
 
+function handleListMappedCsvAccounts() {
+    header('Content-Type: application/json');
+    $upload = readUploadedCsvFile();
+    if (!($upload['success'] ?? false)) {
+        echo json_encode($upload);
+        exit;
+    }
+    $raw = (string) ($upload['raw'] ?? '');
+    $preview = MappedCsvImport::readPreview($raw);
+    if (!($preview['success'] ?? false)) {
+        echo json_encode($preview);
+        exit;
+    }
+    $columns = isset($preview['columns']) && is_array($preview['columns']) ? $preview['columns'] : [];
+    $mapping = parseColumnMappingFromPost();
+    $mappingError = MappedCsvImport::validateMapping($columns, $mapping);
+    if ($mappingError !== null) {
+        echo json_encode(['success' => false, 'error' => $mappingError]);
+        exit;
+    }
+    if (!MappedCsvImport::isAccountMapped($mapping)) {
+        echo json_encode(['success' => false, 'error' => 'Account column is not mapped']);
+        exit;
+    }
+    $accounts = MappedCsvImport::listAccounts($raw, $mapping);
+    if (count($accounts) === 0) {
+        echo json_encode(['success' => false, 'error' => 'No account values found']);
+        exit;
+    }
+    echo json_encode(['success' => true, 'accounts' => $accounts]);
+    exit;
+}
+
 function handleImportMappedVendorCsv() {
     header('Content-Type: application/json');
     $upload = readUploadedCsvFile();
@@ -655,7 +688,16 @@ function handleImportMappedVendorCsv() {
         echo json_encode(['success' => false, 'error' => $mappingError]);
         exit;
     }
-    $parsed = MappedCsvImport::parse($raw, $mapping);
+    if (MappedCsvImport::isAccountMapped($mapping)) {
+        $selectedAccounts = parseSelectedAccountsFromPost();
+        if (count($selectedAccounts) === 0) {
+            echo json_encode(['success' => false, 'error' => 'No accounts selected']);
+            exit;
+        }
+        $parsed = MappedCsvImport::parse($raw, $mapping, $selectedAccounts);
+    } else {
+        $parsed = MappedCsvImport::parse($raw, $mapping);
+    }
     $summaryRows = isset($parsed['summary']) && is_array($parsed['summary']) ? $parsed['summary'] : [];
     $rawRows = isset($parsed['raw']) && is_array($parsed['raw']) ? $parsed['raw'] : [];
     if (count($summaryRows) === 0) {

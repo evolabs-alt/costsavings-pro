@@ -95,6 +95,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'import_mapped_csv':
                 handleImportMappedVendorCsv();
                 break;
+            case 'list_mapped_csv_accounts':
+                handleListMappedCsvAccounts();
+                break;
             case 'ai_ask':
                 handleAiAsk();
                 break;
@@ -5086,7 +5089,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import' && !postProjectCreateFlow.importCompleted) {
                         advancePostProjectCreateFlow();
                     }
-                    pendingCsvFile = null;
+                    if (csvAccountPickerMode === 'mapped') {
+                        pendingMappedCsvMapping = null;
+                        csvAccountPickerMode = 'qb';
+                        setCsvAccountModalIntro('qb');
+                    } else {
+                        pendingCsvFile = null;
+                    }
                 }
                 if (overlay.id === 'appModalMembersInvite' && postProjectCreateFlow.active && postProjectCreateFlow.step === 'invite_open') {
                     endPostProjectCreateFlow();
@@ -5099,6 +5108,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             var pendingMappedCsvFile = null;
             var pendingMappedCsvFileName = '';
             var pendingMappedTargetFields = [];
+            var pendingMappedCsvMapping = null;
+            var csvAccountPickerMode = 'qb';
+            var CSV_ACCOUNT_INTRO_QB = 'Choose which GL accounts to include. Vendor rows are grouped by payee (Name) from the selected accounts only.';
+            var CSV_ACCOUNT_INTRO_MAPPED = 'Choose which account values to include from your mapped column.';
+            function setCsvAccountModalIntro(mode) {
+                var intro = document.getElementById('appModalCsvAccountsIntro');
+                if (!intro) return;
+                intro.textContent = mode === 'mapped' ? CSV_ACCOUNT_INTRO_MAPPED : CSV_ACCOUNT_INTRO_QB;
+            }
             function updateCsvAccountSelectionStatus() {
                 var list = document.getElementById('csvAccountList');
                 var status = document.getElementById('csvAccountSelectionStatus');
@@ -5214,6 +5232,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         }
                         if (d.format === 'account') {
                             pendingCsvFile = file;
+                            csvAccountPickerMode = 'qb';
+                            setCsvAccountModalIntro('qb');
                             renderCsvAccountList(d.accounts || []);
                             openAppModal('appModalCsvAccounts');
                             return;
@@ -5272,7 +5292,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
                 if (importBtn) {
                     importBtn.addEventListener('click', function() {
-                        if (!pendingCsvFile || !list) return;
+                        if (!list) return;
                         var selected = [];
                         list.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) {
                             if (cb.value) selected.push(cb.value);
@@ -5282,8 +5302,30 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             return;
                         }
                         setButtonLoading(importBtn, true, 'Importing…');
-                        runCsvImport(pendingCsvFile, selected).then(function() {
-                            pendingCsvFile = null;
+                        var importPromise;
+                        if (csvAccountPickerMode === 'mapped') {
+                            if (!pendingMappedCsvFile || !pendingMappedCsvMapping) {
+                                setButtonLoading(importBtn, false);
+                                return;
+                            }
+                            importPromise = runMappedCsvImport(pendingMappedCsvFile, pendingMappedCsvMapping, selected).then(function() {
+                                pendingMappedCsvFile = null;
+                                pendingMappedCsvFileName = '';
+                                pendingMappedTargetFields = [];
+                                pendingMappedCsvMapping = null;
+                                csvAccountPickerMode = 'qb';
+                                setCsvAccountModalIntro('qb');
+                            });
+                        } else {
+                            if (!pendingCsvFile) {
+                                setButtonLoading(importBtn, false);
+                                return;
+                            }
+                            importPromise = runCsvImport(pendingCsvFile, selected).then(function() {
+                                pendingCsvFile = null;
+                            });
+                        }
+                        importPromise.then(function() {
                             closeAppModal(document.getElementById('appModalCsvAccounts'));
                         }).finally(function() {
                             setButtonLoading(importBtn, false);
@@ -5324,11 +5366,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
                 return { valid: true, mapping: mapping };
             }
+            function isAccountMappedInForm() {
+                var mapping = collectCsvMappingFromForm();
+                var account = mapping.account;
+                return account !== null && account !== undefined && String(account).trim() !== '';
+            }
             function updateCsvMappingImportButton(targetFields) {
                 var importBtn = document.getElementById('csvMappingImportBtn');
                 if (!importBtn) return;
                 var result = validateCsvMapping(targetFields || []);
                 importBtn.disabled = !result.valid;
+                importBtn.textContent = isAccountMappedInForm() ? 'Continue' : 'Import';
             }
             function renderCsvSamplePreview(columns, sampleRows) {
                 var wrap = document.getElementById('csvSamplePreviewWrap');
@@ -5399,7 +5447,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 });
                 updateCsvMappingImportButton(targetFields);
             }
-            function runMappedCsvImport(file, mapping) {
+            function runMappedCsvImport(file, mapping, selectedAccounts) {
                 if (!file) {
                     showSnackbar('No file to import', 'error');
                     return Promise.resolve();
@@ -5408,6 +5456,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 fd.append('action', 'import_mapped_csv');
                 fd.append('csv_file', file);
                 fd.append('column_mapping', JSON.stringify(mapping || {}));
+                if (selectedAccounts && selectedAccounts.length > 0) {
+                    fd.append('selected_accounts', JSON.stringify(selectedAccounts));
+                }
                 return fetch(window.location.href, { method: 'POST', body: fd })
                     .then(function(r) { return r.json(); })
                     .then(function(d) {
@@ -5486,6 +5537,36 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         var validation = validateCsvMapping(pendingMappedTargetFields);
                         if (!validation.valid) {
                             showSnackbar(validation.error || 'Complete the column mapping', 'error');
+                            return;
+                        }
+                        var accountMapped = validation.mapping.account &&
+                            String(validation.mapping.account).trim() !== '';
+                        if (accountMapped) {
+                            setButtonLoading(importBtn, true, 'Loading…');
+                            var fd = new FormData();
+                            fd.append('action', 'list_mapped_csv_accounts');
+                            fd.append('csv_file', pendingMappedCsvFile);
+                            fd.append('column_mapping', JSON.stringify(validation.mapping));
+                            fetch(window.location.href, { method: 'POST', body: fd })
+                                .then(function(r) { return r.json(); })
+                                .then(function(d) {
+                                    if (!d.success) {
+                                        showSnackbar(d.error || 'Could not read accounts', 'error');
+                                        return;
+                                    }
+                                    pendingMappedCsvMapping = validation.mapping;
+                                    csvAccountPickerMode = 'mapped';
+                                    setCsvAccountModalIntro('mapped');
+                                    renderCsvAccountList(d.accounts || []);
+                                    closeAppModal(document.getElementById('appModalCsvMapping'));
+                                    openAppModal('appModalCsvAccounts');
+                                })
+                                .catch(function() {
+                                    showSnackbar('Could not read accounts', 'error');
+                                })
+                                .finally(function() {
+                                    setButtonLoading(importBtn, false);
+                                });
                             return;
                         }
                         setButtonLoading(importBtn, true, 'Importing…');
@@ -8499,7 +8580,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
             </div>
             <div class="app-modal-body">
-                <p style="margin:0 0 10px;font-size:14px;color:#4b5563;line-height:1.5;">Choose which GL accounts to include. Vendor rows are grouped by payee (Name) from the selected accounts only.</p>
+                <p id="appModalCsvAccountsIntro" style="margin:0 0 10px;font-size:14px;color:#4b5563;line-height:1.5;">Choose which GL accounts to include. Vendor rows are grouped by payee (Name) from the selected accounts only.</p>
                 <div class="data-actions">
                     <button type="button" class="btn-secondary" id="csvAccountSelectAllBtn">Select all</button>
                     <button type="button" class="btn-secondary" id="csvAccountClearBtn">Clear</button>

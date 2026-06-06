@@ -33,6 +33,16 @@ class MappedCsvImport
     }
 
     /**
+     * @param array<string, string|null> $columnMapping
+     */
+    public static function isAccountMapped(array $columnMapping): bool
+    {
+        $mapped = array_key_exists('account', $columnMapping) ? $columnMapping['account'] : null;
+
+        return is_string($mapped) && trim($mapped) !== '';
+    }
+
+    /**
      * @return array{
      *   success: bool,
      *   columns?: array<int, string>,
@@ -67,13 +77,62 @@ class MappedCsvImport
 
     /**
      * @param array<string, string|null> $columnMapping
+     * @return array<int, array{name:string, transaction_count:int}>
+     */
+    public static function listAccounts(string $csvText, array $columnMapping): array
+    {
+        if (!self::isAccountMapped($columnMapping)) {
+            return [];
+        }
+
+        $ctx = self::resolveHeaderContext($csvText);
+        if ($ctx === null) {
+            return [];
+        }
+
+        $indexMap = self::buildColumnIndexMap($ctx['columns'], $columnMapping);
+        if (($indexMap['account'] ?? null) === null) {
+            return [];
+        }
+
+        $counts = [];
+        $order = [];
+        $lastAccount = '';
+
+        foreach ($ctx['data_rows'] as $parsed) {
+            $row = self::parseMappedRow($parsed, $indexMap, $lastAccount);
+            if ($row === null || $row['account'] === '') {
+                continue;
+            }
+            $name = $row['account'];
+            if (!array_key_exists($name, $counts)) {
+                $counts[$name] = 0;
+                $order[] = $name;
+            }
+            $counts[$name]++;
+        }
+
+        $accounts = [];
+        foreach ($order as $name) {
+            $accounts[] = [
+                'name' => $name,
+                'transaction_count' => $counts[$name],
+            ];
+        }
+
+        return $accounts;
+    }
+
+    /**
+     * @param array<string, string|null> $columnMapping
+     * @param array<int, string>|null $selectedAccounts
      * @return array{
      *   summary: array<int, array{vendor_name:string,cost_per_period:float,frequency:string,annual_cost:float,last_payment_date:?string}>,
      *   raw: array<int, array{vendor_name:string,transaction_date:string,amount:float,transaction_type:string,account:string,memo:string}>,
      *   skipped_rows: int
      * }
      */
-    public static function parse(string $csvText, array $columnMapping): array
+    public static function parse(string $csvText, array $columnMapping, ?array $selectedAccounts = null): array
     {
         $ctx = self::resolveHeaderContext($csvText);
         if ($ctx === null) {
@@ -81,14 +140,23 @@ class MappedCsvImport
         }
 
         $indexMap = self::buildColumnIndexMap($ctx['columns'], $columnMapping);
+        $accountMapped = self::isAccountMapped($columnMapping);
+        $filter = self::buildAccountFilter($accountMapped, $selectedAccounts);
         $rawRows = [];
         $skipped = 0;
+        $lastAccount = '';
 
         foreach ($ctx['data_rows'] as $parsed) {
-            $row = self::parseMappedRow($parsed, $indexMap);
+            $row = self::parseMappedRow($parsed, $indexMap, $lastAccount);
             if ($row === null) {
                 $skipped++;
                 continue;
+            }
+            if ($filter !== null) {
+                if ($row['account'] === '' || !isset($filter[$row['account']])) {
+                    $skipped++;
+                    continue;
+                }
             }
             $rawRows[] = $row;
         }
@@ -228,11 +296,32 @@ class MappedCsvImport
     }
 
     /**
+     * @param array<int, string>|null $selectedAccounts
+     * @return array<string, true>|null
+     */
+    private static function buildAccountFilter(bool $accountMapped, ?array $selectedAccounts): ?array
+    {
+        if (!$accountMapped || $selectedAccounts === null) {
+            return null;
+        }
+
+        $filter = [];
+        foreach ($selectedAccounts as $account) {
+            $key = trim((string) $account);
+            if ($key !== '') {
+                $filter[$key] = true;
+            }
+        }
+
+        return $filter;
+    }
+
+    /**
      * @param array<int, string> $parsed
      * @param array<string, int|null> $indexMap
      * @return array{vendor_name:string,transaction_date:string,amount:float,transaction_type:string,account:string,memo:string}|null
      */
-    private static function parseMappedRow(array $parsed, array $indexMap): ?array
+    private static function parseMappedRow(array $parsed, array $indexMap, string &$lastAccount): ?array
     {
         $vendorName = self::cellValue($parsed, $indexMap['vendor_name'] ?? null);
         $dateRaw = self::cellValue($parsed, $indexMap['transaction_date'] ?? null);
@@ -254,8 +343,7 @@ class MappedCsvImport
             return null;
         }
 
-        $accountIdx = $indexMap['account'] ?? null;
-        $account = $accountIdx !== null ? self::cellValue($parsed, $accountIdx) : '';
+        $account = self::resolveAccountValue($parsed, $indexMap['account'] ?? null, $lastAccount);
 
         return [
             'vendor_name' => $vendorName,
@@ -265,6 +353,23 @@ class MappedCsvImport
             'account' => $account,
             'memo' => $memo,
         ];
+    }
+
+    /**
+     * @param array<int, string> $parsed
+     */
+    private static function resolveAccountValue(array $parsed, ?int $accountIdx, string &$lastAccount): string
+    {
+        if ($accountIdx === null) {
+            return '';
+        }
+
+        $accountRaw = self::cellValue($parsed, $accountIdx);
+        if ($accountRaw !== '') {
+            $lastAccount = $accountRaw;
+        }
+
+        return $lastAccount;
     }
 
     /**
