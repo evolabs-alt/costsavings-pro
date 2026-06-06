@@ -5138,7 +5138,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
                 if (importBtn) importBtn.disabled = checked === 0;
             }
-            function renderCsvAccountList(accounts) {
+            function renderCsvAccountList(accounts, autoSelectAll) {
                 var list = document.getElementById('csvAccountList');
                 if (!list) return;
                 list.innerHTML = '';
@@ -5156,6 +5156,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     cb.value = name;
                     cb.setAttribute('data-txn-count', String(count));
                     cb.addEventListener('change', updateCsvAccountSelectionStatus);
+                    if (autoSelectAll) {
+                        cb.checked = true;
+                    }
                     list.appendChild(row);
                 });
                 updateCsvAccountSelectionStatus();
@@ -5234,7 +5237,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             pendingCsvFile = file;
                             csvAccountPickerMode = 'qb';
                             setCsvAccountModalIntro('qb');
-                            renderCsvAccountList(d.accounts || []);
+                            renderCsvAccountList(d.accounts || [], false);
                             openAppModal('appModalCsvAccounts');
                             return;
                         }
@@ -5557,7 +5560,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     pendingMappedCsvMapping = validation.mapping;
                                     csvAccountPickerMode = 'mapped';
                                     setCsvAccountModalIntro('mapped');
-                                    renderCsvAccountList(d.accounts || []);
+                                    renderCsvAccountList(d.accounts || [], true);
                                     closeAppModal(document.getElementById('appModalCsvMapping'));
                                     openAppModal('appModalCsvAccounts');
                                 })

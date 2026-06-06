@@ -100,8 +100,16 @@ class MappedCsvImport
         $lastAccount = '';
 
         foreach ($ctx['data_rows'] as $parsed) {
+            $prevAccount = $lastAccount;
             $row = self::parseMappedRow($parsed, $indexMap, $lastAccount);
-            if ($row === null || $row['account'] === '') {
+            if ($row === null) {
+                if ($lastAccount !== '' && $lastAccount !== $prevAccount && !array_key_exists($lastAccount, $counts)) {
+                    $counts[$lastAccount] = 0;
+                    $order[] = $lastAccount;
+                }
+                continue;
+            }
+            if ($row['account'] === '') {
                 continue;
             }
             $name = $row['account'];
@@ -323,6 +331,11 @@ class MappedCsvImport
      */
     private static function parseMappedRow(array $parsed, array $indexMap, string &$lastAccount): ?array
     {
+        $accountIdx = $indexMap['account'] ?? null;
+        if ($accountIdx !== null) {
+            self::resolveAccountValue($parsed, $accountIdx, $lastAccount);
+        }
+
         $vendorName = self::cellValue($parsed, $indexMap['vendor_name'] ?? null);
         $dateRaw = self::cellValue($parsed, $indexMap['transaction_date'] ?? null);
         $amountRaw = self::cellValue($parsed, $indexMap['amount'] ?? null);
@@ -343,7 +356,7 @@ class MappedCsvImport
             return null;
         }
 
-        $account = self::resolveAccountValue($parsed, $indexMap['account'] ?? null, $lastAccount);
+        $account = $accountIdx !== null ? $lastAccount : '';
 
         return [
             'vendor_name' => $vendorName,
