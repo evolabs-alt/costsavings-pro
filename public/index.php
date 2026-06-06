@@ -5054,6 +5054,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 modal.style.transform = '';
                 modal.style.maxHeight = '';
             }
+            var appModalZCounter = 10000;
             function openAppModal(overlay) {
                 if (!overlay) return;
                 if (typeof overlay === 'string') {
@@ -5064,6 +5065,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 resetAppModalPosition(modal);
                 overlay.classList.add('is-open');
                 overlay.setAttribute('aria-hidden', 'false');
+                appModalZCounter += 1;
+                overlay.style.zIndex = String(appModalZCounter);
                 document.body.style.overflow = 'hidden';
                 var focusable = overlay.querySelector('button, [href], input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])');
                 if (focusable) focusable.focus();
@@ -5078,6 +5081,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 resetAppModalPosition(modal);
                 overlay.classList.remove('is-open');
                 overlay.setAttribute('aria-hidden', 'true');
+                overlay.style.zIndex = '';
                 if (overlay.id === 'appModalVendorChat') {
                     activeVendorChatItemId = 0;
                     activeVendorChatVendorName = '';
@@ -5104,13 +5108,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     }
                 }
                 if (overlay.id === 'appModalCsvMapping') {
-                    if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import' && !postProjectCreateFlow.importCompleted) {
-                        advancePostProjectCreateFlow();
+                    if (suppressCsvMappingModalCleanup) {
+                        suppressCsvMappingModalCleanup = false;
+                    } else {
+                        if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import' && !postProjectCreateFlow.importCompleted) {
+                            advancePostProjectCreateFlow();
+                        }
+                        pendingMappedCsvFile = null;
+                        pendingMappedCsvFileName = '';
+                        pendingMappedTargetFields = [];
+                        pendingMappedCsvMapping = null;
                     }
-                    pendingMappedCsvFile = null;
-                    pendingMappedCsvFileName = '';
-                    pendingMappedTargetFields = [];
-                    pendingMappedCsvMapping = null;
                 }
                 if (overlay.id === 'appModalMembersInvite' && postProjectCreateFlow.active && postProjectCreateFlow.step === 'invite_open') {
                     endPostProjectCreateFlow();
@@ -5125,6 +5133,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             var pendingMappedTargetFields = [];
             var pendingMappedCsvMapping = null;
             var csvAccountPickerMode = 'qb';
+            var suppressCsvMappingModalCleanup = false;
             var CSV_ACCOUNT_INTRO_QB = 'Choose which GL accounts to include. Vendor rows are grouped by payee (Name) from the selected accounts only.';
             var CSV_ACCOUNT_INTRO_MAPPED = 'Choose which account values to include from your mapped column.';
             function setCsvAccountModalIntro(mode) {
@@ -5324,6 +5333,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         if (csvAccountPickerMode === 'mapped') {
                             if (!pendingMappedCsvFile || !pendingMappedCsvMapping) {
                                 setButtonLoading(importBtn, false);
+                                showSnackbar('Import session expired. Please upload the CSV again.', 'error');
                                 return;
                             }
                             importPromise = runMappedCsvImport(pendingMappedCsvFile, pendingMappedCsvMapping, selected).then(function() {
@@ -5337,6 +5347,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         } else {
                             if (!pendingCsvFile) {
                                 setButtonLoading(importBtn, false);
+                                showSnackbar('No file to import. Please upload the CSV again.', 'error');
                                 return;
                             }
                             importPromise = runCsvImport(pendingCsvFile, selected).then(function() {
@@ -5609,6 +5620,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     csvAccountPickerMode = 'mapped';
                                     setCsvAccountModalIntro('mapped');
                                     renderCsvAccountList(d.accounts || [], true);
+                                    suppressCsvMappingModalCleanup = true;
                                     closeAppModal(document.getElementById('appModalCsvMapping'));
                                     openAppModal('appModalCsvAccounts');
                                 })
