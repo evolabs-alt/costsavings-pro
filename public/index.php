@@ -4875,7 +4875,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 if (csvIn && !csvIn.dataset.csvBound) {
                     csvIn.dataset.csvBound = '1';
                     csvIn.addEventListener('change', function() {
-                        handleCsvFileSelected(this.files[0], this);
+                        handleMappedCsvFileSelected(this.files[0], this);
                     });
                 }
                 if (chooseBtn && csvIn) {
@@ -5102,6 +5102,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     } else {
                         pendingCsvFile = null;
                     }
+                }
+                if (overlay.id === 'appModalCsvMapping') {
+                    if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import' && !postProjectCreateFlow.importCompleted) {
+                        advancePostProjectCreateFlow();
+                    }
+                    pendingMappedCsvFile = null;
+                    pendingMappedCsvFileName = '';
+                    pendingMappedTargetFields = [];
+                    pendingMappedCsvMapping = null;
                 }
                 if (overlay.id === 'appModalMembersInvite' && postProjectCreateFlow.active && postProjectCreateFlow.step === 'invite_open') {
                     endPostProjectCreateFlow();
@@ -5459,6 +5468,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             function runMappedCsvImport(file, mapping, selectedAccounts) {
                 if (!file) {
                     showSnackbar('No file to import', 'error');
+                    if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
+                        advancePostProjectCreateFlow();
+                    }
                     return Promise.resolve();
                 }
                 var fd = new FormData();
@@ -5479,16 +5491,40 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 msg += ' (' + skipped + ' row(s) skipped)';
                             }
                             showSnackbar(msg, 'success');
-                            return loadCalculatorData();
+                            var flowActive = postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import';
+                            if (flowActive) {
+                                postProjectCreateFlow.importCompleted = true;
+                            }
+                            var loadP = loadCalculatorData();
+                            if (flowActive) {
+                                return (loadP || Promise.resolve()).then(function() {
+                                    advancePostProjectCreateFlow();
+                                });
+                            }
+                            return loadP;
                         }
                         showSnackbar(d.error || 'Import failed', 'error');
+                        if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
+                            advancePostProjectCreateFlow();
+                        }
                     })
                     .catch(function() {
                         showSnackbar('Import failed', 'error');
+                        if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
+                            advancePostProjectCreateFlow();
+                        }
                     });
             }
             function handleMappedCsvFileSelected(file, inputEl) {
-                if (!file) return;
+                if (!file) {
+                    if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
+                        advancePostProjectCreateFlow();
+                    }
+                    return;
+                }
+                if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload') {
+                    postProjectCreateFlow.step = 'upload_waiting_import';
+                }
                 pendingMappedCsvFileName = file.name || 'CSV file';
                 var fd = new FormData();
                 fd.append('action', 'preview_mapped_csv');
@@ -5498,6 +5534,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     .then(function(d) {
                         if (!d.success) {
                             showSnackbar(d.error || 'Could not read CSV', 'error');
+                            if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
+                                advancePostProjectCreateFlow();
+                            }
                             return;
                         }
                         pendingMappedCsvFile = file;
@@ -5513,6 +5552,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     })
                     .catch(function() {
                         showSnackbar('Could not read CSV', 'error');
+                        if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
+                            advancePostProjectCreateFlow();
+                        }
                     })
                     .finally(function() {
                         if (inputEl) inputEl.value = '';
@@ -8519,7 +8561,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             </div>
             <div class="app-modal-body">
                 <p id="postCreateUploadSubtitle" style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;"></p>
-                <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.5;">Upload a QuickBooks export CSV (Transaction Detail by Account or Transaction List by Vendor).</p>
+                <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.5;">Upload a CSV file, then map columns to import vendor data for this project.</p>
                 <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
                     <button type="button" class="btn-secondary" id="postCreateUploadSkipBtn">Skip for now</button>
                     <button type="button" id="postCreateUploadChooseBtn">Choose CSV file</button>
