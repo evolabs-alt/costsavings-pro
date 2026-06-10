@@ -311,11 +311,11 @@ class VendorService
         try {
             if (OrgRole::isSuperAdmin($actingRole)) {
                 $existing = $pdo->prepare(
-                    'SELECT id FROM cost_calculator_items WHERE org_id = ? AND project_id = ?'
+                    'SELECT id, vendor_name FROM cost_calculator_items WHERE org_id = ? AND project_id = ?'
                 );
             } elseif (OrgRole::isPrivileged($actingRole)) {
                 $existing = $pdo->prepare(
-                    'SELECT id FROM cost_calculator_items WHERE org_id = ? AND project_id = ? AND visibility = \'public\''
+                    'SELECT id, vendor_name FROM cost_calculator_items WHERE org_id = ? AND project_id = ? AND visibility = \'public\''
                 );
             } else {
                 $pdo->rollBack();
@@ -324,8 +324,11 @@ class VendorService
             }
             $existing->execute([$orgId, $projectId]);
             $allowedIds = [];
+            $existingVendorNames = [];
             while ($r = $existing->fetch(PDO::FETCH_ASSOC)) {
-                $allowedIds[(int) $r['id']] = true;
+                $id = (int) $r['id'];
+                $allowedIds[$id] = true;
+                $existingVendorNames[$id] = trim((string) ($r['vendor_name'] ?? ''));
             }
 
             $payloadIds = [];
@@ -361,11 +364,17 @@ class VendorService
                         continue;
                     }
                     $payloadIds[$rowId] = true;
+                    $vendorName = trim((string) ($item['vendor_name'] ?? ''));
+                    if ($vendorName === ''
+                        && isset($existingVendorNames[$rowId])
+                        && $existingVendorNames[$rowId] !== '') {
+                        $vendorName = $existingVendorNames[$rowId];
+                    }
                     $upd->execute([
                         $adminUserId,
                         $email,
                         $mgr,
-                        $item['vendor_name'] ?? '',
+                        $vendorName,
                         (float) ($item['cost_per_period'] ?? 0),
                         $item['frequency'] ?? '',
                         (float) ($item['annual_cost'] ?? 0),

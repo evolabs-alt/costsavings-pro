@@ -732,7 +732,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         /* Cost Savings Pro Tool grid */
         .cost-calculator-table-wrapper {
-            overflow-x: auto;
+            overflow-x: visible;
             overflow-y: visible;
             -webkit-overflow-scrolling: touch;
             margin: 20px 0;
@@ -774,12 +774,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .cost-calculator-grid th {
+            position: sticky;
+            top: 0;
+            z-index: 25;
             padding: 8px 6px;
             text-align: left;
             font-weight: 600;
             border: 1px solid var(--color-primary-hover);
             font-size: 13px;
             white-space: nowrap;
+            background: var(--color-primary);
+            box-shadow: 0 1px 0 var(--color-primary-hover);
         }
 
         .cost-calculator-grid td {
@@ -1011,7 +1016,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .cost-calculator-grid th.th-with-filter {
-            position: relative;
+            position: sticky;
+            top: 0;
+            z-index: 25;
             vertical-align: middle;
         }
 
@@ -5071,8 +5078,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         if (mainAppContainer) mainAppContainer.classList.remove('project-onboarding-hidden');
                         closeAppModal('appModalProjectWizard');
                         var loadPromise = loadProjectsIntoMenu().then(function() {
-                            var calc = loadCalculatorData();
-                            return calc || Promise.resolve();
+                            return loadCalculatorData();
+                        }).then(function() {
+                            return typeof window.waitForCalculatorSaveIdle === 'function'
+                                ? window.waitForCalculatorSaveIdle()
+                                : Promise.resolve();
                         });
                         loadPromise.then(function() {
                             if (canCreateProjects) {
@@ -5257,12 +5267,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             if (flowActive) {
                                 postProjectCreateFlow.importCompleted = true;
                             }
-                            var loadP = loadCalculatorData();
-                            if (flowActive) {
-                                return (loadP || Promise.resolve()).then(function() {
-                                    advancePostProjectCreateFlow();
-                                });
-                            }
+                            return reloadCalculatorAfterImport(flowActive);
                         } else {
                             showSnackbar(d.error || 'Import failed', 'error');
                             if (flowActive) {
@@ -5575,13 +5580,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             if (flowActive) {
                                 postProjectCreateFlow.importCompleted = true;
                             }
-                            var loadP = loadCalculatorData();
-                            if (flowActive) {
-                                return (loadP || Promise.resolve()).then(function() {
-                                    advancePostProjectCreateFlow();
-                                });
-                            }
-                            return loadP;
+                            return reloadCalculatorAfterImport(flowActive);
                         }
                         showSnackbar(d.error || 'Import failed', 'error');
                         if (flowActive) {
@@ -6477,6 +6476,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             let saveTimeout;
             /** True while repopulating rows from the server — avoids save races (partial DELETE/INSERT) from synthetic events. */
             let calculatorLoadInProgress = false;
+            /** Incremented on each load start; stale fetch responses are ignored. */
+            let calculatorLoadGeneration = 0;
             /** Serialize saves: server replaces all rows per request; overlapping saves must not complete out of order. */
             let saveQueue = Promise.resolve();
             /** Abort stale in-flight save HTTP requests so an older payload cannot commit after a newer save was sent (bulk vs autosave races). */
@@ -6506,6 +6507,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const itemsPayload = Array.isArray(opts.items) ? opts.items : null;
                 if (calculatorLoadInProgress && !keepalive) {
                     return Promise.resolve({ success: false, error: 'Still loading vendor data; save skipped.' });
+                }
+                if (postProjectCreateFlow.postCreateCsvImportInFlight && !keepalive) {
+                    return Promise.resolve({ success: false, error: 'Import in progress; save skipped.' });
                 }
                 saveQueue = saveQueue.then(function () {
                     return performSaveCalculatorData(keepalive, silent, itemsPayload);
@@ -7113,6 +7117,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     const cancelDl = deadlineIn && deadlineIn.value ? deadlineIn.value : '';
                     const lastPay = lastPayIn && lastPayIn.value ? lastPayIn.value : '';
 
+                    if (idVal && !vendorName && costPerPeriod <= 0 && !notes && status === 'pending') {
+                        return;
+                    }
                     if (vendorName || costPerPeriod > 0 || status !== 'pending' || notes || idVal) {
                         const o = {
                             vendor_name: vendorName,
@@ -7196,7 +7203,30 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 saveCalculatorData({ keepalive: true, silent: true });
             }
             
+            function reloadCalculatorAfterImport(flowActive) {
+                clearTimeout(saveTimeout);
+                var waitIdle = typeof window.waitForCalculatorSaveIdle === 'function'
+                    ? window.waitForCalculatorSaveIdle()
+                    : Promise.resolve();
+                return waitIdle.then(function() {
+                    return loadCalculatorData();
+                }).then(function() {
+                    return typeof window.waitForCalculatorSaveIdle === 'function'
+                        ? window.waitForCalculatorSaveIdle()
+                        : Promise.resolve();
+                }).then(function() {
+                    if (flowActive) {
+                        advancePostProjectCreateFlow();
+                    }
+                });
+            }
+
             function loadCalculatorData() {
+                clearTimeout(saveTimeout);
+                calculatorLoadGeneration += 1;
+                var loadGeneration = calculatorLoadGeneration;
+                calculatorLoadInProgress = true;
+
                 const formData = new FormData();
                 formData.append('action', 'load_cost_calculator');
                 
@@ -7206,7 +7236,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 })
                 .then(response => response.json())
                 .then(data => {
-                    calculatorLoadInProgress = true;
+                    if (loadGeneration !== calculatorLoadGeneration) {
+                        return;
+                    }
                     try {
                         if (data.success && data.items && data.items.length > 0) {
                             // Clear existing rows
@@ -7313,19 +7345,25 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             applyVendorTablePagination(1, filterSelect ? filterSelect.value : 'all');
                         }
                     } finally {
-                        calculatorLoadInProgress = false;
+                        if (loadGeneration === calculatorLoadGeneration) {
+                            calculatorLoadInProgress = false;
+                        }
                     }
                 })
                 .catch(error => {
+                    if (loadGeneration !== calculatorLoadGeneration) {
+                        return;
+                    }
                     console.error('Error loading data:', error);
-                    calculatorLoadInProgress = true;
                     try {
                         addCalculatorRow();
                         clearRowSelection();
                         const filterSelect = document.getElementById('reportFilter');
                         applyVendorTablePagination(1, filterSelect ? filterSelect.value : 'all');
                     } finally {
-                        calculatorLoadInProgress = false;
+                        if (loadGeneration === calculatorLoadGeneration) {
+                            calculatorLoadInProgress = false;
+                        }
                     }
                 });
             }
