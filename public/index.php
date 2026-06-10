@@ -6256,7 +6256,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 bulkManager.innerHTML = managerOptionsHtml('');
             }
             
-            function addCalculatorRow() {
+            function addCalculatorRow(options) {
+                options = options || {};
                 rowCount++;
                 const tbody = document.getElementById('calculatorRows');
                 const row = document.createElement('tr');
@@ -6351,7 +6352,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const rowCheckbox = row.querySelector('.row-select-checkbox');
                 if (rowCheckbox) rowCheckbox.addEventListener('change', updateSelectAllCheckboxState);
 
-                applyVendorTablePagination(vendorCurrentPage);
+                if (!options.skipPagination) {
+                    applyVendorTablePagination(vendorCurrentPage);
+                }
+                return row;
             }
             
             function attachRowListeners(row) {
@@ -7247,8 +7251,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             
                             // Load saved items (do not dispatch change on the status select — that triggered immediate saves mid-load and corrupted rows)
                             data.items.forEach(item => {
-                                addCalculatorRow();
-                                const lastRow = document.querySelector('#calculatorRows tr:last-child');
+                                const lastRow = addCalculatorRow({ skipPagination: true });
                                 if (lastRow) {
                                     const rowIdEl = lastRow.querySelector('.row-db-id');
                                     if (rowIdEl && item.id) rowIdEl.value = String(item.id);
@@ -7317,8 +7320,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     }
                                     
                                     if (costInput && frequencySelect) {
-                                        const event = new Event('input');
-                                        costInput.dispatchEvent(event);
+                                        calculateAnnualCost({ target: costInput });
                                     }
                                 }
                             });
