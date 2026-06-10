@@ -4649,10 +4649,42 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 previousActiveProjectId: 0,
                 step: null,
                 importCompleted: false,
+                purposeCheckInFlight: false,
+                postCreateCsvImportInFlight: false,
                 copyPurposes: null,
                 copyChats: null,
                 overwriteBlankPurposes: false
             };
+
+            function isPostCreateUploadWaiting() {
+                return postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import';
+            }
+
+            function isPostCreateCsvModalId(modalId) {
+                return modalId === 'appModalCsvAccounts' || modalId === 'appModalCsvMapping';
+            }
+
+            function reopenPostCreateUploadModal() {
+                postProjectCreateFlow.step = 'upload';
+                postProjectCreateFlow.importCompleted = false;
+                setPostCreateSubtitle('postCreateUploadSubtitle', 1);
+                openAppModal('appModalPostCreateUpload');
+            }
+
+            function handlePostCreateImportFailure() {
+                if (!isPostCreateUploadWaiting()) return;
+                postProjectCreateFlow.postCreateCsvImportInFlight = false;
+                closeAppModal('appModalCsvAccounts');
+                closeAppModal('appModalCsvMapping');
+                reopenPostCreateUploadModal();
+            }
+
+            function maybeReturnToPostCreateUploadAfterCsvClose(modalId) {
+                if (!isPostCreateUploadWaiting()) return;
+                if (postProjectCreateFlow.postCreateCsvImportInFlight) return;
+                if (!isPostCreateCsvModalId(modalId)) return;
+                reopenPostCreateUploadModal();
+            }
 
             function postCreateFlowStepLabel(stepNum) {
                 var name = postProjectCreateFlow.projectName || 'your project';
@@ -4749,12 +4781,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             }
 
             function proceedToPurposeOrInvite() {
+                if (postProjectCreateFlow.purposeCheckInFlight) return;
                 var projectId = parseInt(postProjectCreateFlow.projectId, 10) || parseInt(currentActiveProjectId, 10) || 0;
                 if (!projectId) {
                     postProjectCreateFlow.step = 'invite';
                     openPostCreateInviteModal();
                     return;
                 }
+                postProjectCreateFlow.purposeCheckInFlight = true;
                 var syncActive = postJson({ action: 'project_set_active', project_id: projectId }).then(function(d) {
                     if (d && d.success) {
                         currentActiveProjectId = projectId;
@@ -4802,22 +4836,29 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 window.applyPurposeLookupResultsToUi(d.resolved);
                             }
                         });
+                    }).then(function() {
+                        postProjectCreateFlow.step = 'purpose';
+                        openPostCreatePurposeModal();
+                    }).catch(function() {
+                        showSnackbar('Could not finish purpose setup.', 'error');
+                        postProjectCreateFlow.step = 'purpose';
+                        openPostCreatePurposeModal();
+                    }).finally(function() {
+                        hideAiPopulateLoader();
                     });
-                }).then(function() {
-                    postProjectCreateFlow.step = 'purpose';
-                    openPostCreatePurposeModal();
                 }).catch(function() {
                     showSnackbar('Could not finish purpose setup.', 'error');
                     postProjectCreateFlow.step = 'purpose';
                     openPostCreatePurposeModal();
                 }).finally(function() {
-                    hideAiPopulateLoader();
+                    postProjectCreateFlow.purposeCheckInFlight = false;
                 });
             }
 
             function advancePostProjectCreateFlow() {
                 if (!postProjectCreateFlow.active) return;
                 var step = postProjectCreateFlow.step;
+                if (step === 'purpose_check') return;
                 if (step === 'upload' || step === 'upload_waiting_import') {
                     postProjectCreateFlow.step = 'purpose_check';
                     proceedToPurposeOrInvite();
@@ -4835,6 +4876,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 postProjectCreateFlow.active = false;
                 postProjectCreateFlow.step = null;
                 postProjectCreateFlow.importCompleted = false;
+                postProjectCreateFlow.purposeCheckInFlight = false;
+                postProjectCreateFlow.postCreateCsvImportInFlight = false;
                 closeAppModal('appModalPostCreateUpload');
                 closeAppModal('appModalPostCreatePurpose');
                 closeAppModal('appModalPostCreateInvite');
@@ -4858,6 +4901,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 postProjectCreateFlow.dataMode = opts.dataMode || 'upload_after';
                 postProjectCreateFlow.previousActiveProjectId = parseInt(opts.previousActiveProjectId, 10) || 0;
                 postProjectCreateFlow.importCompleted = false;
+                postProjectCreateFlow.purposeCheckInFlight = false;
+                postProjectCreateFlow.postCreateCsvImportInFlight = false;
                 if (postProjectCreateFlow.dataMode === 'upload_after') {
                     postProjectCreateFlow.step = 'upload';
                     setPostCreateSubtitle('postCreateUploadSubtitle', 1);
@@ -5096,28 +5141,26 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     activeCancelGuidanceVendorName = '';
                 }
                 if (overlay.id === 'appModalCsvAccounts') {
-                    if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import' && !postProjectCreateFlow.importCompleted) {
-                        advancePostProjectCreateFlow();
+                    if (!postProjectCreateFlow.postCreateCsvImportInFlight) {
+                        if (csvAccountPickerMode === 'mapped') {
+                            pendingMappedCsvMapping = null;
+                            csvAccountPickerMode = 'qb';
+                            setCsvAccountModalIntro('qb');
+                        } else {
+                            pendingCsvFile = null;
+                        }
                     }
-                    if (csvAccountPickerMode === 'mapped') {
-                        pendingMappedCsvMapping = null;
-                        csvAccountPickerMode = 'qb';
-                        setCsvAccountModalIntro('qb');
-                    } else {
-                        pendingCsvFile = null;
-                    }
+                    maybeReturnToPostCreateUploadAfterCsvClose(overlay.id);
                 }
                 if (overlay.id === 'appModalCsvMapping') {
                     if (suppressCsvMappingModalCleanup) {
                         suppressCsvMappingModalCleanup = false;
-                    } else {
-                        if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import' && !postProjectCreateFlow.importCompleted) {
-                            advancePostProjectCreateFlow();
-                        }
+                    } else if (!postProjectCreateFlow.postCreateCsvImportInFlight) {
                         pendingMappedCsvFile = null;
                         pendingMappedCsvFileName = '';
                         pendingMappedTargetFields = [];
                         pendingMappedCsvMapping = null;
+                        maybeReturnToPostCreateUploadAfterCsvClose(overlay.id);
                     }
                 }
                 if (overlay.id === 'appModalMembersInvite' && postProjectCreateFlow.active && postProjectCreateFlow.step === 'invite_open') {
@@ -5190,10 +5233,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             function runCsvImport(file, selectedAccounts) {
                 if (!file) {
                     showSnackbar('No file to import', 'error');
-                    if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
-                        advancePostProjectCreateFlow();
+                    if (isPostCreateUploadWaiting()) {
+                        handlePostCreateImportFailure();
                     }
                     return Promise.resolve();
+                }
+                var flowActive = isPostCreateUploadWaiting();
+                if (flowActive) {
+                    postProjectCreateFlow.postCreateCsvImportInFlight = true;
                 }
                 var fd = new FormData();
                 fd.append('action', 'import_vendor_csv');
@@ -5207,7 +5254,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         if (d.success) {
                             var rawCount = parseInt(d.raw_inserted || 0, 10) || 0;
                             showSnackbar('Imported ' + (d.inserted || 0) + ' vendor(s), ' + rawCount + ' raw transactions', 'success');
-                            var flowActive = postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import';
                             if (flowActive) {
                                 postProjectCreateFlow.importCompleted = true;
                             }
@@ -5219,22 +5265,27 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             }
                         } else {
                             showSnackbar(d.error || 'Import failed', 'error');
-                            if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
-                                advancePostProjectCreateFlow();
+                            if (flowActive) {
+                                handlePostCreateImportFailure();
                             }
                         }
                     })
                     .catch(function() {
                         showSnackbar('Import failed', 'error');
-                        if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
-                            advancePostProjectCreateFlow();
+                        if (flowActive) {
+                            handlePostCreateImportFailure();
+                        }
+                    })
+                    .finally(function() {
+                        if (flowActive) {
+                            postProjectCreateFlow.postCreateCsvImportInFlight = false;
                         }
                     });
             }
             function handleCsvFileSelected(file, inputEl) {
                 if (!file) {
-                    if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
-                        advancePostProjectCreateFlow();
+                    if (isPostCreateUploadWaiting()) {
+                        handlePostCreateImportFailure();
                     }
                     return;
                 }
@@ -5249,8 +5300,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     .then(function(d) {
                         if (!d.success) {
                             showSnackbar(d.error || 'Could not read CSV', 'error');
-                            if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
-                                advancePostProjectCreateFlow();
+                            if (isPostCreateUploadWaiting()) {
+                                handlePostCreateImportFailure();
                             }
                             return;
                         }
@@ -5266,14 +5317,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             return;
                         }
                         showSnackbar('Unrecognized CSV format', 'error');
-                        if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
-                            advancePostProjectCreateFlow();
+                        if (isPostCreateUploadWaiting()) {
+                            handlePostCreateImportFailure();
                         }
                     })
                     .catch(function() {
                         showSnackbar('Could not read CSV', 'error');
-                        if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
-                            advancePostProjectCreateFlow();
+                        if (isPostCreateUploadWaiting()) {
+                            handlePostCreateImportFailure();
                         }
                     })
                     .finally(function() {
@@ -5334,6 +5385,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             if (!pendingMappedCsvFile || !pendingMappedCsvMapping) {
                                 setButtonLoading(importBtn, false);
                                 showSnackbar('Import session expired. Please upload the CSV again.', 'error');
+                                if (isPostCreateUploadWaiting()) {
+                                    handlePostCreateImportFailure();
+                                }
                                 return;
                             }
                             importPromise = runMappedCsvImport(pendingMappedCsvFile, pendingMappedCsvMapping, selected).then(function() {
@@ -5348,6 +5402,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             if (!pendingCsvFile) {
                                 setButtonLoading(importBtn, false);
                                 showSnackbar('No file to import. Please upload the CSV again.', 'error');
+                                if (isPostCreateUploadWaiting()) {
+                                    handlePostCreateImportFailure();
+                                }
                                 return;
                             }
                             importPromise = runCsvImport(pendingCsvFile, selected).then(function() {
@@ -5361,6 +5418,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             updateCsvAccountSelectionStatus();
                         });
                     });
+                }
+                var accountCancelBtn = document.getElementById('csvAccountCancelBtn');
+                if (accountCancelBtn && !accountCancelBtn.dataset.postCreateBound) {
+                    accountCancelBtn.dataset.postCreateBound = '1';
+                    accountCancelBtn.addEventListener('click', function(e) {
+                        if (!isPostCreateUploadWaiting()) return;
+                        e.stopImmediatePropagation();
+                        closeAppModal(document.getElementById('appModalCsvAccounts'));
+                    }, true);
                 }
             }
             function collectCsvMappingFromForm() {
@@ -5479,10 +5545,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             function runMappedCsvImport(file, mapping, selectedAccounts) {
                 if (!file) {
                     showSnackbar('No file to import', 'error');
-                    if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
-                        advancePostProjectCreateFlow();
+                    if (isPostCreateUploadWaiting()) {
+                        handlePostCreateImportFailure();
                     }
                     return Promise.resolve();
+                }
+                var flowActive = isPostCreateUploadWaiting();
+                if (flowActive) {
+                    postProjectCreateFlow.postCreateCsvImportInFlight = true;
                 }
                 var fd = new FormData();
                 fd.append('action', 'import_mapped_csv');
@@ -5502,7 +5572,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 msg += ' (' + skipped + ' row(s) skipped)';
                             }
                             showSnackbar(msg, 'success');
-                            var flowActive = postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import';
                             if (flowActive) {
                                 postProjectCreateFlow.importCompleted = true;
                             }
@@ -5515,21 +5584,26 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             return loadP;
                         }
                         showSnackbar(d.error || 'Import failed', 'error');
-                        if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
-                            advancePostProjectCreateFlow();
+                        if (flowActive) {
+                            handlePostCreateImportFailure();
                         }
                     })
                     .catch(function() {
                         showSnackbar('Import failed', 'error');
-                        if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
-                            advancePostProjectCreateFlow();
+                        if (flowActive) {
+                            handlePostCreateImportFailure();
+                        }
+                    })
+                    .finally(function() {
+                        if (flowActive) {
+                            postProjectCreateFlow.postCreateCsvImportInFlight = false;
                         }
                     });
             }
             function handleMappedCsvFileSelected(file, inputEl) {
                 if (!file) {
-                    if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
-                        advancePostProjectCreateFlow();
+                    if (isPostCreateUploadWaiting()) {
+                        handlePostCreateImportFailure();
                     }
                     return;
                 }
@@ -5545,8 +5619,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     .then(function(d) {
                         if (!d.success) {
                             showSnackbar(d.error || 'Could not read CSV', 'error');
-                            if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
-                                advancePostProjectCreateFlow();
+                            if (isPostCreateUploadWaiting()) {
+                                handlePostCreateImportFailure();
                             }
                             return;
                         }
@@ -5563,8 +5637,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     })
                     .catch(function() {
                         showSnackbar('Could not read CSV', 'error');
-                        if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import') {
-                            advancePostProjectCreateFlow();
+                        if (isPostCreateUploadWaiting()) {
+                            handlePostCreateImportFailure();
                         }
                     })
                     .finally(function() {
@@ -5642,6 +5716,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             setButtonLoading(importBtn, false);
                         });
                     });
+                }
+                var mappingCancelBtn = document.getElementById('csvMappingCancelBtn');
+                if (mappingCancelBtn && !mappingCancelBtn.dataset.postCreateBound) {
+                    mappingCancelBtn.dataset.postCreateBound = '1';
+                    mappingCancelBtn.addEventListener('click', function(e) {
+                        if (!isPostCreateUploadWaiting()) return;
+                        e.stopImmediatePropagation();
+                        closeAppModal(document.getElementById('appModalCsvMapping'));
+                    }, true);
                 }
             }
             function aiEscapeHtml(s) {
@@ -5780,6 +5863,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     overlay.addEventListener('click', function(e) {
                         if (e.target !== overlay) return;
                         if (overlay.classList.contains('post-create-flow-modal')) return;
+                        if (isPostCreateUploadWaiting() && isPostCreateCsvModalId(overlay.id)) return;
                         closeAppModal(overlay);
                     });
                     overlay.querySelectorAll('.app-modal-close').forEach(function(b) {
@@ -5788,6 +5872,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 });
                 document.addEventListener('keydown', function(e) {
                     if (e.key !== 'Escape') return;
+                    if (postProjectCreateFlow.postCreateCsvImportInFlight) {
+                        showSnackbar('Import in progress…', 'info');
+                        return;
+                    }
                     document.querySelectorAll('.app-modal-overlay.is-open').forEach(function(ov) {
                         if (postProjectCreateFlow.active && ov.classList.contains('post-create-flow-modal')) {
                             if (ov.id === 'appModalPostCreateUpload') {
@@ -5801,6 +5889,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 closeAppModal(ov);
                                 endPostProjectCreateFlow();
                             }
+                            return;
+                        }
+                        if (isPostCreateUploadWaiting() && isPostCreateCsvModalId(ov.id)) {
                             return;
                         }
                         closeAppModal(ov);
