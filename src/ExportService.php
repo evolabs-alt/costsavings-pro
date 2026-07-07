@@ -20,7 +20,7 @@ class ExportService
         $sh->setTitle('Vendors');
         $rows = [[
             'Vendor', 'Cost per period', 'Frequency', 'Annual cost', 'Status',
-            'Visibility', 'Manager ID', 'Purpose', 'Cancel deadline', 'Last payment',
+            'Category', 'Visibility', 'Manager ID', 'Purpose', 'Cancel deadline', 'Last payment',
         ]];
         foreach ($items as $it) {
             $status = isset($it['status']) && $it['status'] !== ''
@@ -32,6 +32,7 @@ class ExportService
                 $it['frequency'] ?? '',
                 $it['annual_cost'] ?? 0,
                 VendorService::statusLabel($status),
+                $it['category_name'] ?? '',
                 $it['visibility'] ?? '',
                 $it['manager_user_id'] ?? '',
                 VendorPurposeService::stripAiPurposeUiPrefix((string) ($it['purpose_of_subscription'] ?? $it['notes'] ?? '')),
@@ -104,6 +105,30 @@ class ExportService
         $html .= '<p><strong>Potential annual savings (Mark for Cancellation, not yet confirmed):</strong> $' . number_format($pendingCancel, 2) . '</p>';
         $html .= '<p><strong>Confirmed annual savings:</strong> $' . number_format($confirmed, 2) . '</p>';
         $html .= '<p>Review vendor rows for overlap, duplicate subscriptions, and right-sizing opportunities.</p>';
+        $html .= '</body></html>';
+
+        return $html;
+    }
+
+    public static function aiReplyPdfHtml(string $question, string $replyHtml): string
+    {
+        $q = trim($question);
+        $html = '<html><head><meta charset="UTF-8"><style>'
+            . 'body{font-family:DejaVu Sans,sans-serif;font-size:11px;line-height:1.45;color:#1F2937;}'
+            . 'h1{color:#0B58A3;font-size:18px;margin:0 0 8px 0;}'
+            . 'h3,h4,h5{color:#0B58A3;margin:0.75em 0 0.35em 0;}'
+            . '.prompt-label{font-size:10px;text-transform:uppercase;letter-spacing:0.04em;color:#6B7280;margin:0 0 4px 0;}'
+            . '.prompt-text{font-size:12px;color:#374151;margin:0 0 16px 0;padding:8px 10px;background:#F3F4F6;border-left:3px solid #0B58A3;}'
+            . '.reply-body p{margin:0 0 0.5em 0;}'
+            . '.reply-body ul,.reply-body ol{margin:0.35em 0 0.5em 0;padding-left:1.25em;}'
+            . '.reply-body li{margin-bottom:0.25em;}'
+            . '</style></head><body>';
+        $html .= '<h1>AI Assistant Report</h1>';
+        if ($q !== '') {
+            $html .= '<p class="prompt-label">Prompt</p>';
+            $html .= '<p class="prompt-text">' . htmlspecialchars($q, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</p>';
+        }
+        $html .= '<div class="reply-body">' . $replyHtml . '</div>';
         $html .= '</body></html>';
 
         return $html;

@@ -98,6 +98,8 @@ class VendorChatService
             ]);
 
             $msgId = (int) $pdo->lastInsertId();
+            self::syncMessageMentions($pdo, $orgId, $msgId, $cleanMessage, $userId);
+
             $st = $pdo->prepare(
                 'SELECT id, vendor_item_id, user_id, username_snapshot, message, is_action_log, edited_at, created_at
                  FROM vendor_item_chat_messages
@@ -245,6 +247,8 @@ class VendorChatService
             );
             $upd->execute([$cleanMessage, $messageId, $orgId, $projectId, $vendorItemId]);
 
+            self::syncMessageMentions($pdo, $orgId, $messageId, $cleanMessage, $userId);
+
             $st->execute([$messageId, $orgId, $projectId, $vendorItemId]);
             $updated = $st->fetch(PDO::FETCH_ASSOC);
             if (!$updated) {
@@ -336,7 +340,8 @@ class VendorChatService
     }
 
     /**
-     * Unread counts (messages from other users) per vendor row visible to this user.
+     * Unread counts (manual chat from other users) per vendor row visible to this user.
+     * Automatic action-log lines (status/purpose changes, AI updates) are excluded.
      *
      * @return array<int, int> vendor_item_id => count
      */
@@ -370,6 +375,7 @@ class VendorChatService
                       ON r.user_id = ? AND r.vendor_item_id = m.vendor_item_id
                     WHERE m.org_id = ? AND m.project_id = ?
                       AND m.vendor_item_id IN ($placeholders)
+                      AND m.is_action_log = 0
                       AND m.user_id <> ?
                       AND m.id > COALESCE(r.last_read_message_id, 0)
                     GROUP BY m.vendor_item_id";
@@ -390,6 +396,221 @@ class VendorChatService
             error_log('VendorChatService::unreadCountsForUserProject: ' . $e->getMessage());
 
             return [];
+        }
+    }
+
+    /**
+     * Unread @mention counts for the current user per vendor row.
+     *
+     * @return array<int, int> vendor_item_id => count
+     */
+    public static function taggedCountsForUserProject(
+        PDO $pdo,
+        int $orgId,
+        int $projectId,
+        int $userId,
+        string $role
+    ): array {
+        $items = VendorService::loadVisibleItems($pdo, $userId, $orgId, $projectId, $role);
+        $ids = [];
+        foreach ($items as $it) {
+            if (!is_array($it)) {
+                continue;
+            }
+            $id = (int) ($it['id'] ?? 0);
+            if ($id > 0) {
+                $ids[] = $id;
+            }
+        }
+        if ($ids === []) {
+            return [];
+        }
+
+        try {
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $sql = "SELECT m.vendor_item_id, COUNT(DISTINCT m.id) AS c
+                    FROM vendor_item_chat_messages m
+                    INNER JOIN vendor_item_chat_mentions t
+                      ON t.message_id = m.id AND t.mentioned_user_id = ?
+                    LEFT JOIN vendor_item_chat_reads r
+                      ON r.user_id = ? AND r.vendor_item_id = m.vendor_item_id
+                    WHERE m.org_id = ? AND m.project_id = ?
+                      AND m.vendor_item_id IN ($placeholders)
+                      AND m.is_action_log = 0
+                      AND m.user_id <> ?
+                      AND m.id > COALESCE(r.last_read_message_id, 0)
+                    GROUP BY m.vendor_item_id";
+
+            $params = array_merge([$userId, $userId, $orgId, $projectId], $ids, [$userId]);
+            $st = $pdo->prepare($sql);
+            $st->execute($params);
+            $out = [];
+            while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+                $vid = (int) ($row['vendor_item_id'] ?? 0);
+                if ($vid > 0) {
+                    $out[$vid] = (int) ($row['c'] ?? 0);
+                }
+            }
+
+            return $out;
+        } catch (PDOException $e) {
+            error_log('VendorChatService::taggedCountsForUserProject: ' . $e->getMessage());
+
+            return [];
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function extractMentionTokens(string $message): array
+    {
+        if (!preg_match_all('/@([A-Za-z0-9._-]+)/u', $message, $matches)) {
+            return [];
+        }
+
+        $tokens = [];
+        foreach ($matches[1] as $token) {
+            $token = trim((string) $token);
+            if ($token !== '') {
+                $tokens[] = $token;
+            }
+        }
+
+        return $tokens;
+    }
+
+    /**
+     * @return array<int, string> user_id => mention_token used in message
+     */
+    public static function resolveMentionsForOrg(PDO $pdo, int $orgId, string $message, int $senderUserId): array
+    {
+        $tokens = self::extractMentionTokens($message);
+        if ($tokens === []) {
+            return [];
+        }
+
+        try {
+            $st = $pdo->prepare(
+                'SELECT id, username, display_name, email FROM users
+                 WHERE org_id = ? AND (is_disabled = 0 OR is_disabled IS NULL)'
+            );
+            $st->execute([$orgId]);
+            $members = $st->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            error_log('VendorChatService::resolveMentionsForOrg: ' . $e->getMessage());
+
+            return [];
+        }
+
+        $lookup = self::buildMentionLookup($members);
+        $resolved = [];
+        foreach ($tokens as $token) {
+            $key = self::normalizeMentionKey($token);
+            if ($key === '' || !isset($lookup[$key])) {
+                continue;
+            }
+            $userId = (int) $lookup[$key]['user_id'];
+            if ($userId <= 0 || $userId === $senderUserId) {
+                continue;
+            }
+            $resolved[$userId] = (string) $lookup[$key]['token'];
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $members
+     * @return array<string, array{user_id:int, token:string}>
+     */
+    private static function buildMentionLookup(array $members): array
+    {
+        $lookup = [];
+        foreach ($members as $member) {
+            $userId = (int) ($member['id'] ?? 0);
+            if ($userId <= 0) {
+                continue;
+            }
+
+            $username = trim((string) ($member['username'] ?? ''));
+            if ($username !== '') {
+                $key = self::normalizeMentionKey($username);
+                if ($key !== '' && !isset($lookup[$key])) {
+                    $lookup[$key] = ['user_id' => $userId, 'token' => $username];
+                }
+            }
+
+            $displayName = trim((string) ($member['display_name'] ?? ''));
+            if ($displayName !== '') {
+                $fullKey = self::normalizeMentionKey(str_replace(' ', '', $displayName));
+                if ($fullKey !== '' && !isset($lookup[$fullKey])) {
+                    $lookup[$fullKey] = ['user_id' => $userId, 'token' => $username !== '' ? $username : $displayName];
+                }
+                $parts = preg_split('/\s+/u', $displayName) ?: [];
+                $firstWord = trim((string) ($parts[0] ?? ''));
+                if ($firstWord !== '') {
+                    $firstKey = self::normalizeMentionKey($firstWord);
+                    if ($firstKey !== '' && !isset($lookup[$firstKey])) {
+                        $lookup[$firstKey] = ['user_id' => $userId, 'token' => $username !== '' ? $username : $firstWord];
+                    }
+                }
+            }
+
+            $email = trim((string) ($member['email'] ?? ''));
+            if ($email !== '' && str_contains($email, '@')) {
+                $local = trim((string) (explode('@', $email, 2)[0] ?? ''));
+                $emailKey = self::normalizeMentionKey($local);
+                if ($emailKey !== '' && !isset($lookup[$emailKey])) {
+                    $lookup[$emailKey] = ['user_id' => $userId, 'token' => $username !== '' ? $username : $local];
+                }
+            }
+        }
+
+        return $lookup;
+    }
+
+    private static function normalizeMentionKey(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+
+        return function_exists('mb_strtolower')
+            ? mb_strtolower($value, 'UTF-8')
+            : strtolower($value);
+    }
+
+    private static function syncMessageMentions(
+        PDO $pdo,
+        int $orgId,
+        int $messageId,
+        string $message,
+        int $senderUserId
+    ): void {
+        if ($messageId <= 0) {
+            return;
+        }
+
+        try {
+            $del = $pdo->prepare('DELETE FROM vendor_item_chat_mentions WHERE message_id = ?');
+            $del->execute([$messageId]);
+
+            $mentions = self::resolveMentionsForOrg($pdo, $orgId, $message, $senderUserId);
+            if ($mentions === []) {
+                return;
+            }
+
+            $ins = $pdo->prepare(
+                'INSERT INTO vendor_item_chat_mentions (message_id, mentioned_user_id, mention_token)
+                 VALUES (?, ?, ?)'
+            );
+            foreach ($mentions as $mentionedUserId => $token) {
+                $ins->execute([$messageId, $mentionedUserId, $token]);
+            }
+        } catch (PDOException $e) {
+            error_log('VendorChatService::syncMessageMentions: ' . $e->getMessage());
         }
     }
 

@@ -177,18 +177,27 @@ class VendorService
     public static function loadVisibleItems(PDO $pdo, int $userId, int $orgId, int $projectId, string $role): array
     {
         if (OrgRole::isSuperAdmin($role)) {
-            $sql = 'SELECT * FROM cost_calculator_items WHERE org_id = :oid AND project_id = :pid ORDER BY id ASC';
+            $sql = 'SELECT cci.*, pc.name AS category_name
+                FROM cost_calculator_items cci
+                LEFT JOIN project_categories pc ON pc.id = cci.category_id AND pc.project_id = cci.project_id
+                WHERE cci.org_id = :oid AND cci.project_id = :pid ORDER BY cci.id ASC';
             $stmt = $pdo->prepare($sql);
             $stmt->execute([':oid' => $orgId, ':pid' => $projectId]);
         } elseif (OrgRole::isPrivileged($role)) {
             // Level-2 admin: public rows only (no confidential vendors).
-            $sql = 'SELECT * FROM cost_calculator_items WHERE org_id = :oid AND project_id = :pid AND visibility = \'public\' ORDER BY id ASC';
+            $sql = 'SELECT cci.*, pc.name AS category_name
+                FROM cost_calculator_items cci
+                LEFT JOIN project_categories pc ON pc.id = cci.category_id AND pc.project_id = cci.project_id
+                WHERE cci.org_id = :oid AND cci.project_id = :pid AND cci.visibility = \'public\' ORDER BY cci.id ASC';
             $stmt = $pdo->prepare($sql);
             $stmt->execute([':oid' => $orgId, ':pid' => $projectId]);
         } else {
-            $sql = 'SELECT * FROM cost_calculator_items WHERE org_id = :oid AND project_id = :pid AND (
-                visibility = \'public\' OR (visibility = \'confidential\' AND manager_user_id = :uid)
-            ) ORDER BY id ASC';
+            $sql = 'SELECT cci.*, pc.name AS category_name
+                FROM cost_calculator_items cci
+                LEFT JOIN project_categories pc ON pc.id = cci.category_id AND pc.project_id = cci.project_id
+                WHERE cci.org_id = :oid AND cci.project_id = :pid AND (
+                cci.visibility = \'public\' OR (cci.visibility = \'confidential\' AND cci.manager_user_id = :uid)
+            ) ORDER BY cci.id ASC';
             $stmt = $pdo->prepare($sql);
             $stmt->execute([':oid' => $orgId, ':pid' => $projectId, ':uid' => $userId]);
         }
@@ -240,6 +249,10 @@ class VendorService
             'visibility' => $row['visibility'] ?? 'public',
             'manager_user_id' => (isset($row['manager_user_id']) && $row['manager_user_id'] !== null && $row['manager_user_id'] !== '')
                 ? (int) $row['manager_user_id'] : null,
+            'category_id' => (isset($row['category_id']) && $row['category_id'] !== null && $row['category_id'] !== '')
+                ? (int) $row['category_id'] : null,
+            'category_name' => isset($row['category_name']) && $row['category_name'] !== null && $row['category_name'] !== ''
+                ? (string) $row['category_name'] : null,
             'cancellation_deadline' => $row['cancellation_deadline'] ?? null,
             'last_payment_date' => $row['last_payment_date'] ?? null,
         ];
@@ -334,11 +347,11 @@ class VendorService
             $payloadIds = [];
 
             $ins = $pdo->prepare(
-                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, category_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $upd = $pdo->prepare(
-                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, vendor_name=?, cost_per_period=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?
+                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, category_id=?, vendor_name=?, cost_per_period=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?
                  WHERE id=? AND org_id=? AND project_id=?'
             );
 
@@ -355,6 +368,7 @@ class VendorService
                 $purpose = $item['purpose_of_subscription'] ?? $item['notes'] ?? '';
                 $vis = ($item['visibility'] ?? 'public') === 'confidential' ? 'confidential' : 'public';
                 $mgr = self::resolveManagerUserIdForAdminSave($pdo, $orgId, $item, $adminUserId);
+                $categoryId = CategoryService::resolveCategoryIdFromItem($pdo, $orgId, $projectId, $item);
                 $deadline = self::normDate($item['cancellation_deadline'] ?? null);
                 $lastPay = self::normDate($item['last_payment_date'] ?? null);
                 $rowId = isset($item['id']) ? (int) $item['id'] : 0;
@@ -374,6 +388,7 @@ class VendorService
                         $adminUserId,
                         $email,
                         $mgr,
+                        $categoryId,
                         $vendorName,
                         (float) ($item['cost_per_period'] ?? 0),
                         $item['frequency'] ?? '',
@@ -396,6 +411,7 @@ class VendorService
                         $adminUserId,
                         $email,
                         $mgr,
+                        $categoryId,
                         $item['vendor_name'] ?? '',
                         (float) ($item['cost_per_period'] ?? 0),
                         $item['frequency'] ?? '',
@@ -469,7 +485,7 @@ class VendorService
             $cc = '';
 
             $upd = $pdo->prepare(
-                'UPDATE cost_calculator_items SET vendor_name=?, cost_per_period=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?, user_email=?, user_id=?
+                'UPDATE cost_calculator_items SET vendor_name=?, cost_per_period=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?, category_id=?, user_email=?, user_id=?
                  WHERE id=? AND org_id=? AND project_id=? AND (manager_user_id IS NULL OR manager_user_id=?)'
             );
 
@@ -482,6 +498,7 @@ class VendorService
                 $cc .= '-' . $legacy['cancel_keep'];
                 $purpose = $item['purpose_of_subscription'] ?? $item['notes'] ?? '';
                 $vis = ($item['visibility'] ?? 'public') === 'confidential' ? 'confidential' : 'public';
+                $categoryId = CategoryService::resolveCategoryIdFromItem($pdo, $orgId, $projectId, $item);
                 $deadline = self::normDate($item['cancellation_deadline'] ?? null);
                 $lastPay = self::normDate($item['last_payment_date'] ?? null);
                 $rowId = isset($item['id']) ? (int) $item['id'] : 0;
@@ -504,6 +521,7 @@ class VendorService
                         $purpose,
                         $deadline,
                         $lastPay,
+                        $categoryId,
                         $email,
                         $userId,
                         $rowId,

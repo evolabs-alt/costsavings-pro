@@ -36,6 +36,10 @@ final class ColumnHelp
                 'title' => 'Item #',
                 'html' => '<p class="column-help-intro">The row number shown in the current table view. Numbers update when you filter, sort, or change page size; they reflect display order, not a permanent vendor ID.</p>',
             ],
+            'category' => [
+                'title' => 'Category',
+                'html' => '<p class="column-help-intro">Optional grouping label for this vendor row. Categories belong to the current project. Choose an existing category from the dropdown or create a new one on the fly. Use the filter and sort icons to focus on specific categories or uncategorized rows.</p>',
+            ],
             'vendor' => [
                 'title' => 'Vendor',
                 'html' => '<p class="column-help-intro">The vendor or subscription name for this spend line. Administrators edit this field; members can view only. Use the filter icon to search by name (case-insensitive). Use the sort icon to order alphabetically. The list icon on a row opens imported raw transaction history for that vendor.</p>',
@@ -73,7 +77,7 @@ final class ColumnHelp
             ],
             'chat' => [
                 'title' => 'Chat',
-                'html' => '<p class="column-help-intro">Per-vendor thread for team notes and an automatic action log. Status and purpose changes, plus AI purpose updates, are recorded here alongside manual messages. You can edit your own notes within one hour of posting. A red dot means unread messages. Save the row first to enable chat. Use the filter icon to show only vendors with unread messages.</p>',
+                'html' => '<p class="column-help-intro">Per-vendor thread for team notes and an automatic action log. Status and purpose changes, plus AI purpose updates, are recorded here alongside manual messages. You can edit your own notes within one hour of posting. Type <strong>@name</strong> in a note to tag a teammate (matches username, display name, or email). A red dot means unread manual notes only—automatic log entries do not trigger the badge. An orange chat button means you were tagged in unread notes. Save the row first to enable chat. Use the filter icon to show vendors with <strong>Unread</strong> or <strong>Tagged</strong> messages.</p>',
             ],
         ];
     }

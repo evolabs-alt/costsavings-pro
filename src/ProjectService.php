@@ -165,6 +165,9 @@ class ProjectService
             $delCc = $pdo->prepare('DELETE FROM cost_calculator_items WHERE org_id = ? AND project_id = ?');
             $delCc->execute([$orgId, $projectId]);
 
+            $delCats = $pdo->prepare('DELETE FROM project_categories WHERE org_id = ? AND project_id = ?');
+            $delCats->execute([$orgId, $projectId]);
+
             $delProj = $pdo->prepare('DELETE FROM projects WHERE id = ? AND org_id = ?');
             $delProj->execute([$projectId, $orgId]);
             if ($delProj->rowCount() < 1) {
@@ -260,7 +263,19 @@ class ProjectService
                 ':org_id' => $orgId,
                 ':from_project_id' => $fromProjectId,
             ]);
-            return ['success' => true, 'copied' => $st->rowCount()];
+            $copied = $st->rowCount();
+            $catResult = CategoryService::copyAssignmentsBetweenProjects(
+                $pdo,
+                $orgId,
+                $fromProjectId,
+                $toProjectId,
+                $actingUserId,
+                $actingRole
+            );
+            if (!($catResult['success'] ?? false)) {
+                return ['success' => false, 'error' => $catResult['error'] ?? 'Could not copy category assignments.'];
+            }
+            return ['success' => true, 'copied' => $copied];
         } catch (PDOException $e) {
             error_log('ProjectService::copyProjectData: ' . $e->getMessage());
             return ['success' => false, 'error' => 'Could not copy project data.'];

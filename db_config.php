@@ -479,11 +479,43 @@ function migrateCostCalculatorSchema(PDO $pdo) {
         error_log('migrateCostCalculatorSchema: ' . $e->getMessage());
     }
 
+    migrateProjectCategoriesSchema($pdo);
     migrateVendorDetailSchema($pdo);
     migrateVendorRawTransactionSchema($pdo);
     migrateVendorChatSchema($pdo);
     migrateVendorChatEditSchema($pdo);
     migrateVendorChatReadStateSchema($pdo);
+    migrateVendorChatMentionsSchema($pdo);
+}
+
+/**
+ * @param PDO $pdo
+ */
+function migrateProjectCategoriesSchema(PDO $pdo): void
+{
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `project_categories` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `org_id` INT UNSIGNED NOT NULL,
+            `project_id` INT UNSIGNED NOT NULL,
+            `name` VARCHAR(255) NOT NULL,
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uk_project_category_name` (`project_id`, `name`),
+            KEY `idx_pc_org_project` (`org_id`, `project_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $st = $pdo->query("SHOW COLUMNS FROM `cost_calculator_items` LIKE 'category_id'");
+        if (!$st->fetch()) {
+            $pdo->exec('ALTER TABLE `cost_calculator_items` ADD COLUMN `category_id` INT UNSIGNED NULL AFTER `manager_user_id`');
+        }
+        try {
+            $pdo->exec('CREATE INDEX `idx_cc_category` ON `cost_calculator_items` (`category_id`)');
+        } catch (PDOException $e) {
+            // ignore duplicate index attempts
+        }
+    } catch (PDOException $e) {
+        error_log('migrateProjectCategoriesSchema: ' . $e->getMessage());
+    }
 }
 
 /**
@@ -630,6 +662,26 @@ function migrateVendorChatReadStateSchema(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     } catch (PDOException $e) {
         error_log('migrateVendorChatReadStateSchema: ' . $e->getMessage());
+    }
+}
+
+/**
+ * @mention tags on vendor chat messages.
+ *
+ * @param PDO $pdo
+ */
+function migrateVendorChatMentionsSchema(PDO $pdo): void
+{
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `vendor_item_chat_mentions` (
+            `message_id` BIGINT UNSIGNED NOT NULL,
+            `mentioned_user_id` INT UNSIGNED NOT NULL,
+            `mention_token` VARCHAR(255) NOT NULL,
+            PRIMARY KEY (`message_id`, `mentioned_user_id`),
+            KEY `idx_vicment_user_msg` (`mentioned_user_id`, `message_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    } catch (PDOException $e) {
+        error_log('migrateVendorChatMentionsSchema: ' . $e->getMessage());
     }
 }
 

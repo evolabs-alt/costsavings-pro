@@ -11,11 +11,11 @@ use PDOException;
 class AiService
 {
     public const PRESETS = [
-        'overlap' => 'Identify any overlap in services between vendors on the keep list.',
+        'overlap' => 'Identify vendors that may offer services or products that are similar or the same as those offered by another vendor. Compare different vendors (not the same vendor twice) and highlight redundant or overlapping spend.',
         'alternatives' => 'Suggest alternative vendors that might cost less for similar services on the keep list.',
         'lower_tiers' => 'Are there lower tiers of the same service that might fit based on how the vendor is being used (keep list)?',
-        'duplicates' => 'Could the user be subscribed to more than one account from the same vendor (duplicate purchases)?',
-        'executive' => 'Give a concise executive summary of cost optimization suggestions a savvy CFO would consider for the vendor data provided.',
+        'duplicates' => 'Identify cases where the same vendor appears more than once in the vendor list, suggesting the user is paying that vendor twice (duplicate subscriptions, multiple accounts, or repeated charges). Only flag rows that share the same vendor name.',
+        'executive' => 'Produce a concise AI Assistant Report of cost optimization suggestions a savvy CFO would consider for the vendor data provided.',
         'cancel_steps' => 'Provide a practical cancellation playbook for this vendor: exact preparation checklist, account artifacts to save, cancellation path options, negotiation fallback, and post-cancellation validation steps.',
     ];
 
@@ -341,6 +341,14 @@ class AiService
 
     /**
      * Allow safe HTML from the model; strip scripts and unknown tags. Plain text is wrapped in <p>.
+     */
+    public static function sanitizeReplyHtml(string $html): string
+    {
+        return self::sanitizeAiHtml($html);
+    }
+
+    /**
+     * @see sanitizeReplyHtml()
      */
     private static function sanitizeAiHtml(string $html): string
     {

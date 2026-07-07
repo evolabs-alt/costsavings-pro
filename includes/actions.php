@@ -3,6 +3,7 @@
 require_once __DIR__ . '/pro_log.php';
 
 use CostSavings\AiService;
+use CostSavings\CategoryService;
 use CostSavings\CsvImport;
 use CostSavings\ExportService;
 use CostSavings\MappedCsvImport;
@@ -276,7 +277,6 @@ function handleLogin() {
     } else {
         unset($_SESSION['active_project_id']);
     }
-    loadUserResponses($_SESSION['user_email']);
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;
 }
@@ -812,6 +812,37 @@ function handleAiAsk() {
     exit;
 }
 
+function handleExportAiReplyPdf() {
+    if (empty($_SESSION['user_id'])) {
+        header('HTTP/1.0 403 Forbidden');
+        echo 'Not logged in';
+        exit;
+    }
+    $question = trim((string) ($_POST['question'] ?? ''));
+    $replyRaw = (string) ($_POST['reply_html'] ?? '');
+    if (strlen($replyRaw) > 65536) {
+        header('HTTP/1.0 413 Payload Too Large');
+        echo 'Reply too large to export.';
+        exit;
+    }
+    $replyHtml = AiService::sanitizeReplyHtml($replyRaw);
+    if ($replyHtml === '') {
+        header('HTTP/1.0 400 Bad Request');
+        echo 'Nothing to export.';
+        exit;
+    }
+    if (!class_exists(\Dompdf\Dompdf::class)) {
+        header('HTTP/1.0 503 Service Unavailable');
+        echo 'Dompdf not installed. Run composer install.';
+        exit;
+    }
+    $filename = 'ai-assistant-report-' . date('Y-m-d') . '.pdf';
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    echo ExportService::htmlToPdfBytes(ExportService::aiReplyPdfHtml($question, $replyHtml));
+    exit;
+}
+
 function handleAiUsageStats() {
     header('Content-Type: application/json');
     if (empty($_SESSION['user_id'])) {
@@ -1267,16 +1298,29 @@ function handleLoadCostCalculator() {
             $uid,
             (string) ($_SESSION['role'] ?? 'member')
         );
+        $tagged = VendorChatService::taggedCountsForUserProject(
+            $pdo,
+            (int) $_SESSION['org_id'],
+            $activeProjectId,
+            $uid,
+            (string) ($_SESSION['role'] ?? 'member')
+        );
         foreach ($items as &$it) {
             if (!is_array($it)) {
                 continue;
             }
             $iid = (int) ($it['id'] ?? 0);
             $it['vendor_chat_unread'] = $counts[$iid] ?? 0;
+            $it['vendor_chat_tagged'] = $tagged[$iid] ?? 0;
         }
         unset($it);
 
         $payload = ['success' => true, 'items' => $items];
+        $payload['categories'] = CategoryService::listForProject(
+            $pdo,
+            (int) $_SESSION['org_id'],
+            $activeProjectId
+        );
         $flags = JSON_UNESCAPED_UNICODE;
         if (defined('JSON_INVALID_UTF8_SUBSTITUTE')) {
             $flags |= JSON_INVALID_UTF8_SUBSTITUTE;
@@ -1457,19 +1501,26 @@ function handleEditVendorChatMessage() {
 function handleVendorChatUnreadCounts() {
     header('Content-Type: application/json');
     if (empty($_SESSION['user_id'])) {
-        echo json_encode(['success' => false, 'error' => 'User not logged in', 'counts' => []]);
+        echo json_encode(['success' => false, 'error' => 'User not logged in', 'counts' => [], 'tagged' => []]);
         exit;
     }
 
     $pdo = getDBConnection();
     $activeProjectId = requireActiveProjectId($pdo);
     if ($activeProjectId === null) {
-        echo json_encode(['success' => true, 'counts' => []]);
+        echo json_encode(['success' => true, 'counts' => [], 'tagged' => []]);
         exit;
     }
 
     $uid = (int) $_SESSION['user_id'];
     $counts = VendorChatService::unreadCountsForUserProject(
+        $pdo,
+        (int) $_SESSION['org_id'],
+        $activeProjectId,
+        $uid,
+        (string) ($_SESSION['role'] ?? 'member')
+    );
+    $tagged = VendorChatService::taggedCountsForUserProject(
         $pdo,
         (int) $_SESSION['org_id'],
         $activeProjectId,
@@ -1482,8 +1533,14 @@ function handleVendorChatUnreadCounts() {
             $sparse[(string) $vid] = $n;
         }
     }
+    $sparseTagged = [];
+    foreach ($tagged as $vid => $n) {
+        if ($n > 0) {
+            $sparseTagged[(string) $vid] = $n;
+        }
+    }
 
-    echo json_encode(['success' => true, 'counts' => $sparse]);
+    echo json_encode(['success' => true, 'counts' => $sparse, 'tagged' => $sparseTagged]);
     exit;
 }
 
@@ -1672,6 +1729,83 @@ function handleCopyProjectChats() {
         exit;
     }
     $result = VendorChatService::copyChatsBetweenProjects(
+        $pdo,
+        $orgId,
+        $fromProjectId,
+        $toProjectId,
+        $userId,
+        $role
+    );
+    echo json_encode($result);
+    exit;
+}
+
+function handleCategoryCreate() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
+        exit;
+    }
+    $name = trim((string) ($_POST['name'] ?? ''));
+    if ($name === '') {
+        echo json_encode(['success' => false, 'error' => 'Category name is required.']);
+        exit;
+    }
+    $pdo = getDBConnection();
+    $orgId = (int) ($_SESSION['org_id'] ?? 0);
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        echo json_encode(['success' => false, 'error' => 'No active project selected']);
+        exit;
+    }
+    $created = CategoryService::findOrCreateByName($pdo, $orgId, $activeProjectId, $name);
+    if (!$created) {
+        echo json_encode(['success' => false, 'error' => 'Could not create category.']);
+        exit;
+    }
+    echo json_encode([
+        'success' => true,
+        'id' => $created['id'],
+        'name' => $created['name'],
+        'created' => $created['created'] ?? false,
+    ]);
+    exit;
+}
+
+function handleCopyProjectCategories() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
+        exit;
+    }
+    if (!OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
+        echo json_encode(['success' => false, 'error' => 'Only a super admin can copy project categories.']);
+        exit;
+    }
+    $fromProjectId = (int) ($_POST['from_project_id'] ?? 0);
+    $toProjectId = (int) ($_POST['to_project_id'] ?? 0);
+    if ($fromProjectId <= 0 || $toProjectId <= 0) {
+        echo json_encode(['success' => false, 'error' => 'Source and target projects are required.']);
+        exit;
+    }
+    if ($fromProjectId === $toProjectId) {
+        echo json_encode(['success' => false, 'error' => 'Source and target projects must be different.']);
+        exit;
+    }
+    $pdo = getDBConnection();
+    $userId = (int) $_SESSION['user_id'];
+    $orgId = (int) ($_SESSION['org_id'] ?? 0);
+    $role = (string) ($_SESSION['role'] ?? 'member');
+    if ($orgId < 1) {
+        echo json_encode(['success' => false, 'error' => 'Organization could not be loaded.']);
+        exit;
+    }
+    if (!ProjectService::canAccessProject($pdo, $fromProjectId, $orgId, $userId, $role)
+        || !ProjectService::canAccessProject($pdo, $toProjectId, $orgId, $userId, $role)) {
+        echo json_encode(['success' => false, 'error' => 'You do not have access to one or both projects.']);
+        exit;
+    }
+    $result = CategoryService::copyAssignmentsBetweenProjects(
         $pdo,
         $orgId,
         $fromProjectId,

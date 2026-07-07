@@ -20,14 +20,6 @@ try {
     // Handlers and rendering below may retry; avoid fatal page when DB is unreachable during bootstrap.
 }
 
-$user_role_options = [
-    'Business owner',
-    'Financial professional (book keeper, CPA, fractional CFO, accountant, etc)',
-    'Aspiring business owner.',
-    'Employee of a small/medium-size business.',
-    'Other'
-];
-
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // fetch() with Content-Type: application/json does not populate $_POST; merge body for action + calculator saves
@@ -52,9 +44,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         switch ($_POST['action']) {
             case 'login':
                 handleLogin();
-                break;
-            case 'save_user_role':
-                handleSaveUserRole();
                 break;
             case 'logout':
                 handleLogout();
@@ -101,6 +90,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'ai_ask':
                 handleAiAsk();
                 break;
+            case 'export_ai_reply_pdf':
+                handleExportAiReplyPdf();
+                break;
             case 'ai_usage_stats':
                 handleAiUsageStats();
                 break;
@@ -140,6 +132,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'copy_project_chats':
                 handleCopyProjectChats();
                 break;
+            case 'category_create':
+                handleCategoryCreate();
+                break;
+            case 'copy_project_categories':
+                handleCopyProjectCategories();
+                break;
         }
     }
 }
@@ -149,42 +147,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
 }
 
 // Functions
-function handleSaveUserRole() {
-    if (empty($_SESSION['user_email'])) {
-        $_SESSION['error'] = 'Please log in first.';
-        return;
-    }
-
-    global $user_role_options;
-
-    $role = $_POST['user_role'] ?? '';
-    $email = $_SESSION['user_email'];
-
-    if (!in_array($role, $user_role_options, true)) {
-        $_SESSION['error'] = 'Please select an option to continue.';
-        return;
-    }
-
-    $existing_role = migrateUserRoleFromJsonIfNeeded($email);
-    if ($existing_role !== null) {
-        $_SESSION['user_role'] = $existing_role;
-        unset($_SESSION['awaiting_role'], $_SESSION['pending_next_chapter']);
-        return;
-    }
-
-    try {
-        saveUserRoleToDB($email, $role, null, null);
-    } catch (Exception $e) {
-        error_log('handleSaveUserRole: ' . $e->getMessage());
-        $_SESSION['error'] = 'Could not save your selection. Please try again.';
-        return;
-    }
-    $_SESSION['user_role'] = $role;
-    unset($_SESSION['awaiting_role'], $_SESSION['pending_next_chapter']);
-
-    syncContactToGHL($email, $role);
-}
-
 function handleLogout() {
     $_SESSION = [];
     if (ini_get('session.use_cookies')) {
@@ -196,242 +158,6 @@ function handleLogout() {
     exit;
 }
 
-
-
-
-
-
-/**
- * DB is authoritative for user_role; one-time backfill from legacy JSON cache.
- *
- * @param string $email Normalized email
- * @return string|null
- */
-function migrateUserRoleFromJsonIfNeeded($email) {
-    try {
-        $role = getUserRoleFromDB($email);
-        if ($role !== null) {
-            return $role;
-        }
-        $fromFile = getUserRoleFromFile($email);
-        if ($fromFile === null || $fromFile === '') {
-            return null;
-        }
-        try {
-            saveUserRoleToDB($email, $fromFile, null, null);
-        } catch (Exception $e) {
-            error_log('migrateUserRoleFromJsonIfNeeded save: ' . $e->getMessage());
-            return null;
-        }
-        return getUserRoleFromDB($email);
-    } catch (Exception $e) {
-        error_log('migrateUserRoleFromJsonIfNeeded: ' . $e->getMessage());
-        return null;
-    }
-}
-
-function loadUserResponses($email) {
-    $role = migrateUserRoleFromJsonIfNeeded($email);
-    if ($role !== null) {
-        $_SESSION['user_role'] = $role;
-    } else {
-        unset($_SESSION['user_role']);
-    }
-}
-
-// GoHighLevel (GHL) API Functions
-function createGHLContact($email, $firstName = '', $lastName = '', $phone = '', $tags = []) {
-    $url = GHL_API_URL . '/contacts/';
-    
-    // Parse name if full name is provided but first/last are not
-    if (empty($firstName) && empty($lastName) && !empty($email)) {
-        $emailParts = explode('@', $email);
-        $namePart = $emailParts[0];
-        $nameParts = explode('.', $namePart);
-        if (count($nameParts) >= 2) {
-            $firstName = ucfirst($nameParts[0]);
-            $lastName = ucfirst($nameParts[1]);
-        } else {
-            $firstName = ucfirst($namePart);
-            $lastName = '';
-        }
-    }
-    
-    $name = trim($firstName . ' ' . $lastName);
-    if (empty($name)) {
-        $name = $email;
-    }
-    
-    $data = [
-        'email' => $email,
-        'firstName' => $firstName,
-        'lastName' => $lastName,
-        'name' => $name,
-        'locationId' => GHL_LOCATION_ID,
-    ];
-    
-    if (!empty($phone)) {
-        $data['phone'] = $phone;
-    }
-    
-    if (!empty($tags)) {
-        $data['tags'] = $tags;
-    }
-    
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-    curl_setopt($ch, CURLOPT_HTTPHEADER, [
-        'Content-Type: application/json',
-        'Accept: application/json',
-        'Authorization: Bearer ' . GHL_API_KEY,
-        'Version: ' . GHL_API_VERSION
-    ]);
-    
-    $response = curl_exec($ch);
-    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curl_error = curl_error($ch);
-    curl_close($ch);
-    
-    error_log("GHL Create Contact - HTTP Code: " . $http_code);
-    error_log("GHL Create Contact - Response: " . substr($response, 0, 500));
-    if ($curl_error) {
-        error_log("GHL Create Contact - cURL Error: " . $curl_error);
-    }
-    
-    if ($http_code === 200 || $http_code === 201) {
-        $result = json_decode($response, true);
-        return [
-            'success' => true,
-            'contact' => $result
-        ];
-    }
-    
-    return [
-        'success' => false,
-        'error' => $response,
-        'http_code' => $http_code
-    ];
-}
-
-function createGHLTag($tagName) {
-    $url = GHL_API_URL . '/locations/' . GHL_LOCATION_ID . '/tags';
-    
-    $data = [
-        'name' => $tagName
-    ];
-    
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-    curl_setopt($ch, CURLOPT_HTTPHEADER, [
-        'Content-Type: application/json',
-        'Accept: application/json',
-        'Authorization: Bearer ' . GHL_API_KEY,
-        'Version: ' . GHL_API_VERSION
-    ]);
-    
-    $response = curl_exec($ch);
-    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curl_error = curl_error($ch);
-    curl_close($ch);
-    
-    error_log("GHL Create Tag - HTTP Code: " . $http_code);
-    error_log("GHL Create Tag - Response: " . substr($response, 0, 500));
-    if ($curl_error) {
-        error_log("GHL Create Tag - cURL Error: " . $curl_error);
-    }
-    
-    // Tag creation might return 409 if tag already exists, which is OK
-    if ($http_code === 200 || $http_code === 201 || $http_code === 409) {
-        $result = json_decode($response, true);
-        return [
-            'success' => true,
-            'tag' => $result
-        ];
-    }
-    
-    return [
-        'success' => false,
-        'error' => $response,
-        'http_code' => $http_code
-    ];
-}
-
-
-
-function syncContactToGHL($email, $role) {
-    // Map user roles to simplified tag names
-    $roleTagMap = [
-        'Business owner' => 'cost savings pro tool business owner',
-        'Financial professional (book keeper, CPA, fractional CFO, accountant, etc)' => 'cost savings pro tool financial professional',
-        'Aspiring business owner.' => 'cost savings pro tool aspiring business owner',
-        'Employee of a small/medium-size business.' => 'cost savings pro tool employee of smb',
-        'Other' => 'cost savings pro tool other'
-    ];
-    
-    // Get the tag name for this role, default to 'cost savings pro tool other' if not found
-    $roleTagName = $roleTagMap[$role] ?? 'cost savings pro tool other';
-    
-    // Tags to apply: role-specific tag + general registration tag
-    $tags = [$roleTagName, 'cost savings pro tool registered'];
-    
-    // Create all tags first
-    foreach ($tags as $tagName) {
-        $tagResult = createGHLTag($tagName);
-        if (!$tagResult['success']) {
-            error_log("GHL Tag creation failed for: " . $tagName);
-        }
-    }
-    
-    // Create contact with tags
-    $contactResult = createGHLContact($email, '', '', '', $tags);
-    
-    if ($contactResult['success']) {
-        error_log("GHL Contact created/updated successfully for: " . $email . " with tags: " . implode(', ', $tags));
-        return true;
-    } else {
-        error_log("GHL Contact creation failed for: " . $email . " - " . print_r($contactResult, true));
-        return false;
-    }
-}
-
-function getUserRoleFromFile($email) {
-    $cache_dir = __DIR__ . '/../cache';
-    $file = $cache_dir . '/resp_' . md5($email) . '.json';
-
-    if (!file_exists($file)) {
-        return null;
-    }
-
-    $data = json_decode(file_get_contents($file), true);
-    if (!is_array($data) || empty($data['user_role'])) {
-        return null;
-    }
-
-    return $data['user_role'];
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 try {
     getDBConnection();
 } catch (Exception $e) {
@@ -441,26 +167,7 @@ try {
 $current_view = 'login';
 $is_logged_in = !empty($_SESSION['user_id']) || !empty($_SESSION['user_email']);
 if ($is_logged_in) {
-    if (!empty($_SESSION['project_onboarding_required']) && \CostSavings\OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
-        unset($_SESSION['awaiting_role']);
-        $current_view = 'placeholder';
-    } else {
-    if (empty($_SESSION['user_role'])) {
-        $email = $_SESSION['user_email'] ?? '';
-        if ($email !== '') {
-            loadUserResponses($email);
-        }
-        if (empty($_SESSION['user_role'])) {
-            $_SESSION['awaiting_role'] = true;
-        }
-    }
-
-    if (!empty($_SESSION['awaiting_role'])) {
-        $current_view = 'login';
-    } else {
-        $current_view = 'placeholder';
-    }
-    }
+    $current_view = 'placeholder';
 }
 
 $is_admin = ($is_logged_in && \CostSavings\OrgRole::isPrivileged((string) ($_SESSION['role'] ?? '')));
@@ -823,6 +530,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             width: 52px;
         }
 
+        .cost-calculator-grid .category-col {
+            min-width: 120px;
+            max-width: 140px;
+        }
+
+        .cost-calculator-grid .category-col select {
+            width: 100%;
+            max-width: 130px;
+        }
+
         .cost-calculator-grid .select-row,
         .cost-calculator-grid .select-row-cell {
             width: 38px;
@@ -950,6 +667,19 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .cost-calculator-grid .vendor-chat-unread-badge.is-visible {
             opacity: 1;
             visibility: visible;
+        }
+
+        .cost-calculator-grid .vendor-chat-btn.is-tagged {
+            border-color: #f59e0b;
+        }
+
+        .cost-calculator-grid .vendor-chat-btn.is-tagged .vendor-chat-icon {
+            color: #d97706;
+        }
+
+        .cost-calculator-grid .vendor-chat-btn.is-tagged:hover:not(:disabled) {
+            border-color: #d97706;
+            box-shadow: 0 6px 16px rgba(217, 119, 6, 0.24);
         }
 
         .vendor-raw-results {
@@ -1291,7 +1021,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             display: none;
         }
 
-        /* Filter dropdown styles */
+        /* Table toolbar styles */
         .report-filters {
             display: flex;
             flex-direction: column;
@@ -1302,35 +1032,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             background: #f8f9fa;
             border-radius: 8px;
             border: 1px solid #e5e7eb;
-        }
-
-        .report-filters label {
-            font-weight: 600;
-            color: #374151;
-            font-size: 14px;
-            margin: 0;
-        }
-
-        .report-filters select {
-            padding: 10px 15px;
-            border: 2px solid #e5e7eb;
-            border-radius: 8px;
-            font-size: 14px;
-            background: white;
-            color: #374151;
-            cursor: pointer;
-            min-width: 200px;
-            transition: all 0.3s ease;
-        }
-
-        .report-filters select:focus {
-            outline: none;
-            border-color: #6b5b95;
-            box-shadow: 0 0 0 3px rgba(107, 91, 149, 0.1);
-        }
-
-        .report-filters select:hover {
-            border-color: #6b5b95;
         }
 
         .report-filters .column-toggle-btn {
@@ -1761,6 +1462,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             }
 
             .cost-calculator-grid .manager-col,
+            .cost-calculator-grid .category-col,
             .cost-calculator-grid .visibility-col {
                 min-width: 85px;
             }
@@ -1772,10 +1474,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             .report-filters {
                 flex-direction: column;
                 align-items: flex-start;
-            }
-
-            .report-filters select {
-                min-width: 100%;
             }
 
             .report-filters .column-toggle-btn {
@@ -2238,43 +1936,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             margin-top: 8px; 
             color: #6b7280; 
             font-size: 13px;
-            font-weight: 500;
-        }
-
-        .role-options {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .role-option {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 14px 16px;
-            border: 2px solid #e5e7eb;
-            border-radius: 12px;
-            background: rgba(255, 255, 255, 0.8);
-            backdrop-filter: blur(10px);
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .role-option:hover {
-            border-color: #6b5b95;
-            box-shadow: 0 6px 18px rgba(107, 91, 149, 0.15);
-        }
-
-        .role-option input[type="radio"] {
-            accent-color: #6b5b95;
-            width: 20px;
-            height: 20px;
-            flex-shrink: 0;
-        }
-
-        .role-option span {
-            font-size: 15px;
-            color: #1f2937;
             font-weight: 500;
         }
         
@@ -2992,6 +2653,51 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .vendor-chat-composer {
             display: grid;
             gap: 8px;
+        }
+
+        .vendor-chat-composer-input-wrap {
+            position: relative;
+        }
+
+        .vendor-chat-mention-dropdown {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: calc(100% + 4px);
+            max-height: 180px;
+            overflow-y: auto;
+            border: 1px solid #d1d5db;
+            border-radius: 10px;
+            background: #fff;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+            z-index: 5;
+        }
+
+        .vendor-chat-mention-option {
+            display: block;
+            width: 100%;
+            border: none;
+            background: transparent;
+            text-align: left;
+            padding: 8px 12px;
+            font-size: 13px;
+            color: #1f2937;
+            cursor: pointer;
+        }
+
+        .vendor-chat-mention-option.is-active,
+        .vendor-chat-mention-option:hover {
+            background: #fff7ed;
+            color: #9a3412;
+        }
+
+        .vendor-chat-mention {
+            color: #c2410c;
+            font-weight: 600;
+        }
+
+        .vendor-chat-row.is-self .vendor-chat-mention {
+            color: #fde68a;
         }
 
         .vendor-chat-input {
@@ -3766,6 +3472,51 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             margin-top: 0;
         }
 
+        .app-modal-body .ai-chat-log .ai-bubble-wrap {
+            position: relative;
+            max-width: 80%;
+        }
+
+        .app-modal-body .ai-chat-log .ai-bubble-wrap .chat-bubble {
+            max-width: 100%;
+            padding-right: 36px;
+        }
+
+        .app-modal-body .ai-chat-log .ai-bubble-export-btn {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            padding: 0;
+            border: none;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.55);
+            color: #1565c0;
+            cursor: pointer;
+            opacity: 0.55;
+            transition: opacity 0.15s ease, background 0.15s ease;
+        }
+
+        .app-modal-body .ai-chat-log .ai-bubble-wrap:hover .ai-bubble-export-btn,
+        .app-modal-body .ai-chat-log .ai-bubble-export-btn:focus-visible {
+            opacity: 1;
+            background: rgba(255, 255, 255, 0.9);
+        }
+
+        .app-modal-body .ai-chat-log .ai-bubble-export-btn .material-symbols-outlined {
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        .app-modal-body .ai-chat-log .ai-bubble-export-btn:disabled {
+            opacity: 0.35;
+            cursor: wait;
+        }
+
         .ai-guidance-button.secondary {
             background: #4b5563;
         }
@@ -3945,12 +3696,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             color: var(--color-primary-hover);
         }
 
+        .cost-calculator-grid .vendor-chat-btn.is-tagged:hover:not(:disabled) .vendor-chat-icon {
+            color: #b45309;
+        }
+
         .cost-calculator-grid .cancel-guidance-btn:hover .cancel-guidance-icon {
             color: #d97706;
         }
 
-        .report-filters select:focus,
-        .report-filters select:hover,
         .report-filters .column-toggle-btn:hover {
             border-color: var(--color-secondary);
         }
@@ -4023,8 +3776,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .chat-input:focus,
-        .vendor-chat-input:focus,
-        .role-option:hover {
+        .vendor-chat-input:focus {
             border-color: var(--color-secondary);
             box-shadow: 0 0 0 2px rgba(37, 168, 224, 0.2);
         }
@@ -4092,9 +3844,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             color: #374151;
         }
 
-        .role-option input[type="radio"] {
-            accent-color: var(--color-primary);
-        }
     </style>
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-K84J5NBK1Y"></script>
@@ -4298,28 +4047,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <h1>Savvy Saver</h1>
                 <p class="subtitle">Sign in with your username and password.</p>
             
-            <?php if (!empty($_SESSION['awaiting_role'])): ?>
-                <form method="POST">
-                    <input type="hidden" name="action" value="save_user_role">
-                    <div class="form-group">
-                        <label>Select the option that best describes you:</label>
-                        <p class="subtitle" style="margin-top: 4px; font-size: 15px; color: #4b5563;">
-                            Signed in as <?php echo htmlspecialchars($_SESSION['user_email'] ?? $_SESSION['username'] ?? ''); ?>. Let us know who you are to tailor your experience.
-                        </p>
-                        <div class="role-options">
-                            <?php foreach ($user_role_options as $option): ?>
-                                <label class="role-option">
-                                    <input type="radio" name="user_role" value="<?php echo htmlspecialchars($option); ?>" required>
-                                    <span><?php echo htmlspecialchars($option); ?></span>
-                                </label>
-                            <?php endforeach; ?>
-                        </div>
-                    </div>
-                    <div class="button-group">
-                        <button type="submit">Continue</button>
-                    </div>
-                </form>
-            <?php else: ?>
                 <form method="POST">
                     <input type="hidden" name="action" value="login">
                     <div class="form-group">
@@ -4338,7 +4065,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     </div>
                     <button type="submit">Log in</button>
                 </form>
-            <?php endif; ?>
             
             <!-- eBook Promotion Section -->
             </div> <!-- Close content-padding -->
@@ -4347,16 +4073,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             <div class="content-padding">
                 <div class="report-filters">
                     <div class="report-filters-top">
-                        <label for="reportFilter">Report Filters:</label>
-                        <select id="reportFilter" onchange="filterTableRows(this.value)">
-                            <option value="all">All</option>
-                            <option value="pending">Pending</option>
-                            <option value="question">Question</option>
-                            <option value="unknown">Unknown</option>
-                            <option value="keep">Keep</option>
-                            <option value="mark_for_cancellation">Mark for Cancellation</option>
-                            <option value="cancelled">Cancelled</option>
-                        </select>
                         <button type="button" class="bulk-action-btn" data-open-modal="appModalBulkActions">Bulk Actions</button>
                         <button type="button" id="togglePurposeColumnBtn" class="column-toggle-btn" aria-pressed="false">Show Purpose</button>
                     </div>
@@ -4377,6 +4093,26 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     <span>Item #</span>
                                     <button type="button" class="th-info-btn" data-column-help="item_number" aria-label="About item number" title="About item number">&#9432;</button>
                                 </span>
+                            </th>
+                            <th class="category-col th-with-filter th-sortable" data-vendor-sort-col="category">
+                                <div class="th-with-filter-inner">
+                                    <span class="th-label-with-info">
+                                        <span class="th-with-filter-caption">Category</span>
+                                        <button type="button" class="th-info-btn" data-column-help="category" aria-label="About category" title="About category">&#9432;</button>
+                                    </span>
+                                    <button type="button" class="vendor-col-sort-btn vendor-col-sort-btn--icon" data-vendor-sort="category" aria-label="Sort by category" title="Sort by category">
+                                        <span class="material-symbols-outlined vendor-col-sort-icon" aria-hidden="true">swap_vert</span>
+                                    </button>
+                                    <button type="button" class="vendor-col-filter-btn" data-vendor-filter="category" title="Filter by category" aria-label="Filter by category" aria-haspopup="true" aria-expanded="false">
+                                        <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
+                                    </button>
+                                    <div class="vendor-col-filter-dropdown" data-vendor-filter="category" hidden>
+                                        <div class="vendor-col-filter-list"></div>
+                                        <div class="vendor-col-filter-actions">
+                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="category">Clear</button>
+                                        </div>
+                                    </div>
+                                </div>
                             </th>
                             <th class="vendor-name th-with-filter th-sortable" data-vendor-sort-col="vendor">
                                 <div class="th-with-filter-inner">
@@ -4660,6 +4396,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 postCreateCsvImportInFlight: false,
                 copyPurposes: null,
                 copyChats: null,
+                copyCategories: null,
                 overwriteBlankPurposes: false
             };
 
@@ -4720,6 +4457,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             function resetPostCreatePurposeModal() {
                 postProjectCreateFlow.copyPurposes = null;
                 postProjectCreateFlow.copyChats = null;
+                postProjectCreateFlow.copyCategories = null;
                 postProjectCreateFlow.overwriteBlankPurposes = false;
                 var questionsBlock = document.getElementById('postCreateCopyQuestionsBlock');
                 var sourceBlock = document.getElementById('postCreatePurposeSelectBlock');
@@ -4735,19 +4473,23 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 if (blankCb) blankCb.checked = false;
                 document.querySelectorAll('input[name="postCreateCopyPurposes"]').forEach(function(r) { r.checked = false; });
                 document.querySelectorAll('input[name="postCreateCopyChats"]').forEach(function(r) { r.checked = false; });
+                document.querySelectorAll('input[name="postCreateCopyCategories"]').forEach(function(r) { r.checked = false; });
             }
 
             function postCreateCopyAnswersChosen() {
                 var purposeRadio = document.querySelector('input[name="postCreateCopyPurposes"]:checked');
                 var chatRadio = document.querySelector('input[name="postCreateCopyChats"]:checked');
-                return !!(purposeRadio && chatRadio);
+                var categoryRadio = document.querySelector('input[name="postCreateCopyCategories"]:checked');
+                return !!(purposeRadio && chatRadio && categoryRadio);
             }
 
             function readPostCreateCopyAnswers() {
                 var purposeRadio = document.querySelector('input[name="postCreateCopyPurposes"]:checked');
                 var chatRadio = document.querySelector('input[name="postCreateCopyChats"]:checked');
+                var categoryRadio = document.querySelector('input[name="postCreateCopyCategories"]:checked');
                 postProjectCreateFlow.copyPurposes = purposeRadio ? purposeRadio.value === 'yes' : null;
                 postProjectCreateFlow.copyChats = chatRadio ? chatRadio.value === 'yes' : null;
+                postProjectCreateFlow.copyCategories = categoryRadio ? categoryRadio.value === 'yes' : null;
                 var blankCb = document.getElementById('postCreateOverwriteBlankPurposes');
                 postProjectCreateFlow.overwriteBlankPurposes = blankCb ? !!blankCb.checked : false;
             }
@@ -4948,11 +4690,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 if (copyContinueBtn) {
                     copyContinueBtn.addEventListener('click', function() {
                         if (!postCreateCopyAnswersChosen()) {
-                            showSnackbar('Answer both questions to continue.', 'error');
+                            showSnackbar('Answer all three questions to continue.', 'error');
                             return;
                         }
                         readPostCreateCopyAnswers();
-                        if (!postProjectCreateFlow.copyPurposes && !postProjectCreateFlow.copyChats) {
+                        if (!postProjectCreateFlow.copyPurposes && !postProjectCreateFlow.copyChats && !postProjectCreateFlow.copyCategories) {
                             closeAppModal('appModalPostCreatePurpose');
                             postProjectCreateFlow.step = 'purpose_done';
                             advancePostProjectCreateFlow();
@@ -5022,6 +4764,21 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 });
                             });
                         }
+                        if (postProjectCreateFlow.copyCategories) {
+                            chain = chain.then(function() {
+                                return postJson({
+                                    action: 'copy_project_categories',
+                                    from_project_id: fromId,
+                                    to_project_id: toId
+                                }).then(function(d) {
+                                    if (!d || !d.success) {
+                                        throw new Error((d && d.error) || 'Could not copy categories.');
+                                    }
+                                    var matched = parseInt(d.matched || 0, 10) || 0;
+                                    showSnackbar('Copied categories for ' + matched + ' vendor(s).', 'success');
+                                });
+                            });
+                        }
                         chain.then(function() {
                             return loadCalculatorData();
                         }).then(function() {
@@ -5062,7 +4819,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     action: 'project_create',
                     project_name: projectName,
                     start_date: (document.getElementById('projectWizardStartDate') || {}).value || '',
-                    end_date: '',
+                    end_date: (document.getElementById('projectWizardEndDate') || {}).value || '',
                     member_ids: [],
                     copy_from_active: (dataMode === 'copy_from_active' ? 1 : 0),
                     source_project_id: (dataMode === 'copy_from_active' ? (currentActiveProjectId || 0) : 0),
@@ -5945,48 +5702,95 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             let vendorChatUnreadPollTimer = null;
             var VENDOR_CHAT_UNREAD_POLL_MS = 35000;
 
+            function refreshVendorChatButtonPresentation(chatBtn) {
+                if (!chatBtn) return;
+                var vendorHint = (chatBtn.getAttribute('data-vendor-name') || '').trim();
+                var unreadRaw = Number(chatBtn.getAttribute('data-chat-unread'));
+                var taggedRaw = Number(chatBtn.getAttribute('data-chat-tagged'));
+                var unread = (isFinite(unreadRaw) && unreadRaw > 0) ? Math.floor(unreadRaw) : 0;
+                var tagged = (isFinite(taggedRaw) && taggedRaw > 0) ? Math.floor(taggedRaw) : 0;
+                var baseAria = chatBtn.disabled
+                    ? 'Open vendor chat'
+                    : ('Open vendor chat for ' + (vendorHint || 'this vendor'));
+                if (chatBtn.disabled) {
+                    chatBtn.title = 'Save this row first to enable chat';
+                    chatBtn.setAttribute('aria-label', baseAria);
+                    return;
+                }
+                var hintParts = [];
+                if (unread > 0) {
+                    hintParts.push(unread + ' unread');
+                }
+                if (tagged > 0) {
+                    hintParts.push('tagged ' + tagged + ' time' + (tagged === 1 ? '' : 's'));
+                }
+                if (hintParts.length) {
+                    chatBtn.title = vendorHint
+                        ? (vendorHint + ' (' + hintParts.join(', ') + ')')
+                        : hintParts.join(', ');
+                    chatBtn.setAttribute('aria-label', baseAria + '; ' + hintParts.join('; '));
+                } else {
+                    chatBtn.title = 'Open vendor chat for ' + (vendorHint || 'this vendor');
+                    chatBtn.setAttribute('aria-label', baseAria);
+                }
+            }
+
             function setVendorChatUnreadBadge(chatBtn, count) {
                 if (!chatBtn) return;
                 var nRaw = Number(count);
                 var n = (isFinite(nRaw) && nRaw > 0) ? Math.floor(nRaw) : 0;
                 chatBtn.setAttribute('data-chat-unread', String(n));
                 var badge = chatBtn.querySelector('.vendor-chat-unread-badge');
-                var vendorHint = (chatBtn.getAttribute('data-vendor-name') || '').trim();
-                var baseAria = chatBtn.disabled
-                    ? 'Open vendor chat'
-                    : ('Open vendor chat for ' + (vendorHint || 'this vendor'));
                 if (chatBtn.disabled || n <= 0) {
-                    chatBtn.title = chatBtn.disabled
-                        ? 'Save this row first to enable chat'
-                        : ('Open vendor chat for ' + (vendorHint || 'this vendor'));
-                    chatBtn.setAttribute('aria-label', baseAria);
                     if (badge) {
                         badge.classList.remove('is-visible');
                         badge.hidden = true;
                     }
-                    scheduleVendorTablePaginationIfChatUnreadFilter();
-                    return;
-                }
-                chatBtn.title = vendorHint ? ('Unread notes for ' + vendorHint + ' (' + n + ')') : ('Unread vendor chat (' + n + ')');
-                chatBtn.setAttribute('aria-label', baseAria + '; ' + n + ' unread');
-                if (badge) {
+                } else if (badge) {
                     badge.hidden = false;
                     badge.classList.add('is-visible');
                 }
+                refreshVendorChatButtonPresentation(chatBtn);
                 scheduleVendorTablePaginationIfChatUnreadFilter();
             }
 
-            function applySparseVendorChatUnreadCounts(counts) {
-                var map = (counts && typeof counts === 'object') ? counts : {};
+            function setVendorChatTaggedState(chatBtn, count) {
+                if (!chatBtn) return;
+                var nRaw = Number(count);
+                var n = (isFinite(nRaw) && nRaw > 0) ? Math.floor(nRaw) : 0;
+                chatBtn.setAttribute('data-chat-tagged', String(n));
+                chatBtn.classList.toggle('is-tagged', n > 0);
+                refreshVendorChatButtonPresentation(chatBtn);
+                scheduleVendorTablePaginationIfChatUnreadFilter();
+            }
+
+            function clearVendorChatIndicatorsForButtons(buttons) {
+                if (!buttons) return;
+                buttons.forEach(function(b) {
+                    setVendorChatUnreadBadge(b, 0);
+                    setVendorChatTaggedState(b, 0);
+                });
+            }
+
+            function applyVendorChatIndicatorCounts(unreadCounts, taggedCounts) {
+                var unreadMap = (unreadCounts && typeof unreadCounts === 'object') ? unreadCounts : {};
+                var taggedMap = (taggedCounts && typeof taggedCounts === 'object') ? taggedCounts : {};
                 document.querySelectorAll('#calculatorRows tr .vendor-chat-btn').forEach(function(btn) {
                     var vid = parseInt(btn.getAttribute('data-vendor-item-id'), 10) || 0;
                     if (vid <= 0) {
                         setVendorChatUnreadBadge(btn, 0);
+                        setVendorChatTaggedState(btn, 0);
                         return;
                     }
-                    var c = parseInt(map[String(vid)], 10) || 0;
-                    setVendorChatUnreadBadge(btn, c);
+                    var unread = parseInt(unreadMap[String(vid)], 10) || 0;
+                    var tagged = parseInt(taggedMap[String(vid)], 10) || 0;
+                    setVendorChatUnreadBadge(btn, unread);
+                    setVendorChatTaggedState(btn, tagged);
                 });
+            }
+
+            function applySparseVendorChatUnreadCounts(counts, tagged) {
+                applyVendorChatIndicatorCounts(counts, tagged);
             }
 
             function pollVendorChatUnreadCounts() {
@@ -5996,8 +5800,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 fetch(window.location.href, { method: 'POST', body: fd })
                     .then(function(r) { return r.json(); })
                     .then(function(d) {
-                        if (!d || !d.success || !d.counts) return;
-                        applySparseVendorChatUnreadCounts(d.counts);
+                        if (!d || !d.success) return;
+                        applyVendorChatIndicatorCounts(d.counts || {}, d.tagged || {});
                     })
                     .catch(function() {});
             }
@@ -6007,20 +5811,22 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             const VENDOR_PAGE_SIZE_OPTIONS = [20, 50, 100, 500];
             let vendorPageSize = 20;
             let vendorCurrentPage = 1;
-            let vendorCurrentFilter = 'all';
 
-            const VENDOR_SORTABLE_COLS = ['vendor', 'annual_cost', 'manager', 'visibility', 'status'];
+            const VENDOR_SORTABLE_COLS = ['vendor', 'category', 'annual_cost', 'manager', 'visibility', 'status'];
             let vendorSortColumn = null;
             let vendorSortDirection = 'asc';
 
-            const VENDOR_FILTER_COLS = ['frequency', 'manager', 'visibility', 'status', 'chat_unread'];
+            const VENDOR_FILTER_COLS = ['frequency', 'category', 'manager', 'visibility', 'status', 'chat_unread'];
             let vendorColumnFilters = {
                 frequency: new Set(),
+                category: new Set(),
                 manager: new Set(),
                 visibility: new Set(),
                 status: new Set(),
                 chat_unread: new Set(),
             };
+            let PROJECT_CATEGORIES = [];
+            let pendingCategoryCreateRow = null;
             let vendorNameSearchQuery = '';
             let vendorNameSearchDebounce = null;
 
@@ -6062,7 +5868,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             }
 
             function getSelectedVendorRows() {
-                const filteredSet = new Set(getFilteredVendorRows(vendorCurrentFilter));
+                const filteredSet = new Set(getFilteredVendorRows());
                 return Array.from(document.querySelectorAll('#calculatorRows tr')).filter(function(row) {
                     if (!filteredSet.has(row)) return false;
                     const cb = row.querySelector('.row-select-checkbox');
@@ -6073,7 +5879,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             function updateSelectAllCheckboxState() {
                 const selectAll = document.getElementById('selectAllVendors');
                 if (!selectAll) return;
-                const filtered = getFilteredVendorRows(vendorCurrentFilter);
+                const filtered = getFilteredVendorRows();
                 if (!filtered.length) {
                     selectAll.checked = false;
                     selectAll.indeterminate = false;
@@ -6089,7 +5895,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             }
 
             function setAllRowSelection(checked) {
-                getFilteredVendorRows(vendorCurrentFilter).forEach(function(row) {
+                getFilteredVendorRows().forEach(function(row) {
                     const cb = row.querySelector('.row-select-checkbox');
                     if (cb) cb.checked = !!checked;
                 });
@@ -6218,10 +6024,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             }
                         }
                     });
-                    const filterSelect = document.getElementById('reportFilter');
-                    if (filterSelect) {
-                        filterTableRows(filterSelect.value);
-                    }
                 }
                 applyVendorTablePagination(vendorCurrentPage);
                 calculateAnnualSavings();
@@ -6250,6 +6052,129 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 return o;
             }
 
+            function categoryOptionsHtml(selectedId) {
+                let o = '<option value="">None</option>';
+                (PROJECT_CATEGORIES || []).forEach(function(c) {
+                    const id = String(c.id);
+                    const lab = String(c.name || '').replace(/</g, '');
+                    const sel = (selectedId && String(selectedId) === id) ? ' selected' : '';
+                    o += '<option value="' + id + '"' + sel + '>' + lab + '</option>';
+                });
+                o += '<option value="__new__">+ New category...</option>';
+                return o;
+            }
+
+            function setProjectCategories(categories) {
+                PROJECT_CATEGORIES = Array.isArray(categories) ? categories.slice() : [];
+                PROJECT_CATEGORIES.sort(function(a, b) {
+                    return String(a.name || '').localeCompare(String(b.name || ''));
+                });
+            }
+
+            function refreshAllCategorySelects() {
+                document.querySelectorAll('.category-select').forEach(function(sel) {
+                    const current = sel.value && sel.value !== '__new__' ? sel.value : '';
+                    sel.innerHTML = categoryOptionsHtml(current);
+                    if (current) sel.value = current;
+                });
+                VENDOR_FILTER_COLS.forEach(function(col) {
+                    if (col === 'category') populateVendorColumnFilterList('category');
+                });
+            }
+
+            function addProjectCategoryToList(cat) {
+                if (!cat || !cat.id) return;
+                const exists = (PROJECT_CATEGORIES || []).some(function(c) {
+                    return String(c.id) === String(cat.id);
+                });
+                if (!exists) {
+                    PROJECT_CATEGORIES.push({ id: cat.id, name: cat.name || '' });
+                    PROJECT_CATEGORIES.sort(function(a, b) {
+                        return String(a.name || '').localeCompare(String(b.name || ''));
+                    });
+                }
+                refreshAllCategorySelects();
+            }
+
+            function openNewCategoryModal(row) {
+                pendingCategoryCreateRow = row || null;
+                const input = document.getElementById('newCategoryNameInput');
+                const err = document.getElementById('newCategoryNameError');
+                if (input) {
+                    input.value = '';
+                    input.classList.remove('is-invalid');
+                }
+                if (err) err.textContent = '';
+                openAppModal('appModalNewCategory');
+                if (input) {
+                    setTimeout(function() { input.focus(); }, 50);
+                }
+            }
+
+            function closeNewCategoryModal(restoreRow) {
+                closeAppModal('appModalNewCategory');
+                if (restoreRow && pendingCategoryCreateRow) {
+                    const sel = pendingCategoryCreateRow.querySelector('.category-select');
+                    if (sel) {
+                        const prev = sel.getAttribute('data-prev-category') || '';
+                        sel.value = prev;
+                    }
+                }
+                pendingCategoryCreateRow = null;
+            }
+
+            function submitNewCategoryModal() {
+                const input = document.getElementById('newCategoryNameInput');
+                const err = document.getElementById('newCategoryNameError');
+                const name = input ? input.value.trim() : '';
+                if (!name) {
+                    if (err) err.textContent = 'Enter a category name.';
+                    if (input) input.classList.add('is-invalid');
+                    return;
+                }
+                const saveBtn = document.getElementById('newCategorySaveBtn');
+                if (saveBtn) saveBtn.disabled = true;
+                postJson({ action: 'category_create', name: name })
+                    .then(function(d) {
+                        if (!d || !d.success) {
+                            throw new Error((d && d.error) || 'Could not create category.');
+                        }
+                        addProjectCategoryToList({ id: d.id, name: d.name });
+                        if (pendingCategoryCreateRow) {
+                            const sel = pendingCategoryCreateRow.querySelector('.category-select');
+                            if (sel) sel.value = String(d.id);
+                        }
+                        closeAppModal('appModalNewCategory');
+                        pendingCategoryCreateRow = null;
+                        autoSave();
+                        if (!calculatorLoadInProgress) {
+                            applyVendorTablePagination(vendorCurrentPage);
+                        }
+                        showSnackbar('Category created.', 'success');
+                    })
+                    .catch(function(e) {
+                        if (err) err.textContent = e && e.message ? e.message : 'Could not create category.';
+                        if (input) input.classList.add('is-invalid');
+                    })
+                    .finally(function() {
+                        if (saveBtn) saveBtn.disabled = false;
+                    });
+            }
+
+            function handleCategorySelectChange(row, sel) {
+                if (!sel) return;
+                if (sel.value === '__new__') {
+                    sel.setAttribute('data-prev-category', sel.getAttribute('data-prev-category') || '');
+                    openNewCategoryModal(row);
+                    return;
+                }
+                sel.setAttribute('data-prev-category', sel.value || '');
+                autoSave();
+                if (!calculatorLoadInProgress) {
+                    applyVendorTablePagination(vendorCurrentPage);
+                }
+            }
+
             function syncBulkManagerOptions() {
                 const bulkManager = document.getElementById('bulkManagerValue');
                 if (!bulkManager) return;
@@ -6270,6 +6195,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <input type="checkbox" class="row-select-checkbox" aria-label="Select vendor row" />
                     </td>
                     <td class="item-number">${rowCount}</td>
+                    <td class="category-col">
+                        <select class="category-select" data-row="${rowCount}">
+                            ${categoryOptionsHtml('')}
+                        </select>
+                    </td>
                     <td class="vendor-name">
                         <input type="hidden" class="row-db-id" value="" />
                         <div class="vendor-cell-wrap">
@@ -6526,23 +6456,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             
             const VALID_ROW_STATUSES = ['pending', 'question', 'unknown', 'keep', 'mark_for_cancellation', 'cancelled'];
 
-            function normalizeVendorFilter(filterValue) {
-                const filter = String(filterValue || 'all');
-                if (filter === 'all' || VALID_ROW_STATUSES.indexOf(filter) !== -1) {
-                    return filter;
-                }
-                return 'all';
-            }
-
-            function rowPassesVendorFilters(row, filterValue) {
-                const filter = normalizeVendorFilter(filterValue);
-                const passesReport = filter === 'all' || getRowStatus(row) === filter;
-                return passesReport && rowMatchesColumnFilters(row);
-            }
-
-            function getFilteredVendorRows(filterValue) {
+            function getFilteredVendorRows() {
                 return Array.from(document.querySelectorAll('#calculatorRows tr')).filter(function(row) {
-                    return rowPassesVendorFilters(row, filterValue);
+                    return rowMatchesColumnFilters(row);
                 });
             }
 
@@ -6571,6 +6487,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     const opt = mgrSel.options[mgrSel.selectedIndex];
                     return { isUnassigned: false, text: (opt ? opt.text : '').trim().toLowerCase() };
                 }
+                if (col === 'category') {
+                    const catSel = row.querySelector('.category-select');
+                    const catVal = catSel && catSel.value ? String(catSel.value).trim() : '';
+                    if (!catVal || catVal === '__new__') {
+                        return { isUnassigned: true, text: '' };
+                    }
+                    const opt = catSel.options[catSel.selectedIndex];
+                    return { isUnassigned: false, text: (opt ? opt.text : '').trim().toLowerCase() };
+                }
                 if (col === 'visibility') {
                     const visSel = row.querySelector('.visibility-select');
                     const opt = visSel ? visSel.options[visSel.selectedIndex] : null;
@@ -6592,7 +6517,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
                 if (col === 'annual_cost') {
                     cmp = va - vb;
-                } else if (col === 'manager') {
+                } else if (col === 'manager' || col === 'category') {
                     if (va.isUnassigned && !vb.isUnassigned) cmp = 1;
                     else if (!va.isUnassigned && vb.isUnassigned) cmp = -1;
                     else cmp = va.text.localeCompare(vb.text);
@@ -6615,7 +6540,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const filtered = [];
                 const unfiltered = [];
                 allRows.forEach(function(row) {
-                    if (rowPassesVendorFilters(row, vendorCurrentFilter)) {
+                    if (rowMatchesColumnFilters(row)) {
                         filtered.push(row);
                     } else {
                         unfiltered.push(row);
@@ -6699,10 +6624,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 nextBtn.disabled = !hasMultiplePages || vendorCurrentPage >= totalPages;
             }
 
-            function applyVendorTablePagination(page, filterValue) {
-                if (typeof filterValue !== 'undefined') {
-                    vendorCurrentFilter = normalizeVendorFilter(filterValue);
-                }
+            function applyVendorTablePagination(page) {
                 if (typeof page === 'number' && isFinite(page)) {
                     vendorCurrentPage = page;
                 }
@@ -6710,7 +6632,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 sortVendorRowsInDom();
 
                 const allRows = Array.from(document.querySelectorAll('#calculatorRows tr'));
-                const filteredRows = getFilteredVendorRows(vendorCurrentFilter);
+                const filteredRows = getFilteredVendorRows();
                 const totalPages = Math.max(1, Math.ceil(filteredRows.length / vendorPageSize));
                 vendorCurrentPage = Math.min(totalPages, Math.max(1, vendorCurrentPage));
 
@@ -6767,6 +6689,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 return mgr === '' ? '__none__' : mgr;
             }
 
+            function getRowCategoryFilterKey(row) {
+                const catSel = row.querySelector('.category-select');
+                const cat = catSel && catSel.value ? String(catSel.value).trim() : '';
+                return (cat === '' || cat === '__new__') ? '__none__' : cat;
+            }
+
             function rowMatchesColumnFilters(row) {
                 if (vendorNameSearchQuery) {
                     const vendorInput = row.querySelector('input[name="vendor[]"]');
@@ -6775,6 +6703,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
                 if (vendorColumnFilters.frequency.size) {
                     if (!vendorColumnFilters.frequency.has(getRowFrequencyValue(row))) return false;
+                }
+                if (vendorColumnFilters.category.size) {
+                    if (!vendorColumnFilters.category.has(getRowCategoryFilterKey(row))) return false;
                 }
                 if (vendorColumnFilters.manager.size) {
                     if (!vendorColumnFilters.manager.has(getRowManagerFilterKey(row))) return false;
@@ -6788,11 +6719,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     if (!vendorColumnFilters.status.has(getRowStatus(row))) return false;
                 }
                 if (vendorColumnFilters.chat_unread.size) {
-                    if (!vendorColumnFilters.chat_unread.has('unread')) return false;
                     const chatBtn = row.querySelector('.vendor-chat-btn');
-                    const nRaw = chatBtn ? Number(chatBtn.getAttribute('data-chat-unread')) : 0;
-                    const n = (isFinite(nRaw) && nRaw > 0) ? Math.floor(nRaw) : 0;
-                    if (n <= 0) return false;
+                    const unreadRaw = chatBtn ? Number(chatBtn.getAttribute('data-chat-unread')) : 0;
+                    const taggedRaw = chatBtn ? Number(chatBtn.getAttribute('data-chat-tagged')) : 0;
+                    const unread = (isFinite(unreadRaw) && unreadRaw > 0) ? Math.floor(unreadRaw) : 0;
+                    const tagged = (isFinite(taggedRaw) && taggedRaw > 0) ? Math.floor(taggedRaw) : 0;
+                    let chatMatch = false;
+                    if (vendorColumnFilters.chat_unread.has('unread') && unread > 0) chatMatch = true;
+                    if (vendorColumnFilters.chat_unread.has('tagged') && tagged > 0) chatMatch = true;
+                    if (!chatMatch) return false;
                 }
                 return true;
             }
@@ -6891,6 +6826,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         const lab = (m.username || m.email || ('User ' + m.id)).replace(/</g, '');
                         opts.push({ value: String(m.id), label: lab });
                     });
+                } else if (col === 'category') {
+                    opts.push({ value: '__none__', label: 'Uncategorized' });
+                    (PROJECT_CATEGORIES || []).forEach(function(c) {
+                        opts.push({ value: String(c.id), label: String(c.name || '').replace(/</g, '') });
+                    });
                 } else if (col === 'visibility') {
                     opts.push({ value: 'public', label: 'Public' });
                     opts.push({ value: 'confidential', label: 'Confidential' });
@@ -6900,6 +6840,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     });
                 } else if (col === 'chat_unread') {
                     opts.push({ value: 'unread', label: 'Unread' });
+                    opts.push({ value: 'tagged', label: 'Tagged' });
                 }
                 opts.forEach(function(opt) {
                     const labEl = document.createElement('label');
@@ -7101,6 +7042,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     const annualCostDisplay = row.querySelector('.annual-cost-display');
                     const rowIdEl = row.querySelector('.row-db-id');
                     const mgrSel = row.querySelector('.manager-select');
+                    const catSel = row.querySelector('.category-select');
                     const visSel = row.querySelector('.visibility-select');
                     const deadlineIn = row.querySelector('.cancel-deadline-input');
                     const lastPayIn = row.querySelector('.last-payment-input');
@@ -7117,6 +7059,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     const managerRaw = mgrSel ? String(mgrSel.value || '').trim() : '';
                     const managerParsed = managerRaw !== '' ? parseInt(managerRaw, 10) : NaN;
                     const managerOk = managerRaw !== '' && !isNaN(managerParsed) && managerParsed > 0;
+                    const categoryRaw = catSel ? String(catSel.value || '').trim() : '';
+                    const categoryParsed = categoryRaw !== '' && categoryRaw !== '__new__' ? parseInt(categoryRaw, 10) : NaN;
+                    const categoryOk = categoryRaw !== '' && categoryRaw !== '__new__' && !isNaN(categoryParsed) && categoryParsed > 0;
                     const visibility = visSel ? visSel.value : 'public';
                     const cancelDl = deadlineIn && deadlineIn.value ? deadlineIn.value : '';
                     const lastPay = lastPayIn && lastPayIn.value ? lastPayIn.value : '';
@@ -7139,7 +7084,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             visibility: visibility,
                             cancellation_deadline: cancelDl,
                             last_payment_date: lastPay,
-                            manager_user_id: managerOk ? managerParsed : null
+                            manager_user_id: managerOk ? managerParsed : null,
+                            category_id: categoryOk ? categoryParsed : null
                         };
                         if (idVal) { o.id = idVal; }
                         items.push(o);
@@ -7244,6 +7190,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         return;
                     }
                     try {
+                        if (data.success) {
+                            setProjectCategories(data.categories || []);
+                        }
                         if (data.success && data.items && data.items.length > 0) {
                             // Clear existing rows
                             document.getElementById('calculatorRows').innerHTML = '';
@@ -7261,6 +7210,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     const statusSelect = lastRow.querySelector('.row-status-select');
                                     const notesTextarea = lastRow.querySelector('textarea.purpose-textarea');
                                     const mgr = lastRow.querySelector('.manager-select');
+                                    const cat = lastRow.querySelector('.category-select');
                                     const vis = lastRow.querySelector('.visibility-select');
                                     const dl = lastRow.querySelector('.cancel-deadline-input');
                                     const lp = lastRow.querySelector('.last-payment-input');
@@ -7268,14 +7218,24 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     if (vendorInput) vendorInput.value = item.vendor_name || '';
                                     updateVendorDrilldownState(lastRow);
                                     var uch = typeof item.vendor_chat_unread !== 'undefined' ? item.vendor_chat_unread : 0;
+                                    var tch = typeof item.vendor_chat_tagged !== 'undefined' ? item.vendor_chat_tagged : 0;
                                     var cbtn = lastRow.querySelector('.vendor-chat-btn');
-                                    if (cbtn) setVendorChatUnreadBadge(cbtn, uch);
+                                    if (cbtn) {
+                                        setVendorChatUnreadBadge(cbtn, uch);
+                                        setVendorChatTaggedState(cbtn, tch);
+                                    }
 
                                     if (costInput) costInput.value = item.cost_per_period > 0 ? formatCostInputValue(item.cost_per_period) : '';
                                     if (frequencySelect) frequencySelect.value = item.frequency || '';
                                     if (mgr) {
                                         const mid = item.manager_user_id ? String(item.manager_user_id) : '';
                                         mgr.innerHTML = managerOptionsHtml(mid);
+                                    }
+                                    if (cat) {
+                                        const cid = item.category_id ? String(item.category_id) : '';
+                                        cat.innerHTML = categoryOptionsHtml(cid);
+                                        if (cid) cat.value = cid;
+                                        cat.setAttribute('data-prev-category', cid);
                                     }
                                     if (vis) vis.value = (item.visibility === 'confidential') ? 'confidential' : 'public';
                                     if (dl && item.cancellation_deadline) {
@@ -7328,8 +7288,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             calculateAnnualSavings();
                             calculateConfirmedSavings();
                             clearRowSelection();
-                            const filterSelect = document.getElementById('reportFilter');
-                            applyVendorTablePagination(1, filterSelect ? filterSelect.value : 'all');
+                            applyVendorTablePagination(1);
                         } else if (data.success) {
                             // Empty project (or zero visible rows): must clear DOM or previous project rows stay visible.
                             document.getElementById('calculatorRows').innerHTML = '';
@@ -7338,13 +7297,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             calculateAnnualSavings();
                             calculateConfirmedSavings();
                             clearRowSelection();
-                            const filterSelectEmpty = document.getElementById('reportFilter');
-                            applyVendorTablePagination(1, filterSelectEmpty ? filterSelectEmpty.value : 'all');
+                            applyVendorTablePagination(1);
                         } else {
                             addCalculatorRow();
                             clearRowSelection();
-                            const filterSelect = document.getElementById('reportFilter');
-                            applyVendorTablePagination(1, filterSelect ? filterSelect.value : 'all');
+                            applyVendorTablePagination(1);
                         }
                     } finally {
                         if (loadGeneration === calculatorLoadGeneration) {
@@ -7360,8 +7317,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     try {
                         addCalculatorRow();
                         clearRowSelection();
-                        const filterSelect = document.getElementById('reportFilter');
-                        applyVendorTablePagination(1, filterSelect ? filterSelect.value : 'all');
+                        applyVendorTablePagination(1);
                     } finally {
                         if (loadGeneration === calculatorLoadGeneration) {
                             calculatorLoadInProgress = false;
@@ -7378,6 +7334,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const rawBtn = row.querySelector('.vendor-raw-btn');
                 const notesTextarea = row.querySelector('textarea.purpose-textarea');
                 const mgrSel = row.querySelector('.manager-select');
+                const catSel = row.querySelector('.category-select');
                 const visSel = row.querySelector('.visibility-select');
                 const dlIn = row.querySelector('.cancel-deadline-input');
                 const lpIn = row.querySelector('.last-payment-input');
@@ -7412,10 +7369,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         calculateConfirmedSavings();
                         clearTimeout(saveTimeout);
                         saveCalculatorData();
-                        const filterSelect = document.getElementById('reportFilter');
-                        if (filterSelect) {
-                            filterTableRows(filterSelect.value);
-                        }
+                        applyVendorTablePagination(vendorCurrentPage);
                     });
                 }
                 
@@ -7457,6 +7411,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         }
                     });
                 });
+                if (catSel) {
+                    catSel.addEventListener('change', function() {
+                        handleCategorySelectChange(row, catSel);
+                    });
+                }
                 [dlIn, lpIn].forEach(function(el) {
                     if (el) el.addEventListener('change', autoSave);
                 });
@@ -7487,10 +7446,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         : 'Save this row first to enable chat';
                     if (!canChat) {
                         setVendorChatUnreadBadge(chatBtn, 0);
+                        setVendorChatTaggedState(chatBtn, 0);
                     } else {
                         var prevUnread = parseInt(chatBtn.getAttribute('data-chat-unread'), 10);
                         if (!isFinite(prevUnread)) prevUnread = 0;
+                        var prevTagged = parseInt(chatBtn.getAttribute('data-chat-tagged'), 10);
+                        if (!isFinite(prevTagged)) prevTagged = 0;
                         setVendorChatUnreadBadge(chatBtn, prevUnread);
+                        setVendorChatTaggedState(chatBtn, prevTagged);
                     }
                 }
                 if (cancelGuideBtn) {
@@ -7502,11 +7465,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             // Override attachRowListeners to use the new version with auto-save
             const originalAttachRowListeners = attachRowListeners;
             attachRowListeners = attachRowListenersWithSave;
-            
-            // Filter table rows based on selected filter
-            function filterTableRows(filterValue) {
-                applyVendorTablePagination(1, filterValue);
-            }
 
             function setPurposeColumnState(isVisible) {
                 const grid = document.getElementById('costCalculatorGrid');
@@ -7535,6 +7493,36 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     setPurposeColumnState(nextVisible);
                     localStorage.setItem(prefKey, nextVisible ? '1' : '0');
                 });
+            }
+
+            function initNewCategoryModal() {
+                var saveBtn = document.getElementById('newCategorySaveBtn');
+                var cancelBtn = document.getElementById('newCategoryCancelBtn');
+                var input = document.getElementById('newCategoryNameInput');
+                var overlay = document.getElementById('appModalNewCategory');
+                if (saveBtn) {
+                    saveBtn.addEventListener('click', submitNewCategoryModal);
+                }
+                if (cancelBtn) {
+                    cancelBtn.addEventListener('click', function() {
+                        closeNewCategoryModal(true);
+                    });
+                }
+                if (input) {
+                    input.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            submitNewCategoryModal();
+                        }
+                    });
+                }
+                if (overlay) {
+                    overlay.querySelectorAll('.app-modal-close').forEach(function(btn) {
+                        btn.addEventListener('click', function() {
+                            closeNewCategoryModal(true);
+                        });
+                    });
+                }
             }
 
             function initVendorPageSizeSelect() {
@@ -7571,6 +7559,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 initVendorPageSizeSelect();
                 initVendorColumnSort();
                 initVendorColumnHeaderFilters();
+                initNewCategoryModal();
                 loadProjectsIntoMenu();
                 syncBulkManagerOptions();
                 const projectSwitcher = document.getElementById('projectSwitcherSelect');
@@ -7648,7 +7637,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     selectAll.addEventListener('change', function() {
                         setAllRowSelection(selectAll.checked);
                         if (selectAll.checked) {
-                            const n = getFilteredVendorRows(vendorCurrentFilter).length;
+                            const n = getFilteredVendorRows().length;
                             showSnackbar(formatVendorsSelectedLabel(n), 'success');
                         }
                     });
@@ -7747,6 +7736,180 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     d.textContent = s;
                     return d.innerHTML;
                 }
+                function normalizeVendorChatMentionKey(value) {
+                    return String(value || '').trim().toLowerCase();
+                }
+                function vendorChatMentionInsertToken(member) {
+                    var username = String(member.username || '').trim();
+                    if (username) return username;
+                    var display = String(member.display_name || '').trim();
+                    if (display) {
+                        var first = (display.split(/\s+/)[0] || display).replace(/\s+/g, '');
+                        if (first) return first;
+                    }
+                    var email = String(member.email || '');
+                    if (email.indexOf('@') >= 0) {
+                        return email.split('@')[0];
+                    }
+                    return 'user' + String(member.id || '');
+                }
+                function buildVendorChatMentionCandidates() {
+                    return (TEAM_MEMBERS || []).filter(function(m) {
+                        if (!m || m.is_disabled) return false;
+                        if (parseInt(m.id, 10) === CURRENT_USER_ID) return false;
+                        return true;
+                    }).map(function(m) {
+                        var token = vendorChatMentionInsertToken(m);
+                        var label = String(m.display_name || m.username || m.email || ('User ' + m.id)).trim();
+                        var keys = [];
+                        var username = String(m.username || '').trim();
+                        if (username) keys.push(normalizeVendorChatMentionKey(username));
+                        var display = String(m.display_name || '').trim();
+                        if (display) {
+                            keys.push(normalizeVendorChatMentionKey(display.replace(/\s+/g, '')));
+                            var first = (display.split(/\s+/)[0] || '').trim();
+                            if (first) keys.push(normalizeVendorChatMentionKey(first));
+                        }
+                        var email = String(m.email || '');
+                        if (email.indexOf('@') >= 0) {
+                            keys.push(normalizeVendorChatMentionKey(email.split('@')[0]));
+                        }
+                        var uniqueKeys = [];
+                        keys.forEach(function(k) {
+                            if (k && uniqueKeys.indexOf(k) === -1) uniqueKeys.push(k);
+                        });
+                        return { id: m.id, token: token, label: label, searchKeys: uniqueKeys };
+                    });
+                }
+                function renderVendorChatMessageBody(el, text) {
+                    if (!el) return;
+                    el.textContent = '';
+                    var str = String(text || '');
+                    var re = /@([A-Za-z0-9._-]+)/g;
+                    var lastIndex = 0;
+                    var match;
+                    while ((match = re.exec(str)) !== null) {
+                        if (match.index > lastIndex) {
+                            el.appendChild(document.createTextNode(str.slice(lastIndex, match.index)));
+                        }
+                        var span = document.createElement('span');
+                        span.className = 'vendor-chat-mention';
+                        span.textContent = '@' + match[1];
+                        el.appendChild(span);
+                        lastIndex = re.lastIndex;
+                    }
+                    if (lastIndex < str.length) {
+                        el.appendChild(document.createTextNode(str.slice(lastIndex)));
+                    }
+                }
+                function initVendorChatMentionComposer() {
+                    var input = document.getElementById('vendorChatInput');
+                    var dropdown = document.getElementById('vendorChatMentionDropdown');
+                    if (!input || !dropdown) return;
+                    var candidates = buildVendorChatMentionCandidates();
+                    var activeMatches = [];
+                    var activeIndex = -1;
+                    var mentionStart = -1;
+                    function hideMentionDropdown() {
+                        dropdown.hidden = true;
+                        dropdown.innerHTML = '';
+                        activeMatches = [];
+                        activeIndex = -1;
+                        mentionStart = -1;
+                    }
+                    function getMentionQuery() {
+                        var value = input.value;
+                        var pos = input.selectionStart;
+                        if (pos == null) pos = value.length;
+                        var before = value.slice(0, pos);
+                        var at = before.lastIndexOf('@');
+                        if (at < 0) return null;
+                        if (at > 0 && !/\s/.test(before.charAt(at - 1))) return null;
+                        var query = before.slice(at + 1);
+                        if (/\s/.test(query)) return null;
+                        return { at: at, query: query, pos: pos };
+                    }
+                    function renderMentionDropdown() {
+                        var ctx = getMentionQuery();
+                        if (!ctx) {
+                            hideMentionDropdown();
+                            return;
+                        }
+                        mentionStart = ctx.at;
+                        var q = normalizeVendorChatMentionKey(ctx.query);
+                        activeMatches = candidates.filter(function(c) {
+                            if (!q) return true;
+                            return c.searchKeys.some(function(k) { return k.indexOf(q) === 0; });
+                        }).slice(0, 8);
+                        if (!activeMatches.length) {
+                            hideMentionDropdown();
+                            return;
+                        }
+                        if (activeIndex >= activeMatches.length) activeIndex = activeMatches.length - 1;
+                        if (activeIndex < 0) activeIndex = 0;
+                        dropdown.innerHTML = '';
+                        activeMatches.forEach(function(item, idx) {
+                            var btn = document.createElement('button');
+                            btn.type = 'button';
+                            btn.className = 'vendor-chat-mention-option' + (idx === activeIndex ? ' is-active' : '');
+                            btn.textContent = '@' + item.token + ' — ' + item.label;
+                            btn.addEventListener('mousedown', function(e) {
+                                e.preventDefault();
+                                insertMention(item);
+                            });
+                            dropdown.appendChild(btn);
+                        });
+                        dropdown.hidden = false;
+                    }
+                    function insertMention(item) {
+                        var ctx = getMentionQuery();
+                        if (!ctx || !item) return;
+                        var value = input.value;
+                        var before = value.slice(0, ctx.at);
+                        var after = value.slice(ctx.pos);
+                        var insertText = '@' + item.token + ' ';
+                        input.value = before + insertText + after;
+                        var nextPos = before.length + insertText.length;
+                        input.focus();
+                        input.setSelectionRange(nextPos, nextPos);
+                        hideMentionDropdown();
+                    }
+                    input.addEventListener('input', renderMentionDropdown);
+                    input.addEventListener('click', renderMentionDropdown);
+                    input.addEventListener('blur', function() {
+                        window.setTimeout(hideMentionDropdown, 120);
+                    });
+                    input.addEventListener('keydown', function(e) {
+                        if (!dropdown.hidden && activeMatches.length) {
+                            if (e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                activeIndex = (activeIndex + 1) % activeMatches.length;
+                                renderMentionDropdown();
+                                return;
+                            }
+                            if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                activeIndex = (activeIndex - 1 + activeMatches.length) % activeMatches.length;
+                                renderMentionDropdown();
+                                return;
+                            }
+                            if (e.key === 'Enter' || e.key === 'Tab') {
+                                e.preventDefault();
+                                insertMention(activeMatches[activeIndex] || activeMatches[0]);
+                                return;
+                            }
+                            if (e.key === 'Escape') {
+                                e.preventDefault();
+                                hideMentionDropdown();
+                                return;
+                            }
+                        }
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            sendVendorChatMessage();
+                        }
+                    });
+                }
                 function formatVendorChatTimestamp(rawValue) {
                     var raw = String(rawValue || '').trim();
                     if (!raw) return '';
@@ -7773,7 +7936,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     var body = bubble.querySelector('.vendor-chat-text');
                     var stamp = bubble.querySelector('.vendor-chat-time');
                     var editBtn = bubble.querySelector('.vendor-chat-edit-btn');
-                    if (body) body.textContent = String(msg.message || '');
+                    if (body) renderVendorChatMessageBody(body, String(msg.message || ''));
                     if (stamp) stamp.textContent = formatVendorChatStampText(msg);
                     if (editBtn) {
                         editBtn.hidden = !msg.can_edit;
@@ -7817,7 +7980,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         actions.remove();
                         body.hidden = false;
                         if (restore) {
-                            body.textContent = originalText;
+                            renderVendorChatMessageBody(body, originalText);
                             if (editBtn) editBtn.hidden = false;
                         }
                     }
@@ -7889,7 +8052,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     }
                     var body = document.createElement('div');
                     body.className = 'vendor-chat-text';
-                    body.textContent = String(msg.message || '');
+                    renderVendorChatMessageBody(body, String(msg.message || ''));
                     var stamp = document.createElement('div');
                     stamp.className = 'vendor-chat-time';
                     stamp.textContent = formatVendorChatStampText(msg);
@@ -7964,7 +8127,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             vendorChatRequestInFlight = false;
                             if (d && d.success) {
                                 var rows = document.querySelectorAll('.vendor-chat-btn[data-vendor-item-id="' + String(vendorItemId) + '"]');
-                                rows.forEach(function(b) { setVendorChatUnreadBadge(b, 0); });
+                                clearVendorChatIndicatorsForButtons(rows);
                             }
                             if (!d || !d.success) {
                                 if (!isSilent) {
@@ -8054,9 +8217,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             var sentVid = activeVendorChatItemId;
                             input.value = '';
                             if (sentVid) {
-                                document.querySelectorAll('.vendor-chat-btn[data-vendor-item-id="' + String(sentVid) + '"]').forEach(function(b) {
-                                    setVendorChatUnreadBadge(b, 0);
-                                });
+                                clearVendorChatIndicatorsForButtons(
+                                    document.querySelectorAll('.vendor-chat-btn[data-vendor-item-id="' + String(sentVid) + '"]')
+                                );
                             }
                             if (d.vendor_name) {
                                 activeVendorChatVendorName = String(d.vendor_name);
@@ -8089,15 +8252,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         sendVendorChatMessage();
                     });
                 }
-                var vendorChatInput = document.getElementById('vendorChatInput');
-                if (vendorChatInput) {
-                    vendorChatInput.addEventListener('keydown', function(e) {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            sendVendorChatMessage();
-                        }
-                    });
-                }
+                initVendorChatMentionComposer();
                 function setCancelGuidanceLoading(messageHtml) {
                     var body = document.getElementById('cancelGuidanceBody');
                     var retryBtn = document.getElementById('cancelGuidanceRetryBtn');
@@ -8221,9 +8376,50 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     bar.innerHTML = '<strong>This month:</strong> ' + used + ' / ' + d.limit + ' questions used'
                         + (hint ? '<br><span style="font-size:11px;color:#4B5563;">' + aiEscapeHtml(hint) + '</span>' : '');
                 }
+                var lastAiChatQuestion = '';
+                function exportAiChatReplyToPdf(question, replyHtml, exportBtn) {
+                    if (exportBtn) exportBtn.disabled = true;
+                    var fd = new FormData();
+                    fd.append('action', 'export_ai_reply_pdf');
+                    fd.append('question', question || '');
+                    fd.append('reply_html', replyHtml || '');
+                    fetch(window.location.href, { method: 'POST', body: fd })
+                        .then(function(r) {
+                            if (!r.ok) {
+                                return r.text().then(function(t) {
+                                    throw new Error(t || 'Export failed.');
+                                });
+                            }
+                            var disposition = r.headers.get('Content-Disposition') || '';
+                            var match = disposition.match(/filename="([^"]+)"/i);
+                            var filename = match ? match[1] : 'ai-assistant-report.pdf';
+                            return r.blob().then(function(blob) {
+                                return { blob: blob, filename: filename };
+                            });
+                        })
+                        .then(function(result) {
+                            var url = URL.createObjectURL(result.blob);
+                            var a = document.createElement('a');
+                            a.href = url;
+                            a.download = result.filename;
+                            document.body.appendChild(a);
+                            a.click();
+                            a.remove();
+                            URL.revokeObjectURL(url);
+                        })
+                        .catch(function(err) {
+                            showSnackbar((err && err.message) || 'Could not export PDF.', 'error');
+                        })
+                        .finally(function() {
+                            if (exportBtn) exportBtn.disabled = false;
+                        });
+                }
                 function appendAiChatMessage(role, text, asHtml) {
                     var log = document.getElementById('aiChatLog');
                     if (!log) return;
+                    if (role === 'user') {
+                        lastAiChatQuestion = String(text || '').trim();
+                    }
                     var wrap = document.createElement('div');
                     wrap.className = 'chat-message ' + (role === 'user' ? 'user-message' : 'ai-message');
                     var bubble = document.createElement('div');
@@ -8234,7 +8430,26 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     } else {
                         bubble.textContent = text;
                     }
-                    wrap.appendChild(bubble);
+                    if (role === 'assistant') {
+                        var bubbleWrap = document.createElement('div');
+                        bubbleWrap.className = 'ai-bubble-wrap';
+                        bubbleWrap.dataset.question = lastAiChatQuestion;
+                        var exportBtn = document.createElement('button');
+                        exportBtn.type = 'button';
+                        exportBtn.className = 'ai-bubble-export-btn';
+                        exportBtn.setAttribute('aria-label', 'Export to PDF');
+                        exportBtn.title = 'Export to PDF';
+                        exportBtn.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">picture_as_pdf</span>';
+                        exportBtn.addEventListener('click', function() {
+                            var replyContent = asHtml ? bubble.innerHTML : bubble.textContent;
+                            exportAiChatReplyToPdf(bubbleWrap.dataset.question || '', replyContent, exportBtn);
+                        });
+                        bubbleWrap.appendChild(bubble);
+                        bubbleWrap.appendChild(exportBtn);
+                        wrap.appendChild(bubbleWrap);
+                    } else {
+                        wrap.appendChild(bubble);
+                    }
                     log.appendChild(wrap);
                     if (role === 'assistant') {
                         // Keep the newest assistant answer positioned from its start.
@@ -8660,6 +8875,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <label>Start date
                         <input type="date" id="projectWizardStartDate" required>
                     </label>
+                    <label>End date
+                        <input type="date" id="projectWizardEndDate">
+                    </label>
                     <label>
                         <input type="radio" name="projectWizardDataMode" id="projectWizardDataModeUpload" value="upload_after" checked>
                         I will upload data after creating this project.
@@ -8732,6 +8950,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <label style="margin-right:14px;font-size:14px;"><input type="radio" name="postCreateCopyChats" value="yes"> Yes</label>
                         <label style="font-size:14px;"><input type="radio" name="postCreateCopyChats" value="no"> No</label>
                     </fieldset>
+                    <fieldset style="border:none;margin:0 0 14px;padding:0;">
+                        <legend style="font-size:14px;color:#374151;margin-bottom:8px;">Copy vendor categories from a previous project? Categories are matched by vendor name.</legend>
+                        <label style="margin-right:14px;font-size:14px;"><input type="radio" name="postCreateCopyCategories" value="yes"> Yes</label>
+                        <label style="font-size:14px;"><input type="radio" name="postCreateCopyCategories" value="no"> No</label>
+                    </fieldset>
                 </div>
                 <div id="postCreatePurposeSelectBlock" style="display:none;margin-bottom:14px;">
                     <label style="display:grid;gap:6px;font-size:14px;margin-bottom:10px;">
@@ -8767,6 +8990,26 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         </div>
     </div>
     <?php endif; ?>
+
+    <div class="app-modal-overlay" id="appModalNewCategory" role="dialog" aria-modal="true" aria-labelledby="appModalNewCategoryTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1" style="max-width:420px;">
+            <div class="app-modal-header">
+                <h2 id="appModalNewCategoryTitle">New category</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <label style="display:grid;gap:6px;font-size:14px;">
+                    <span>Category name</span>
+                    <input type="text" id="newCategoryNameInput" maxlength="255" placeholder="Example: Software" />
+                </label>
+                <p id="newCategoryNameError" style="margin:8px 0 0;font-size:13px;color:#b91c1c;"></p>
+                <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+                    <button type="button" class="btn-secondary" id="newCategoryCancelBtn">Cancel</button>
+                    <button type="button" id="newCategorySaveBtn">Create</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <div class="app-modal-overlay" id="appModalCsvAccounts" role="dialog" aria-modal="true" aria-labelledby="appModalCsvAccountsTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
@@ -8822,7 +9065,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <div class="ai-presets-row">
                         <button type="button" class="btn-secondary ai-preset" data-preset="overlap">Overlap between vendors</button>
                         <button type="button" class="btn-secondary ai-preset" data-preset="duplicates">Duplicate subscriptions</button>
-                        <button type="button" class="btn-secondary ai-preset" data-preset="executive">Executive summary</button>
+                        <button type="button" class="btn-secondary ai-preset" data-preset="executive">AI Assistant Report</button>
                     </div>
                     <div id="aiChatLog" class="chat-container ai-chat-log" aria-label="AI Assistant conversation"></div>
                     <div class="ai-composer">
@@ -8966,9 +9209,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     </div>
                     <div id="vendorChatLog" class="vendor-chat-log" aria-live="polite"></div>
                     <div class="vendor-chat-composer">
-                        <textarea id="vendorChatInput" class="vendor-chat-input" maxlength="2000" placeholder="Write a note for this vendor. Press Enter to send, Shift+Enter for a new line."></textarea>
+                        <div class="vendor-chat-composer-input-wrap">
+                            <textarea id="vendorChatInput" class="vendor-chat-input" maxlength="2000" placeholder="Write a note for this vendor. Type @name to tag a teammate. Enter to send, Shift+Enter for a new line."></textarea>
+                            <div id="vendorChatMentionDropdown" class="vendor-chat-mention-dropdown" hidden></div>
+                        </div>
                         <div class="vendor-chat-composer-actions">
-                            <span class="vendor-chat-hint">Shared notes include author and timestamp.</span>
+                            <span class="vendor-chat-hint">Use @username to tag a teammate. Shared notes include author and timestamp.</span>
                             <button type="button" id="vendorChatSendBtn" class="vendor-chat-send-btn">Send Note</button>
                         </div>
                     </div>
