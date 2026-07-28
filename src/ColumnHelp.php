@@ -30,7 +30,7 @@ final class ColumnHelp
         return [
             'select' => [
                 'title' => 'Select',
-                'html' => '<p class="column-help-intro">Use row checkboxes to choose vendors for bulk actions (status, manager, visibility, frequency, and more). The header checkbox selects or clears all rows that match your current report and column filters—not rows hidden on other pages.</p>',
+                'html' => '<p class="column-help-intro">Use row checkboxes to choose vendors for bulk actions (status, category, manager, visibility, frequency, and more). The header checkbox selects or clears all rows that match your current report and column filters—not rows hidden on other pages.</p>',
             ],
             'item_number' => [
                 'title' => 'Item #',

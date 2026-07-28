@@ -146,6 +146,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
     handleExportVendors();
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'sso_consume') {
+    handleSsoConsume();
+}
+
 // Functions
 function handleLogout() {
     $_SESSION = [];
@@ -1334,7 +1338,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             padding: 6px 10px;
         }
 
-        .bulk-actions-form .bulk-confirm-summary {
+        .bulk-confirm-summary {
             background: #f8f9fa;
             border: 1px solid #e5e7eb;
             border-radius: 8px;
@@ -1342,6 +1346,35 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             font-size: 14px;
             color: #374151;
             line-height: 1.45;
+        }
+
+        .bulk-confirm-summary--danger {
+            background: #FEF2F2;
+            border-color: var(--color-error);
+            color: #7F1D1D;
+        }
+
+        .bulk-confirm-summary--danger strong {
+            color: #991B1B;
+        }
+
+        .bulk-confirm-summary-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .bulk-confirm-danger-icon {
+            flex-shrink: 0;
+            width: 22px;
+            height: 22px;
+            color: var(--color-error);
+            margin-top: 1px;
+        }
+
+        .bulk-confirm-summary-content {
+            flex: 1;
+            min-width: 0;
         }
 
         .savings-summary {
@@ -3295,6 +3328,28 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             margin-bottom: 12px;
         }
 
+        .csv-header-row-wrap {
+            display: grid;
+            grid-template-columns: minmax(140px, 180px) 1fr;
+            gap: 8px 12px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .csv-header-row-wrap label {
+            font-weight: 500;
+            color: #374151;
+        }
+
+        .csv-header-row-wrap select {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid var(--color-border);
+            border-radius: 6px;
+            font-size: 13px;
+            background: #fff;
+        }
+
         .app-modal-body .settings-block {
             margin-bottom: 16px;
             padding: 12px;
@@ -4006,10 +4061,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=xlsx">Download Excel</a></li>
                                 <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=pdf">Download PDF</a></li>
                                 <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=summary_pdf">Executive summary PDF</a></li>
-                                <li role="none">
-                                    <button type="button" role="menuitem" class="app-submenu-item" id="appImportCsvBtn">Import CSV</button>
-                                    <input type="file" id="csvImportInput" accept=".csv,text/csv" style="display:none;">
-                                </li>
                                 <li role="none">
                                     <button type="button" role="menuitem" class="app-submenu-item" id="appImportMappedCsvBtn">Custom CSV import</button>
                                     <input type="file" id="mappedCsvImportInput" accept=".csv,text/csv" style="display:none;">
@@ -4927,6 +4978,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         pendingMappedCsvFileName = '';
                         pendingMappedTargetFields = [];
                         pendingMappedCsvMapping = null;
+                        pendingMappedCsvHeaderRow = null;
                         maybeReturnToPostCreateUploadAfterCsvClose(overlay.id);
                     }
                 }
@@ -4942,6 +4994,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             var pendingMappedCsvFileName = '';
             var pendingMappedTargetFields = [];
             var pendingMappedCsvMapping = null;
+            var pendingMappedCsvHeaderRow = null;
+            var suppressCsvHeaderRowChange = false;
             var csvAccountPickerMode = 'qb';
             var suppressCsvMappingModalCleanup = false;
             var CSV_ACCOUNT_INTRO_QB = 'Choose which GL accounts to include. Vendor rows are grouped by payee (Name) from the selected accounts only.';
@@ -5157,6 +5211,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 pendingMappedCsvFileName = '';
                                 pendingMappedTargetFields = [];
                                 pendingMappedCsvMapping = null;
+                                pendingMappedCsvHeaderRow = null;
                                 csvAccountPickerMode = 'qb';
                                 setCsvAccountModalIntro('qb');
                             });
@@ -5227,6 +5282,91 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 var mapping = collectCsvMappingFromForm();
                 var account = mapping.account;
                 return account !== null && account !== undefined && String(account).trim() !== '';
+            }
+            function appendMappedCsvHeaderRow(fd) {
+                if (pendingMappedCsvHeaderRow) {
+                    fd.append('header_row', String(pendingMappedCsvHeaderRow));
+                }
+            }
+            function updateCsvMappingMeta(previewData) {
+                var meta = document.getElementById('csvMappingMeta');
+                if (!meta) return;
+                var parts = [pendingMappedCsvFileName];
+                parts.push((previewData.row_count_estimate || 0) + ' data row(s) detected');
+                if (previewData.header_row) {
+                    parts.push('header on row ' + previewData.header_row);
+                }
+                if ((previewData.preamble_rows || 0) > 0) {
+                    parts.push('skipped ' + previewData.preamble_rows + ' title row(s)');
+                }
+                meta.textContent = parts.join(' — ');
+            }
+            function renderCsvHeaderRowPicker(options, selectedRow) {
+                var wrap = document.getElementById('csvHeaderRowWrap');
+                var select = document.getElementById('csvHeaderRowSelect');
+                if (!wrap || !select) return;
+                var opts = options || [];
+                if (opts.length <= 1) {
+                    wrap.style.display = 'none';
+                    return;
+                }
+                wrap.style.display = '';
+                suppressCsvHeaderRowChange = true;
+                select.innerHTML = '';
+                opts.forEach(function(opt) {
+                    var el = document.createElement('option');
+                    el.value = String(opt.row);
+                    el.textContent = 'Row ' + opt.row + ': ' + (opt.preview || '');
+                    select.appendChild(el);
+                });
+                if (selectedRow) {
+                    select.value = String(selectedRow);
+                }
+                suppressCsvHeaderRowChange = false;
+            }
+            function applyMappedCsvPreview(previewData, openModal) {
+                pendingMappedCsvHeaderRow = previewData.header_row || null;
+                pendingMappedTargetFields = previewData.target_fields || [];
+                updateCsvMappingMeta(previewData);
+                renderCsvHeaderRowPicker(previewData.header_row_options || [], pendingMappedCsvHeaderRow);
+                renderCsvMappingForm(
+                    previewData.target_fields || [],
+                    previewData.columns || [],
+                    previewData.suggested_mapping || {}
+                );
+                renderCsvSamplePreview(previewData.columns || [], previewData.sample_rows || []);
+                if (openModal) {
+                    openAppModal('appModalCsvMapping');
+                }
+            }
+            function refreshMappedCsvPreview(headerRow, openModal) {
+                if (!pendingMappedCsvFile) {
+                    return Promise.resolve();
+                }
+                var fd = new FormData();
+                fd.append('action', 'preview_mapped_csv');
+                fd.append('csv_file', pendingMappedCsvFile);
+                if (headerRow) {
+                    fd.append('header_row', String(headerRow));
+                }
+                return fetch(window.location.href, { method: 'POST', body: fd })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (!d.success) {
+                            showSnackbar(d.error || 'Could not read CSV', 'error');
+                            if (isPostCreateUploadWaiting()) {
+                                handlePostCreateImportFailure();
+                            }
+                            return;
+                        }
+                        applyMappedCsvPreview(d, !!openModal);
+                    })
+                    .catch(function() {
+                        showSnackbar('Could not read CSV', 'error');
+                        if (isPostCreateUploadWaiting()) {
+                            handlePostCreateImportFailure();
+                        }
+                    });
             }
             function updateCsvMappingImportButton(targetFields) {
                 var importBtn = document.getElementById('csvMappingImportBtn');
@@ -5320,6 +5460,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 fd.append('action', 'import_mapped_csv');
                 fd.append('csv_file', file);
                 fd.append('column_mapping', JSON.stringify(mapping || {}));
+                appendMappedCsvHeaderRow(fd);
                 if (selectedAccounts && selectedAccounts.length > 0) {
                     fd.append('selected_accounts', JSON.stringify(selectedAccounts));
                 }
@@ -5366,37 +5507,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 if (postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload') {
                     postProjectCreateFlow.step = 'upload_waiting_import';
                 }
+                pendingMappedCsvFile = file;
                 pendingMappedCsvFileName = file.name || 'CSV file';
-                var fd = new FormData();
-                fd.append('action', 'preview_mapped_csv');
-                fd.append('csv_file', file);
-                fetch(window.location.href, { method: 'POST', body: fd })
-                    .then(function(r) { return r.json(); })
-                    .then(function(d) {
-                        if (!d.success) {
-                            showSnackbar(d.error || 'Could not read CSV', 'error');
-                            if (isPostCreateUploadWaiting()) {
-                                handlePostCreateImportFailure();
-                            }
-                            return;
-                        }
-                        pendingMappedCsvFile = file;
-                        pendingMappedTargetFields = d.target_fields || [];
-                        var meta = document.getElementById('csvMappingMeta');
-                        if (meta) {
-                            meta.textContent = pendingMappedCsvFileName + ' — ' +
-                                (d.row_count_estimate || 0) + ' data row(s) detected';
-                        }
-                        renderCsvMappingForm(d.target_fields || [], d.columns || [], d.suggested_mapping || {});
-                        renderCsvSamplePreview(d.columns || [], d.sample_rows || []);
-                        openAppModal('appModalCsvMapping');
-                    })
-                    .catch(function() {
-                        showSnackbar('Could not read CSV', 'error');
-                        if (isPostCreateUploadWaiting()) {
-                            handlePostCreateImportFailure();
-                        }
-                    })
+                refreshMappedCsvPreview(null, true)
                     .finally(function() {
                         if (inputEl) inputEl.value = '';
                     });
@@ -5422,6 +5535,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     return;
                 }
                 mappingModal.dataset.csvBound = '1';
+                var headerRowSelect = document.getElementById('csvHeaderRowSelect');
+                if (headerRowSelect && !headerRowSelect.dataset.csvBound) {
+                    headerRowSelect.dataset.csvBound = '1';
+                    headerRowSelect.addEventListener('change', function() {
+                        if (suppressCsvHeaderRowChange) return;
+                        var row = parseInt(this.value, 10);
+                        if (!row) return;
+                        refreshMappedCsvPreview(row, false);
+                    });
+                }
                 var importBtn = document.getElementById('csvMappingImportBtn');
                 if (importBtn) {
                     importBtn.addEventListener('click', function() {
@@ -5439,6 +5562,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             fd.append('action', 'list_mapped_csv_accounts');
                             fd.append('csv_file', pendingMappedCsvFile);
                             fd.append('column_mapping', JSON.stringify(validation.mapping));
+                            appendMappedCsvHeaderRow(fd);
                             fetch(window.location.href, { method: 'POST', body: fd })
                                 .then(function(r) { return r.json(); })
                                 .then(function(d) {
@@ -5467,6 +5591,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             pendingMappedCsvFile = null;
                             pendingMappedCsvFileName = '';
                             pendingMappedTargetFields = [];
+                            pendingMappedCsvHeaderRow = null;
                             closeAppModal(document.getElementById('appModalCsvMapping'));
                         }).finally(function() {
                             setButtonLoading(importBtn, false);
@@ -5912,12 +6037,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const statusWrap = document.getElementById('bulkStatusWrap');
                 const visibilityWrap = document.getElementById('bulkVisibilityWrap');
                 const managerWrap = document.getElementById('bulkManagerWrap');
-                if (!actionSel || !frequencyWrap || !statusWrap || !visibilityWrap || !managerWrap) return;
+                const categoryWrap = document.getElementById('bulkCategoryWrap');
+                if (!actionSel || !frequencyWrap || !statusWrap || !visibilityWrap || !managerWrap || !categoryWrap) return;
                 const action = actionSel.value;
                 frequencyWrap.style.display = action === 'frequency' ? '' : 'none';
                 statusWrap.style.display = action === 'status' ? '' : 'none';
                 visibilityWrap.style.display = action === 'visibility' ? '' : 'none';
                 managerWrap.style.display = action === 'manager' ? '' : 'none';
+                categoryWrap.style.display = action === 'category' ? '' : 'none';
             }
 
             function getBulkActionPayload() {
@@ -5951,6 +6078,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         : ('Update manager to ' + (mgr.options[mgr.selectedIndex] ? mgr.options[mgr.selectedIndex].text : val));
                     return { action: action, value: val, label: label };
                 }
+                if (action === 'category') {
+                    const cat = document.getElementById('bulkCategoryValue');
+                    if (!cat) return null;
+                    const val = cat.value;
+                    const label = val === ''
+                        ? 'Clear category'
+                        : ('Update category to ' + (cat.options[cat.selectedIndex] ? cat.options[cat.selectedIndex].text : val));
+                    return { action: action, value: val, label: label };
+                }
                 if (action === 'delete') {
                     return { action: action, value: null, label: 'Delete selected vendor rows' };
                 }
@@ -5966,11 +6102,31 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const overlay = document.getElementById('appModalBulkConfirm');
                 const body = document.getElementById('bulkConfirmDetails');
                 if (!overlay || !body) return;
-                body.innerHTML = ''
-                    + '<div class="bulk-confirm-summary">'
-                    + '<div><strong>Action:</strong> ' + payload.label + '</div>'
-                    + '<div><strong>' + formatVendorsSelectedLabel(selectedCount) + '</strong></div>'
-                    + '</div>';
+                const isDelete = payload.action === 'delete';
+                const dangerIcon = '<svg class="bulk-confirm-danger-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">'
+                    + '<circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>'
+                    + '<path d="M12 7v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'
+                    + '<circle cx="12" cy="17" r="1" fill="currentColor"/>'
+                    + '</svg>';
+                if (isDelete) {
+                    body.innerHTML = ''
+                        + '<div class="bulk-confirm-summary bulk-confirm-summary--danger">'
+                        + '<div class="bulk-confirm-summary-row">'
+                        + dangerIcon
+                        + '<div class="bulk-confirm-summary-content">'
+                        + '<div><strong>Action:</strong> ' + payload.label + '</div>'
+                        + '<div><strong>' + formatVendorsSelectedLabel(selectedCount) + '</strong></div>'
+                        + '<div>This cannot be undone.</div>'
+                        + '</div>'
+                        + '</div>'
+                        + '</div>';
+                } else {
+                    body.innerHTML = ''
+                        + '<div class="bulk-confirm-summary">'
+                        + '<div><strong>Action:</strong> ' + payload.label + '</div>'
+                        + '<div><strong>' + formatVendorsSelectedLabel(selectedCount) + '</strong></div>'
+                        + '</div>';
+                }
                 pendingBulkActionData = payload;
                 openAppModal(overlay);
             }
@@ -6008,6 +6164,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         if (mgrSel && !mgrSel.disabled) {
                             mgrSel.value = payload.value;
                             syncMemberStatusEditability(row);
+                        }
+                    });
+                } else if (payload.action === 'category') {
+                    selectedRows.forEach(function(row) {
+                        const catSel = row.querySelector('.category-select');
+                        if (catSel) {
+                            catSel.value = payload.value;
+                            catSel.setAttribute('data-prev-category', payload.value || '');
                         }
                     });
                 } else if (payload.action === 'status') {
@@ -6069,6 +6233,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 PROJECT_CATEGORIES.sort(function(a, b) {
                     return String(a.name || '').localeCompare(String(b.name || ''));
                 });
+                syncBulkCategoryOptions();
             }
 
             function refreshAllCategorySelects() {
@@ -6077,6 +6242,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     sel.innerHTML = categoryOptionsHtml(current);
                     if (current) sel.value = current;
                 });
+                syncBulkCategoryOptions();
                 VENDOR_FILTER_COLS.forEach(function(col) {
                     if (col === 'category') populateVendorColumnFilterList('category');
                 });
@@ -6179,6 +6345,22 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const bulkManager = document.getElementById('bulkManagerValue');
                 if (!bulkManager) return;
                 bulkManager.innerHTML = managerOptionsHtml('');
+            }
+
+            function bulkCategoryOptionsHtml() {
+                let o = '<option value="">None</option>';
+                (PROJECT_CATEGORIES || []).forEach(function(c) {
+                    const id = String(c.id);
+                    const lab = String(c.name || '').replace(/</g, '');
+                    o += '<option value="' + id + '">' + lab + '</option>';
+                });
+                return o;
+            }
+
+            function syncBulkCategoryOptions() {
+                const bulkCategory = document.getElementById('bulkCategoryValue');
+                if (!bulkCategory) return;
+                bulkCategory.innerHTML = bulkCategoryOptionsHtml();
             }
             
             function addCalculatorRow(options) {
@@ -7562,6 +7744,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 initNewCategoryModal();
                 loadProjectsIntoMenu();
                 syncBulkManagerOptions();
+                syncBulkCategoryOptions();
                 const projectSwitcher = document.getElementById('projectSwitcherSelect');
                 if (projectSwitcher) {
                     const handleProjectSwitch = function() {
@@ -8882,10 +9065,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <input type="radio" name="projectWizardDataMode" id="projectWizardDataModeUpload" value="upload_after" checked>
                         I will upload data after creating this project.
                     </label>
-                    <label>
-                        <input type="radio" name="projectWizardDataMode" id="projectWizardDataModeCopy" value="copy_from_active">
-                        Copy data from current active project.
-                    </label>
                     <div style="display:flex;gap:8px;justify-content:flex-end;">
                         <button type="button" class="btn-secondary app-modal-close project-wizard-cancel-btn">Cancel</button>
                         <button type="submit">Create</button>
@@ -9042,6 +9221,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             <div class="app-modal-body">
                 <p style="margin:0 0 10px;font-size:14px;color:#4b5563;line-height:1.5;">Map vendor, date, and amount (required). Transaction type, memo, and account are optional.</p>
                 <div class="csv-mapping-meta" id="csvMappingMeta"></div>
+                <div class="csv-header-row-wrap" id="csvHeaderRowWrap" style="display:none;">
+                    <label for="csvHeaderRowSelect">Header row</label>
+                    <select id="csvHeaderRowSelect"></select>
+                </div>
                 <div class="csv-mapping-form" id="csvMappingForm" role="group" aria-label="Column mapping"></div>
                 <p style="margin:0 0 6px;font-size:13px;font-weight:600;color:#374151;">Sample data</p>
                 <div class="csv-sample-preview-wrap" id="csvSamplePreviewWrap"></div>
@@ -9127,6 +9310,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <option value="frequency">Update Frequency</option>
                         <?php endif; ?>
                         <option value="status">Update Status</option>
+                        <option value="category">Update Category</option>
                         <?php if ($is_admin): ?>
                         <option value="visibility">Update Visibility</option>
                         <option value="manager">Update Manager</option>
@@ -9168,6 +9352,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <div id="bulkManagerWrap" style="display:none;">
                             <label for="bulkManagerValue">Manager value</label>
                             <select id="bulkManagerValue"></select>
+                        </div>
+                        <div id="bulkCategoryWrap" style="display:none;">
+                            <label for="bulkCategoryValue">Category value</label>
+                            <select id="bulkCategoryValue"></select>
                         </div>
                     </div>
                     <div class="bulk-actions-buttons">

@@ -254,6 +254,54 @@ function handleLogin() {
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     }
+    establishUserSession($pdo, $row);
+    header('Location: ' . $_SERVER['PHP_SELF']);
+    exit;
+}
+
+/**
+ * Members-area SSO: GET ?action=sso_consume&token=...
+ */
+function handleSsoConsume(): void
+{
+    require_once __DIR__ . '/SsoToken.php';
+    $secret = defined('SSO_SHARED_SECRET') ? (string) SSO_SHARED_SECRET : '';
+    $token = (string) ($_GET['token'] ?? '');
+    if ($secret === '' || $token === '') {
+        $_SESSION['error'] = 'SSO is not configured or the link is invalid.';
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    }
+    $claims = SsoToken::verify($token, $secret, 'savvy-saver');
+    if (!$claims) {
+        $_SESSION['error'] = 'SSO link is invalid or expired.';
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    }
+    $pdo = getDBConnection();
+    $stmt = $pdo->prepare('SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1');
+    $stmt->execute([$claims['email']]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        $_SESSION['error'] = 'No Savvy Saver account exists for this email.';
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    }
+    if (!empty($row['is_disabled'])) {
+        $_SESSION['error'] = 'Your account has been disabled. Contact your administrator.';
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    }
+    establishUserSession($pdo, $row);
+    header('Location: ' . $_SERVER['PHP_SELF']);
+    exit;
+}
+
+/**
+ * Shared post-auth session bootstrap (password login + SSO).
+ */
+function establishUserSession(PDO $pdo, array $row): void
+{
     session_regenerate_id(true);
     $_SESSION['user_id'] = (int) $row['id'];
     $_SESSION['role'] = $row['role'];
@@ -277,8 +325,6 @@ function handleLogin() {
     } else {
         unset($_SESSION['active_project_id']);
     }
-    header('Location: ' . $_SERVER['PHP_SELF']);
-    exit;
 }
 
 function requireActiveProjectId(PDO $pdo): ?int
@@ -393,7 +439,7 @@ function handleInviteMember() {
         . '<p><a href="' . htmlspecialchars($link) . '">Complete registration</a></p>'
         . '<p style="font-size:13px;color:#555;">If the link above does not work, copy and paste this address into your browser:<br>'
         . htmlspecialchars($link) . '</p>';
-    $mailResult = sendEmail($email, 'Your invitation — Savvy Expense Optimizer', $body);
+    $mailResult = sendEmail($email, 'Your invitation — Savvy Saver', $body);
     if ($mailResult !== true) {
         $postmarkDetail = '';
         if (is_array($mailResult)) {
@@ -516,6 +562,25 @@ function parseColumnMappingFromPost(): array {
 }
 
 /**
+ * 0-based header row index from optional 1-based POST value; null triggers auto-detect.
+ */
+function parseHeaderRowFromPost(): ?int {
+    if (!isset($_POST['header_row'])) {
+        return null;
+    }
+    $raw = $_POST['header_row'];
+    if (!is_numeric($raw)) {
+        return null;
+    }
+    $oneBased = (int) $raw;
+    if ($oneBased < 1) {
+        return null;
+    }
+
+    return $oneBased - 1;
+}
+
+/**
  * @param array<int, array<string, mixed>> $summaryRows
  * @param array<int, array<string, mixed>> $rawRows
  * @return array<string, mixed>
@@ -631,7 +696,8 @@ function handlePreviewMappedCsvImport() {
         exit;
     }
     $raw = (string) ($upload['raw'] ?? '');
-    echo json_encode(MappedCsvImport::readPreview($raw));
+    $headerRowIndex = parseHeaderRowFromPost();
+    echo json_encode(MappedCsvImport::readPreview($raw, $headerRowIndex));
     exit;
 }
 
@@ -643,7 +709,8 @@ function handleListMappedCsvAccounts() {
         exit;
     }
     $raw = (string) ($upload['raw'] ?? '');
-    $preview = MappedCsvImport::readPreview($raw);
+    $headerRowIndex = parseHeaderRowFromPost();
+    $preview = MappedCsvImport::readPreview($raw, $headerRowIndex);
     if (!($preview['success'] ?? false)) {
         echo json_encode($preview);
         exit;
@@ -659,7 +726,7 @@ function handleListMappedCsvAccounts() {
         echo json_encode(['success' => false, 'error' => 'Account column is not mapped']);
         exit;
     }
-    $accounts = MappedCsvImport::listAccounts($raw, $mapping);
+    $accounts = MappedCsvImport::listAccounts($raw, $mapping, $headerRowIndex);
     if (count($accounts) === 0) {
         echo json_encode(['success' => false, 'error' => 'No account values found']);
         exit;
@@ -676,7 +743,8 @@ function handleImportMappedVendorCsv() {
         exit;
     }
     $raw = (string) ($upload['raw'] ?? '');
-    $preview = MappedCsvImport::readPreview($raw);
+    $headerRowIndex = parseHeaderRowFromPost();
+    $preview = MappedCsvImport::readPreview($raw, $headerRowIndex);
     if (!($preview['success'] ?? false)) {
         echo json_encode($preview);
         exit;
@@ -694,9 +762,9 @@ function handleImportMappedVendorCsv() {
             echo json_encode(['success' => false, 'error' => 'No accounts selected']);
             exit;
         }
-        $parsed = MappedCsvImport::parse($raw, $mapping, $selectedAccounts);
+        $parsed = MappedCsvImport::parse($raw, $mapping, $selectedAccounts, $headerRowIndex);
     } else {
-        $parsed = MappedCsvImport::parse($raw, $mapping);
+        $parsed = MappedCsvImport::parse($raw, $mapping, null, $headerRowIndex);
     }
     $summaryRows = isset($parsed['summary']) && is_array($parsed['summary']) ? $parsed['summary'] : [];
     $rawRows = isset($parsed['raw']) && is_array($parsed['raw']) ? $parsed['raw'] : [];

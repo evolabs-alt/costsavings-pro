@@ -7,6 +7,10 @@ namespace CostSavings;
  */
 class MappedCsvImport
 {
+    private const MAX_HEADER_SCAN_ROWS = 20;
+    private const MIN_HEADER_SCORE = 5;
+    private const HEADER_ROW_OPTIONS_LIMIT = 15;
+
     /** @var array<string, array<int, string>> */
     private const FIELD_ALIASES = [
         'vendor_name' => ['name', 'payee', 'vendor', 'vendor name', 'supplier'],
@@ -50,12 +54,16 @@ class MappedCsvImport
      *   row_count_estimate?: int,
      *   suggested_mapping?: array<string, string|null>,
      *   target_fields?: array<int, array{key:string, label:string, required:bool}>,
+     *   header_row?: int,
+     *   preamble_rows?: int,
+     *   header_row_options?: array<int, array{row:int, preview:string}>,
      *   error?: string
      * }
      */
-    public static function readPreview(string $csvText): array
+    public static function readPreview(string $csvText, ?int $headerRowIndex = null): array
     {
-        $ctx = self::resolveHeaderContext($csvText);
+        $lines = preg_split('/\r\n|\r|\n/', $csvText);
+        $ctx = self::resolveHeaderContext($csvText, $headerRowIndex);
         if ($ctx === null) {
             return ['success' => false, 'error' => 'No header row found'];
         }
@@ -65,6 +73,8 @@ class MappedCsvImport
             return ['success' => false, 'error' => 'No columns detected in header row'];
         }
 
+        $headerIdx = $ctx['header_idx'];
+
         return [
             'success' => true,
             'columns' => $columns,
@@ -72,6 +82,9 @@ class MappedCsvImport
             'row_count_estimate' => count($ctx['data_rows']),
             'suggested_mapping' => self::suggestMapping($columns),
             'target_fields' => self::targetFields(),
+            'header_row' => $headerIdx + 1,
+            'preamble_rows' => $headerIdx,
+            'header_row_options' => self::buildHeaderRowOptions($lines),
         ];
     }
 
@@ -79,13 +92,13 @@ class MappedCsvImport
      * @param array<string, string|null> $columnMapping
      * @return array<int, array{name:string, transaction_count:int}>
      */
-    public static function listAccounts(string $csvText, array $columnMapping): array
+    public static function listAccounts(string $csvText, array $columnMapping, ?int $headerRowIndex = null): array
     {
         if (!self::isAccountMapped($columnMapping)) {
             return [];
         }
 
-        $ctx = self::resolveHeaderContext($csvText);
+        $ctx = self::resolveHeaderContext($csvText, $headerRowIndex);
         if ($ctx === null) {
             return [];
         }
@@ -140,9 +153,9 @@ class MappedCsvImport
      *   skipped_rows: int
      * }
      */
-    public static function parse(string $csvText, array $columnMapping, ?array $selectedAccounts = null): array
+    public static function parse(string $csvText, array $columnMapping, ?array $selectedAccounts = null, ?int $headerRowIndex = null): array
     {
-        $ctx = self::resolveHeaderContext($csvText);
+        $ctx = self::resolveHeaderContext($csvText, $headerRowIndex);
         if ($ctx === null) {
             return ['summary' => [], 'raw' => [], 'skipped_rows' => 0];
         }
@@ -241,18 +254,161 @@ class MappedCsvImport
     }
 
     /**
-     * @return array{columns: array<int, string>, data_rows: array<int, array<int, string>>}|null
+     * @param array<int, string> $lines
      */
-    private static function resolveHeaderContext(string $csvText): ?array
+    private static function detectHeaderRowIndex(array $lines): int
     {
-        $lines = preg_split('/\r\n|\r|\n/', $csvText);
-        $headerIdx = -1;
+        $bestIdx = -1;
+        $bestScore = PHP_INT_MIN;
+        $scanned = 0;
+
         foreach ($lines as $i => $line) {
-            if (trim($line) !== '') {
-                $headerIdx = $i;
+            if (trim($line) === '') {
+                continue;
+            }
+            if ($scanned >= self::MAX_HEADER_SCAN_ROWS) {
                 break;
             }
+            $scanned++;
+
+            $cells = str_getcsv($line);
+            $score = self::scoreHeaderCandidate($cells);
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $bestIdx = $i;
+            }
         }
+
+        if ($bestIdx >= 0 && $bestScore >= self::MIN_HEADER_SCORE) {
+            return $bestIdx;
+        }
+
+        foreach ($lines as $i => $line) {
+            if (trim($line) !== '') {
+                return $i;
+            }
+        }
+
+        return -1;
+    }
+
+    /**
+     * @param array<int, string> $cells
+     */
+    private static function scoreHeaderCandidate(array $cells): int
+    {
+        $aliasSet = [];
+        foreach (self::FIELD_ALIASES as $aliases) {
+            foreach ($aliases as $alias) {
+                $aliasSet[strtolower(trim($alias))] = true;
+            }
+        }
+
+        $nonEmpty = 0;
+        $aliasHits = 0;
+        $dataLike = 0;
+
+        foreach ($cells as $cell) {
+            $val = trim((string) $cell);
+            if ($val === '') {
+                continue;
+            }
+            $nonEmpty++;
+
+            $lower = strtolower($val);
+            if (isset($aliasSet[$lower])) {
+                $aliasHits++;
+            }
+            if (CsvImport::parseDate($val) !== null || CsvImport::parseAmount($val) !== null) {
+                $dataLike++;
+            }
+        }
+
+        if ($nonEmpty <= 1) {
+            return -100;
+        }
+
+        $score = $aliasHits * 10;
+        $score += min($nonEmpty, 8);
+        $score -= $dataLike * 5;
+
+        return $score;
+    }
+
+    /**
+     * @param array<int, string> $lines
+     * @return array<int, array{row:int, preview:string}>
+     */
+    private static function buildHeaderRowOptions(array $lines): array
+    {
+        $options = [];
+        $count = 0;
+
+        foreach ($lines as $i => $line) {
+            if (trim($line) === '') {
+                continue;
+            }
+            if ($count >= self::HEADER_ROW_OPTIONS_LIMIT) {
+                break;
+            }
+            $count++;
+
+            $cells = str_getcsv($line);
+            $preview = self::formatRowPreview($cells);
+
+            $options[] = [
+                'row' => $i + 1,
+                'preview' => $preview,
+            ];
+        }
+
+        return $options;
+    }
+
+    /**
+     * @param array<int, string> $cells
+     */
+    private static function formatRowPreview(array $cells): string
+    {
+        $parts = [];
+        foreach ($cells as $cell) {
+            $val = trim((string) $cell);
+            if ($val !== '') {
+                $parts[] = $val;
+            }
+        }
+
+        if (count($parts) === 0) {
+            return '(empty)';
+        }
+
+        $preview = implode(', ', $parts);
+        if (strlen($preview) > 80) {
+            return substr($preview, 0, 77) . '...';
+        }
+
+        return $preview;
+    }
+
+    /**
+     * @return array{header_idx: int, columns: array<int, string>, data_rows: array<int, array<int, string>>}|null
+     */
+    private static function resolveHeaderContext(string $csvText, ?int $headerRowIndex = null): ?array
+    {
+        $lines = preg_split('/\r\n|\r|\n/', $csvText);
+
+        if ($headerRowIndex !== null) {
+            if ($headerRowIndex < 0 || $headerRowIndex >= count($lines)) {
+                return null;
+            }
+            if (trim($lines[$headerRowIndex] ?? '') === '') {
+                return null;
+            }
+            $headerIdx = $headerRowIndex;
+        } else {
+            $headerIdx = self::detectHeaderRowIndex($lines);
+        }
+
         if ($headerIdx < 0) {
             return null;
         }
@@ -273,6 +429,7 @@ class MappedCsvImport
         }
 
         return [
+            'header_idx' => $headerIdx,
             'columns' => $columns,
             'data_rows' => $dataRows,
         ];

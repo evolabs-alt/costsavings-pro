@@ -51,6 +51,11 @@ if (!defined('CRON_SECRET')) {
     define('CRON_SECRET', getenv('CRON_SECRET') ?: '');
 }
 
+/** Members-area SSO shared secret (must match savvy-cfo-portfolio api/config.php). */
+if (!defined('SSO_SHARED_SECRET')) {
+    define('SSO_SHARED_SECRET', getenv('SSO_SHARED_SECRET') ?: '');
+}
+
 if (!is_dir(CACHE_DIR)) {
     mkdir(CACHE_DIR, 0755, true);
 }
