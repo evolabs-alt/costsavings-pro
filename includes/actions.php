@@ -9,6 +9,7 @@ use CostSavings\ExportService;
 use CostSavings\MappedCsvImport;
 use CostSavings\OrgRole;
 use CostSavings\ProjectService;
+use CostSavings\QboService;
 use CostSavings\VendorChatService;
 use CostSavings\VendorPurposeService;
 use CostSavings\VendorService;
@@ -283,9 +284,42 @@ function handleSsoConsume(): void
     $stmt->execute([$claims['email']]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$row) {
-        $_SESSION['error'] = 'No Savvy Saver account exists for this email.';
-        header('Location: ' . $_SERVER['PHP_SELF']);
-        exit;
+        $email = $claims['email'];
+        $local = preg_replace('/[^a-zA-Z0-9._-]/', '', explode('@', $email)[0] ?? 'user');
+        if ($local === '') {
+            $local = 'user';
+        }
+        $username = $local;
+        $suffix = 0;
+        while (true) {
+            $chk = $pdo->prepare('SELECT 1 FROM users WHERE username = ? LIMIT 1');
+            $chk->execute([$username]);
+            if (!$chk->fetchColumn()) {
+                break;
+            }
+            $suffix++;
+            $username = $local . $suffix;
+        }
+        $display = $local;
+        try {
+            $ins = $pdo->prepare(
+                'INSERT INTO users (org_id, username, email, password_hash, role, display_name)
+                 VALUES (NULL, ?, ?, NULL, \'member\', ?)'
+            );
+            $ins->execute([$username, $email, $display]);
+            $newId = (int) $pdo->lastInsertId();
+            $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ? LIMIT 1');
+            $stmt->execute([$newId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            error_log('SSO provision Saver: ' . $e->getMessage());
+            $row = false;
+        }
+        if (!$row) {
+            $_SESSION['error'] = 'Could not create a Savvy Saver account for this email.';
+            header('Location: ' . $_SERVER['PHP_SELF']);
+            exit;
+        }
     }
     if (!empty($row['is_disabled'])) {
         $_SESSION['error'] = 'Your account has been disabled. Contact your administrator.';
@@ -439,18 +473,18 @@ function handleInviteMember() {
         . '<p><a href="' . htmlspecialchars($link) . '">Complete registration</a></p>'
         . '<p style="font-size:13px;color:#555;">If the link above does not work, copy and paste this address into your browser:<br>'
         . htmlspecialchars($link) . '</p>';
-    $mailResult = sendEmail($email, 'Your invitation — Savvy Saver', $body);
+    $mailResult = sendInviteEmail($email, 'Your invitation — Savvy Saver', $body);
     if ($mailResult !== true) {
-        $postmarkDetail = '';
+        $mailDetail = '';
         if (is_array($mailResult)) {
             $em = trim((string) ($mailResult['error_message'] ?? ''));
             $ei = trim((string) ($mailResult['error_info'] ?? ''));
             if ($em !== '' && $ei !== '' && $ei !== $em) {
-                $postmarkDetail = $em . ' (' . $ei . ')';
+                $mailDetail = $em . ' (' . $ei . ')';
             } elseif ($em !== '') {
-                $postmarkDetail = $em;
+                $mailDetail = $em;
             } elseif ($ei !== '') {
-                $postmarkDetail = $ei;
+                $mailDetail = $ei;
             }
             error_log(
                 'handleInviteMember mail: '
@@ -458,23 +492,20 @@ function handleInviteMember() {
                 . ' '
                 . ($mailResult['error_info'] ?? '')
             );
-            if (!empty($mailResult['smtp_debug']) && defined('POSTMARK_DEBUG') && POSTMARK_DEBUG) {
-                $_SESSION['smtp_debug_transcript'] = (string) $mailResult['smtp_debug'];
-            }
         }
-        $detailForLog = $postmarkDetail !== ''
-            ? (function_exists('mb_substr') ? mb_substr($postmarkDetail, 0, 500) : substr($postmarkDetail, 0, 500))
+        $detailForLog = $mailDetail !== ''
+            ? (function_exists('mb_substr') ? mb_substr($mailDetail, 0, 500) : substr($mailDetail, 0, 500))
             : '';
         logInviteEvent('mail_failed', [
             'invitation_id' => $invId,
             'org_id' => $orgId,
             'email' => $email,
-            'postmark_detail' => $detailForLog,
+            'mail_detail' => $detailForLog,
         ]);
         // Keep the invitation row so the token stays valid; admin can share the link manually.
-        $hint = 'Check POSTMARK_SERVER_TOKEN, that SMTP_FROM_EMAIL matches a verified Postmark sender, and Postmark account limits. See pro.logs for sendEmail_postmark_fail.';
-        if ($postmarkDetail !== '') {
-            $short = function_exists('mb_substr') ? mb_substr($postmarkDetail, 0, 450) : substr($postmarkDetail, 0, 450);
+        $hint = 'Complete Gmail OAuth setup, ensure SMTP_FROM_EMAIL matches the authorized mailbox, and check pro.logs for sendInviteEmail_fail.';
+        if ($mailDetail !== '') {
+            $short = function_exists('mb_substr') ? mb_substr($mailDetail, 0, 450) : substr($mailDetail, 0, 450);
             $hint = $short . ' See pro.logs for details. ' . $hint;
         }
         $_SESSION['error'] = 'Could not send invitation email. ' . $hint
@@ -1180,6 +1211,205 @@ function handleSaveReminderSettings() {
 
     $_SESSION['message'] = $isAdmin ? 'Settings saved.' : 'Reminder preference saved.';
     header('Location: ' . $_SERVER['PHP_SELF']);
+    exit;
+}
+
+function handleSaveQboSettings(): void
+{
+    if (empty($_SESSION['user_id']) || empty($_SESSION['org_id'])) {
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    }
+    if (!OrgRole::isPrivileged((string) ($_SESSION['role'] ?? ''))) {
+        $_SESSION['error'] = 'Only admins can manage QuickBooks settings.';
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    }
+
+    $environment = QboService::normalizeEnvironment((string) ($_POST['qbo_environment'] ?? 'production'));
+    $clientId = trim((string) ($_POST['qbo_client_id'] ?? ''));
+    $clientSecretRaw = (string) ($_POST['qbo_client_secret'] ?? '');
+    $clientSecret = trim($clientSecretRaw) === '' ? null : trim($clientSecretRaw);
+
+    if ($clientId === '') {
+        $_SESSION['error'] = 'QuickBooks Client ID is required.';
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    }
+
+    try {
+        $pdo = getDBConnection();
+        $svc = new QboService($pdo);
+        $existing = $svc->getConnection((int) $_SESSION['org_id']);
+        if ($clientSecret === null && ($existing === null || empty($existing['client_secret']))) {
+            $_SESSION['error'] = 'QuickBooks Client Secret is required the first time you save.';
+            header('Location: ' . $_SERVER['PHP_SELF']);
+            exit;
+        }
+        $svc->saveCredentials(
+            (int) $_SESSION['org_id'],
+            $environment,
+            $clientId,
+            $clientSecret,
+            (int) $_SESSION['user_id']
+        );
+        $_SESSION['message'] = 'QuickBooks credentials saved.';
+    } catch (Throwable $e) {
+        error_log('handleSaveQboSettings: ' . $e->getMessage());
+        $_SESSION['error'] = 'Could not save QuickBooks settings.';
+    }
+    header('Location: ' . $_SERVER['PHP_SELF']);
+    exit;
+}
+
+function handleQboConnectionStatus(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id']) || empty($_SESSION['org_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Not authenticated']);
+        exit;
+    }
+    try {
+        $pdo = getDBConnection();
+        $svc = new QboService($pdo);
+        $status = $svc->connectionStatus((int) $_SESSION['org_id']);
+        echo json_encode(array_merge(['success' => true], $status));
+    } catch (Throwable $e) {
+        error_log('handleQboConnectionStatus: ' . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => 'Could not load QuickBooks status']);
+    }
+    exit;
+}
+
+function handleQboDisconnect(): void
+{
+    if (empty($_SESSION['user_id']) || empty($_SESSION['org_id'])) {
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    }
+    if (!OrgRole::isPrivileged((string) ($_SESSION['role'] ?? ''))) {
+        $_SESSION['error'] = 'Only admins can disconnect QuickBooks.';
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    }
+    try {
+        $pdo = getDBConnection();
+        $svc = new QboService($pdo);
+        $svc->disconnect((int) $_SESSION['org_id'], (int) $_SESSION['user_id'], true);
+        $_SESSION['message'] = 'QuickBooks disconnected. Credentials were kept.';
+    } catch (Throwable $e) {
+        error_log('handleQboDisconnect: ' . $e->getMessage());
+        $_SESSION['error'] = 'Could not disconnect QuickBooks.';
+    }
+    header('Location: ' . $_SERVER['PHP_SELF']);
+    exit;
+}
+
+function handlePreviewQboSync(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id']) || empty($_SESSION['org_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Not authenticated']);
+        exit;
+    }
+    $startDate = trim((string) ($_POST['start_date'] ?? ''));
+    $endDate = trim((string) ($_POST['end_date'] ?? ''));
+    try {
+        QboService::assertValidDateRange($startDate, $endDate);
+        $pdo = getDBConnection();
+        $activeProjectId = requireActiveProjectId($pdo);
+        if ($activeProjectId === null) {
+            echo json_encode(['success' => false, 'error' => 'No active project selected']);
+            exit;
+        }
+        $svc = new QboService($pdo);
+        if (!$svc->isConnected((int) $_SESSION['org_id'])) {
+            echo json_encode([
+                'success' => false,
+                'error' => 'QuickBooks is not connected. Open Settings to connect.',
+                'needs_setup' => true,
+            ]);
+            exit;
+        }
+        $rows = $svc->fetchTransactionRows((int) $_SESSION['org_id'], $startDate, $endDate);
+        if (count($rows) === 0) {
+            echo json_encode(['success' => false, 'error' => 'No transactions found for the selected date range']);
+            exit;
+        }
+        $accounts = QboService::listAccountsFromRows($rows);
+        $cacheKey = QboService::writeSyncCache(
+            (int) $_SESSION['org_id'],
+            (int) $_SESSION['user_id'],
+            $rows,
+            $startDate,
+            $endDate
+        );
+        $_SESSION['pending_qbo_sync_key'] = $cacheKey;
+        echo json_encode([
+            'success' => true,
+            'accounts' => $accounts,
+            'transaction_count' => count($rows),
+            'cache_key' => $cacheKey,
+        ]);
+    } catch (InvalidArgumentException $e) {
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    } catch (Throwable $e) {
+        error_log('handlePreviewQboSync: ' . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+function handleImportQboSync(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id']) || empty($_SESSION['org_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Not authenticated']);
+        exit;
+    }
+    $cacheKey = trim((string) ($_POST['cache_key'] ?? ($_SESSION['pending_qbo_sync_key'] ?? '')));
+    if ($cacheKey === '') {
+        echo json_encode(['success' => false, 'error' => 'Sync session expired. Pull from QuickBooks again.']);
+        exit;
+    }
+    $selectedAccounts = parseSelectedAccountsFromPost();
+    if (count($selectedAccounts) === 0) {
+        echo json_encode(['success' => false, 'error' => 'No accounts selected']);
+        exit;
+    }
+    try {
+        $cached = QboService::readSyncCache(
+            $cacheKey,
+            (int) $_SESSION['org_id'],
+            (int) $_SESSION['user_id']
+        );
+        if ($cached === null) {
+            unset($_SESSION['pending_qbo_sync_key']);
+            echo json_encode(['success' => false, 'error' => 'Sync session expired. Pull from QuickBooks again.']);
+            exit;
+        }
+        $filtered = QboService::filterRowsByAccounts($cached['rows'], $selectedAccounts);
+        if (count($filtered) === 0) {
+            echo json_encode(['success' => false, 'error' => 'No transactions match the selected accounts']);
+            exit;
+        }
+        $payload = QboService::buildImportPayload($filtered);
+        $summaryRows = $payload['summary'];
+        $rawRows = $payload['raw'];
+        if (count($summaryRows) === 0) {
+            echo json_encode(['success' => false, 'error' => 'No valid vendor rows to import']);
+            exit;
+        }
+        $result = importParsedVendorCsvData($summaryRows, $rawRows);
+        if (!empty($result['success'])) {
+            QboService::deleteSyncCache($cacheKey);
+            unset($_SESSION['pending_qbo_sync_key']);
+        }
+        echo json_encode($result);
+    } catch (Throwable $e) {
+        error_log('handleImportQboSync: ' . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
     exit;
 }
 

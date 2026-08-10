@@ -5,21 +5,55 @@
 
 define('CACHE_DIR', __DIR__ . '/cache/');
 
-/**
- * Postmark (https://postmarkapp.com): Server API token from your Postmark server.
- * Prefer setting POSTMARK_SERVER_TOKEN in the environment in production.
- * The From address below must match a verified Sender Signature or domain in Postmark.
- */
-define('POSTMARK_SERVER_TOKEN', getenv('POSTMARK_SERVER_TOKEN') ?: '');
-define('SMTP_FROM_EMAIL', 'user@example.com');
-define('SMTP_FROM_NAME', 'Savvy CFO Portal');
-/** Optional: set true temporarily to print Postmark HTTP debug detail in the browser console after invite failures. */
-define('POSTMARK_DEBUG', false);
+/** Base URL for invite links (include trailing slash), e.g. https://yourdomain.com/public/ */
+if (!defined('BASE_URL')) {
+    define('BASE_URL', 'http://localhost/public/');
+}
 
-define('GHL_API_KEY', 'your-ghl-private-integration-token');
-define('GHL_LOCATION_ID', 'your-location-id');
-define('GHL_API_URL', 'https://services.leadconnectorhq.com');
-define('GHL_API_VERSION', '2021-07-28');
+/**
+ * QuickBooks Online OAuth callback (optional override).
+ * Default: {BASE_URL}index.php?page=qbo-callback — register the same URI in your Intuit app.
+ * Per-org Client ID / Secret are stored in Admin → Settings (not here).
+ */
+if (!defined('QBO_REDIRECT_URI')) {
+    define(
+        'QBO_REDIRECT_URI',
+        getenv('QBO_REDIRECT_URI') ?: (rtrim(BASE_URL, '/') . '/index.php?page=qbo-callback')
+    );
+}
+
+/**
+ * AES-256 key material for encrypting QBO client secrets + refresh tokens at rest.
+ * Prefer a long random string via env. Access tokens are never persisted (memory only).
+ */
+if (!defined('QBO_TOKEN_ENCRYPTION_KEY')) {
+    define('QBO_TOKEN_ENCRYPTION_KEY', getenv('QBO_TOKEN_ENCRYPTION_KEY') ?: '');
+}
+
+/**
+ * Gmail API OAuth (invites). Prefer env vars in production.
+ * From address must match the OAuth-authorized Workspace mailbox.
+ */
+define('GOOGLE_CLIENT_ID', getenv('GOOGLE_CLIENT_ID') ?: '');
+define('GOOGLE_CLIENT_SECRET', getenv('GOOGLE_CLIENT_SECRET') ?: '');
+define(
+    'GOOGLE_REDIRECT_URI',
+    getenv('GOOGLE_REDIRECT_URI') ?: (rtrim(BASE_URL, '/') . '/index.php?page=gmail-callback')
+);
+define('GMAIL_OAUTH_SETUP_KEY', getenv('GMAIL_OAUTH_SETUP_KEY') ?: '');
+define('SMTP_FROM_EMAIL', getenv('SMTP_FROM_EMAIL') ?: 'contactus@savvycfo.com');
+define('SMTP_FROM_NAME', getenv('SMTP_FROM_NAME') ?: 'Savvy CFO Portal');
+
+/**
+ * GoHighLevel Conversations API (deadline + monthly renewal reminders).
+ * Use the same GHL_LOCATION_ID as Scorecard Pro.
+ */
+define('GHL_API_KEY', getenv('GHL_API_KEY') ?: getenv('GHL_API_TOKEN') ?: '');
+define('GHL_LOCATION_ID', getenv('GHL_LOCATION_ID') ?: '');
+define('GHL_API_URL', getenv('GHL_API_URL') ?: 'https://services.leadconnectorhq.com');
+define('GHL_API_VERSION', getenv('GHL_API_VERSION') ?: '2021-07-28');
+define('GHL_FROM_EMAIL', getenv('GHL_FROM_EMAIL') ?: 'no-reply@savvycfo.com');
+define('GHL_FROM_NAME', getenv('GHL_FROM_NAME') ?: 'Savvy CFO Cost Savings');
 
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'costsavings_db');
@@ -27,11 +61,6 @@ define('DB_USER', 'db_user');
 define('DB_PASS', 'db_password');
 define('DB_PORT', '3306');
 define('DB_CHARSET', 'utf8mb4');
-
-/** Base URL for invite links (include trailing slash), e.g. https://yourdomain.com/public/ */
-if (!defined('BASE_URL')) {
-    define('BASE_URL', 'http://localhost/public/');
-}
 
 /** Seed admin when no user has a password (local testing). Leave password empty in production. */
 define('SEED_ADMIN_USERNAME', 'testadmin');

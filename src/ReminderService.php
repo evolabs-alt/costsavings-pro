@@ -90,7 +90,7 @@ class ReminderService
                 }
 
                 $r = $sendEmail($to, $subj, $body);
-                $ok = $r === true || $r === [];
+                $ok = $r === true;
                 if ($ok) {
                     try {
                         $ins = $pdo->prepare(
@@ -112,11 +112,13 @@ class ReminderService
      * Monthly renewal summary (vendors on Keep with next renewal in the coming calendar month).
      *
      * @param callable(string,string,string):mixed $sendEmail
-     * @return array{sent:int}
+     * @return array{sent:int, errors:array<int, string>, debug:array<int, array<string, mixed>>}
      */
     public static function runMonthlyRenewalSummaries(PDO $pdo, callable $sendEmail): array
     {
         $sent = 0;
+        $errors = [];
+        $debug = [];
         $now = new DateTimeImmutable('first day of this month');
         $nextMonth = $now->modify('+1 month');
         $ym = $nextMonth->format('Y-m');
@@ -124,9 +126,21 @@ class ReminderService
         $users = $pdo->query('SELECT id, email, org_id, role FROM users WHERE email IS NOT NULL AND email <> \'\'')->fetchAll(PDO::FETCH_ASSOC);
         foreach ($users as $u) {
             $uid = (int) $u['id'];
-            $chk = $pdo->prepare('SELECT 1 FROM monthly_renewal_sent WHERE user_id = ? AND year_month = ?');
+            $email = (string) $u['email'];
+            $entry = [
+                'user_id' => $uid,
+                'email' => $email,
+                'year_month' => $ym,
+                'action' => null,
+                'lines' => 0,
+                'send_result' => null,
+            ];
+
+            $chk = $pdo->prepare('SELECT 1 FROM monthly_renewal_sent WHERE user_id = ? AND `year_month` = ?');
             $chk->execute([$uid, $ym]);
             if ($chk->fetchColumn()) {
+                $entry['action'] = 'skip_already_sent';
+                $debug[] = $entry;
                 continue;
             }
 
@@ -170,7 +184,10 @@ class ReminderService
                 }
                 $lines[] = ($row['vendor_name'] ?? '') . ' — renews ~' . $next->format('M j, Y');
             }
+            $entry['lines'] = count($lines);
             if (count($lines) === 0) {
+                $entry['action'] = 'skip_no_renewals';
+                $debug[] = $entry;
                 continue;
             }
 
@@ -179,15 +196,45 @@ class ReminderService
                 $html .= '<li>' . htmlspecialchars($l) . '</li>';
             }
             $html .= '</ul>';
-            $r = $sendEmail((string) $u['email'], 'Monthly renewal summary — ' . $nextMonth->format('F Y'), $html);
-            if ($r === true || $r === []) {
-                $ins = $pdo->prepare('INSERT INTO monthly_renewal_sent (user_id, year_month, sent_at) VALUES (?,?,NOW())');
+            $r = $sendEmail($email, 'Monthly renewal summary — ' . $nextMonth->format('F Y'), $html);
+            $entry['send_result'] = self::summarizeSendResult($r);
+            $ok = $r === true;
+            if ($ok) {
+                $ins = $pdo->prepare('INSERT INTO monthly_renewal_sent (user_id, `year_month`, sent_at) VALUES (?,?,NOW())');
                 $ins->execute([$uid, $ym]);
                 ++$sent;
+                $entry['action'] = 'sent_ok';
+            } else {
+                $entry['action'] = 'send_failed';
+                $msg = is_array($r)
+                    ? (($r['error_message'] ?? 'send failed') . ' | ' . ($r['error_info'] ?? ''))
+                    : ('unexpected return: ' . gettype($r));
+                $errors[] = $email . ': ' . $msg;
             }
+            $debug[] = $entry;
         }
 
-        return ['sent' => $sent];
+        return ['sent' => $sent, 'errors' => $errors, 'debug' => $debug, 'year_month' => $ym];
+    }
+
+    /**
+     * @param mixed $r
+     * @return array<string, mixed>
+     */
+    private static function summarizeSendResult($r): array
+    {
+        if ($r === true) {
+            return ['ok' => true];
+        }
+        if (is_array($r)) {
+            return [
+                'ok' => false,
+                'error_message' => (string) ($r['error_message'] ?? ''),
+                'error_info' => (string) ($r['error_info'] ?? ''),
+                'keys' => array_keys($r),
+            ];
+        }
+        return ['ok' => false, 'type' => gettype($r), 'value' => is_scalar($r) ? $r : null];
     }
 
     /**

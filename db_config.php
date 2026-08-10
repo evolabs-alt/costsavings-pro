@@ -332,6 +332,27 @@ function migrateSchema(PDO $pdo) {
             CONSTRAINT `fk_mrs_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `cs_gmail_tokens` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `token_data` TEXT NOT NULL,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `org_qbo_connections` (
+            `org_id` INT UNSIGNED NOT NULL PRIMARY KEY,
+            `environment` VARCHAR(16) NOT NULL DEFAULT 'production',
+            `client_id` VARCHAR(255) NOT NULL DEFAULT '',
+            `client_secret` TEXT NULL,
+            `realm_id` VARCHAR(64) NULL,
+            `company_name` VARCHAR(255) NULL,
+            `token_data` TEXT NULL,
+            `connected_at` DATETIME NULL,
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            `updated_by` INT UNSIGNED NULL,
+            CONSTRAINT `fk_org_qbo_org` FOREIGN KEY (`org_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
         migrateProjectSchema($pdo);
         migrateCostCalculatorSchema($pdo);
         seedInitialAdminIfNeeded($pdo);
@@ -805,4 +826,32 @@ function saveUserRoleToDB($email, $role, $firstName = null, $lastName = null) {
         error_log('Error saving user role: ' . $e->getMessage());
         throw new Exception('Failed to save user role');
     }
+}
+
+function csGetGmailToken(): ?array
+{
+    $pdo = getDBConnection();
+    $stmt = $pdo->query('SELECT * FROM cs_gmail_tokens ORDER BY id DESC LIMIT 1');
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+function csSaveGmailToken(array $tokenData): void
+{
+    $pdo = getDBConnection();
+    $json = json_encode($tokenData);
+    $existing = csGetGmailToken();
+    if ($existing) {
+        $pdo->prepare('UPDATE cs_gmail_tokens SET token_data = :t WHERE id = :id')
+            ->execute([':t' => $json, ':id' => $existing['id']]);
+        return;
+    }
+    $pdo->prepare('INSERT INTO cs_gmail_tokens (token_data) VALUES (:t)')
+        ->execute([':t' => $json]);
+}
+
+function csDeleteGmailToken(): void
+{
+    $pdo = getDBConnection();
+    $pdo->exec('DELETE FROM cs_gmail_tokens');
 }

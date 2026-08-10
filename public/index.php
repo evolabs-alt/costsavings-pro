@@ -8,6 +8,16 @@ if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
 }
 require_once __DIR__ . '/../includes/mail.php';
 require_once __DIR__ . '/../includes/actions.php';
+require_once __DIR__ . '/../includes/gmail_handlers.php';
+require_once __DIR__ . '/../includes/qbo_handlers.php';
+
+$page = $_GET['page'] ?? '';
+if ($page === 'gmail-auth') {
+    csGmailAuthenticate();
+}
+if ($page === 'gmail-callback') {
+    csGmailCallback();
+}
 
 if (isset($_SESSION['user_email'])) {
     $_SESSION['user_email'] = normalizeUserEmail($_SESSION['user_email']);
@@ -18,6 +28,14 @@ try {
     syncSessionOrgRoleFromDatabase();
 } catch (Exception $e) {
     // Handlers and rendering below may retry; avoid fatal page when DB is unreachable during bootstrap.
+}
+
+// QBO OAuth after DB bootstrap so org_qbo_connections migration can run
+if ($page === 'qbo-connect') {
+    csQboConnect();
+}
+if ($page === 'qbo-callback') {
+    csQboCallback();
 }
 
 // Handle form submissions
@@ -114,6 +132,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'save_reminder_settings':
                 handleSaveReminderSettings();
                 break;
+            case 'save_qbo_settings':
+                handleSaveQboSettings();
+                break;
+            case 'qbo_connection_status':
+                handleQboConnectionStatus();
+                break;
+            case 'qbo_disconnect':
+                handleQboDisconnect();
+                break;
+            case 'preview_qbo_sync':
+                handlePreviewQboSync();
+                break;
+            case 'import_qbo_sync':
+                handleImportQboSync();
+                break;
             case 'project_list':
                 handleProjectList();
                 break;
@@ -181,6 +214,15 @@ $invite_can_choose_org_role = $can_create_projects;
 $deadline_reminders_org = true;
 $deadline_reminders_user = true;
 $notification_webhook_url = '';
+$qbo_status = [
+    'connected' => false,
+    'has_credentials' => false,
+    'company_name' => null,
+    'environment' => 'production',
+    'client_id' => '',
+    'has_secret' => false,
+    'redirect_uri' => \CostSavings\QboService::redirectUri(),
+];
 if ($is_logged_in && !empty($_SESSION['org_id'])) {
     try {
         $pdoView = getDBConnection();
@@ -201,6 +243,8 @@ if ($is_logged_in && !empty($_SESSION['org_id'])) {
                 $deadline_reminders_user = (bool) $ur['deadline_reminders_enabled'];
             }
         }
+        $qboSvc = new \CostSavings\QboService($pdoView);
+        $qbo_status = $qboSvc->connectionStatus((int) $_SESSION['org_id']);
     } catch (Exception $e) {
         // ignore
     }
@@ -4006,14 +4050,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             showSnackbar('<?php echo addslashes(htmlspecialchars($_SESSION['message'])); ?>', 'success');
             <?php unset($_SESSION['message']); ?>
         <?php endif; ?>
-        <?php if (isset($_SESSION['smtp_debug_transcript'])): ?>
-            try {
-                console.group('Postmark HTTP debug');
-                console.log(<?php echo json_encode((string) $_SESSION['smtp_debug_transcript']); ?>);
-                console.groupEnd();
-            } catch (e) {}
-            <?php unset($_SESSION['smtp_debug_transcript']); ?>
-        <?php endif; ?>
     });
     </script>
 
@@ -4064,6 +4100,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 <li role="none">
                                     <button type="button" role="menuitem" class="app-submenu-item" id="appImportMappedCsvBtn">Custom CSV import</button>
                                     <input type="file" id="mappedCsvImportInput" accept=".csv,text/csv" style="display:none;">
+                                </li>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" id="appSyncQboBtn">Sync with QBO</button>
                                 </li>
                             </ul>
                         </li>
@@ -4964,6 +5003,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             pendingMappedCsvMapping = null;
                             csvAccountPickerMode = 'qb';
                             setCsvAccountModalIntro('qb');
+                        } else if (csvAccountPickerMode === 'qbo') {
+                            pendingQboCacheKey = '';
+                            csvAccountPickerMode = 'qb';
+                            setCsvAccountModalIntro('qb');
                         } else {
                             pendingCsvFile = null;
                         }
@@ -4997,13 +5040,21 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             var pendingMappedCsvHeaderRow = null;
             var suppressCsvHeaderRowChange = false;
             var csvAccountPickerMode = 'qb';
+            var pendingQboCacheKey = '';
             var suppressCsvMappingModalCleanup = false;
             var CSV_ACCOUNT_INTRO_QB = 'Choose which GL accounts to include. Vendor rows are grouped by payee (Name) from the selected accounts only.';
             var CSV_ACCOUNT_INTRO_MAPPED = 'Choose which account values to include from your mapped column.';
+            var CSV_ACCOUNT_INTRO_QBO = 'Choose which accounts to include from QuickBooks Online. Vendor rows are grouped by payee from the selected accounts only.';
             function setCsvAccountModalIntro(mode) {
                 var intro = document.getElementById('appModalCsvAccountsIntro');
                 if (!intro) return;
-                intro.textContent = mode === 'mapped' ? CSV_ACCOUNT_INTRO_MAPPED : CSV_ACCOUNT_INTRO_QB;
+                if (mode === 'mapped') {
+                    intro.textContent = CSV_ACCOUNT_INTRO_MAPPED;
+                } else if (mode === 'qbo') {
+                    intro.textContent = CSV_ACCOUNT_INTRO_QBO;
+                } else {
+                    intro.textContent = CSV_ACCOUNT_INTRO_QB;
+                }
             }
             function updateCsvAccountSelectionStatus() {
                 var list = document.getElementById('csvAccountList');
@@ -5212,6 +5263,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 pendingMappedTargetFields = [];
                                 pendingMappedCsvMapping = null;
                                 pendingMappedCsvHeaderRow = null;
+                                csvAccountPickerMode = 'qb';
+                                setCsvAccountModalIntro('qb');
+                            });
+                        } else if (csvAccountPickerMode === 'qbo') {
+                            if (!pendingQboCacheKey) {
+                                setButtonLoading(importBtn, false);
+                                showSnackbar('Sync session expired. Pull from QuickBooks again.', 'error');
+                                return;
+                            }
+                            importPromise = runQboImport(selected).then(function() {
+                                pendingQboCacheKey = '';
                                 csvAccountPickerMode = 'qb';
                                 setCsvAccountModalIntro('qb');
                             });
@@ -5608,6 +5670,130 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     }, true);
                 }
             }
+            function runQboImport(selectedAccounts) {
+                var fd = new FormData();
+                fd.append('action', 'import_qbo_sync');
+                fd.append('selected_accounts', JSON.stringify(selectedAccounts || []));
+                if (pendingQboCacheKey) {
+                    fd.append('cache_key', pendingQboCacheKey);
+                }
+                return fetch(window.location.href, { method: 'POST', body: fd })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (d.success) {
+                            var rawCount = parseInt(d.raw_inserted || 0, 10) || 0;
+                            showSnackbar('Imported ' + (d.inserted || 0) + ' vendor(s), ' + rawCount + ' raw transactions', 'success');
+                            return reloadCalculatorAfterImport(false);
+                        }
+                        showSnackbar(d.error || 'Import failed', 'error');
+                    })
+                    .catch(function() {
+                        showSnackbar('Import failed', 'error');
+                    });
+            }
+            function defaultQboDateRange() {
+                var end = new Date();
+                var start = new Date();
+                start.setFullYear(start.getFullYear() - 1);
+                function fmt(d) {
+                    var y = d.getFullYear();
+                    var m = String(d.getMonth() + 1).padStart(2, '0');
+                    var day = String(d.getDate()).padStart(2, '0');
+                    return y + '-' + m + '-' + day;
+                }
+                return { start: fmt(start), end: fmt(end) };
+            }
+            function fetchQboConnectionStatus() {
+                var fd = new FormData();
+                fd.append('action', 'qbo_connection_status');
+                return fetch(window.location.href, { method: 'POST', body: fd })
+                    .then(function(r) { return r.json(); });
+            }
+            function initQboSyncUi() {
+                var syncBtn = document.getElementById('appSyncQboBtn');
+                if (syncBtn && !syncBtn.dataset.qboBound) {
+                    syncBtn.dataset.qboBound = '1';
+                    syncBtn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        setButtonLoading(syncBtn, true, 'Checking…');
+                        fetchQboConnectionStatus()
+                            .then(function(d) {
+                                if (!d || !d.success) {
+                                    showSnackbar((d && d.error) || 'Could not check QuickBooks status', 'error');
+                                    return;
+                                }
+                                if (!d.connected) {
+                                    showSnackbar('Connect QuickBooks Online in Settings first.', 'error');
+                                    openAppModal('appModalSettings');
+                                    var block = document.getElementById('qboSettingsBlock');
+                                    if (block && block.scrollIntoView) {
+                                        block.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                    }
+                                    return;
+                                }
+                                var range = defaultQboDateRange();
+                                var startEl = document.getElementById('qboSyncStartDate');
+                                var endEl = document.getElementById('qboSyncEndDate');
+                                if (startEl) startEl.value = range.start;
+                                if (endEl) endEl.value = range.end;
+                                openAppModal('appModalQboDateRange');
+                            })
+                            .catch(function() {
+                                showSnackbar('Could not check QuickBooks status', 'error');
+                            })
+                            .finally(function() {
+                                setButtonLoading(syncBtn, false);
+                            });
+                    });
+                }
+                var pullBtn = document.getElementById('qboSyncPullBtn');
+                if (pullBtn && !pullBtn.dataset.qboBound) {
+                    pullBtn.dataset.qboBound = '1';
+                    pullBtn.addEventListener('click', function() {
+                        var startEl = document.getElementById('qboSyncStartDate');
+                        var endEl = document.getElementById('qboSyncEndDate');
+                        var startDate = startEl ? String(startEl.value || '').trim() : '';
+                        var endDate = endEl ? String(endEl.value || '').trim() : '';
+                        if (!startDate || !endDate) {
+                            showSnackbar('Select start and end dates', 'error');
+                            return;
+                        }
+                        if (startDate > endDate) {
+                            showSnackbar('Start date must be on or before end date', 'error');
+                            return;
+                        }
+                        setButtonLoading(pullBtn, true, 'Pulling…');
+                        var fd = new FormData();
+                        fd.append('action', 'preview_qbo_sync');
+                        fd.append('start_date', startDate);
+                        fd.append('end_date', endDate);
+                        fetch(window.location.href, { method: 'POST', body: fd })
+                            .then(function(r) { return r.json(); })
+                            .then(function(d) {
+                                if (!d.success) {
+                                    showSnackbar(d.error || 'Could not pull from QuickBooks', 'error');
+                                    if (d.needs_setup) {
+                                        closeAppModal(document.getElementById('appModalQboDateRange'));
+                                        openAppModal('appModalSettings');
+                                    }
+                                    return;
+                                }
+                                pendingQboCacheKey = d.cache_key || '';
+                                csvAccountPickerMode = 'qbo';
+                                setCsvAccountModalIntro('qbo');
+                                renderCsvAccountList(d.accounts || [], false);
+                                closeAppModal(document.getElementById('appModalQboDateRange'));
+                                openAppModal('appModalCsvAccounts');
+                            })
+                            .catch(function() {
+                                showSnackbar('Could not pull from QuickBooks', 'error');
+                            })
+                            .finally(function() {
+                                setButtonLoading(pullBtn, false);
+                            });
+                    });
+                }
+            }
             function aiEscapeHtml(s) {
                 var d = document.createElement('div');
                 d.textContent = s;
@@ -5814,6 +6000,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 });
                 initCsvImportUi();
                 initMappedCsvImportUi();
+                initQboSyncUi();
             }
             const TEAM_MEMBERS = <?php echo $team_members_json; ?>;
             const IS_ADMIN = <?php echo $is_admin ? 'true' : 'false'; ?>;
@@ -7914,6 +8101,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 });
                 initCsvImportUi();
                 initMappedCsvImportUi();
+                initQboSyncUi();
                 function aiEscapeHtml(s) {
                     var d = document.createElement('div');
                     d.textContent = s;
@@ -9290,6 +9478,95 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <label style="font-size:14px;"><input type="checkbox" name="user_deadline_reminders" value="1" <?php echo $deadline_reminders_user ? 'checked' : ''; ?>> Email me cancellation date reminders</label>
                         <div><button type="submit">Save</button></div>
                     </form>
+                </div>
+                <?php if ($is_admin): ?>
+                <div class="settings-block" id="qboSettingsBlock" style="margin-top:18px;padding-top:16px;border-top:1px solid #e5e7eb;">
+                    <h3 style="margin:0 0 8px;font-size:16px;">QuickBooks Online</h3>
+                    <p style="margin:0 0 12px;font-size:13px;color:#6b7280;line-height:1.45;">
+                        Paste Client ID and Client Secret from your Intuit developer app, save, then connect the company to import vendors via Data → Sync with QBO.
+                    </p>
+                    <p style="margin:0 0 12px;font-size:13px;">
+                        Status:
+                        <?php if (!empty($qbo_status['connected'])): ?>
+                            <strong style="color:#047857;">Connected<?php echo !empty($qbo_status['company_name']) ? ' — ' . htmlspecialchars((string) $qbo_status['company_name']) : ''; ?></strong>
+                        <?php elseif (!empty($qbo_status['has_credentials'])): ?>
+                            <strong style="color:#b45309;">Credentials saved — connect to authorize</strong>
+                        <?php else: ?>
+                            <strong style="color:#6b7280;">Not configured</strong>
+                        <?php endif; ?>
+                    </p>
+                    <form method="POST" style="display:grid;gap:10px;">
+                        <input type="hidden" name="action" value="save_qbo_settings">
+                        <label style="display:grid;gap:6px;font-size:14px;">
+                            <span>Environment</span>
+                            <select name="qbo_environment" style="max-width:240px;">
+                                <option value="production" <?php echo (($qbo_status['environment'] ?? '') === 'production') ? 'selected' : ''; ?>>Production</option>
+                                <option value="sandbox" <?php echo (($qbo_status['environment'] ?? '') === 'sandbox') ? 'selected' : ''; ?>>Sandbox</option>
+                            </select>
+                        </label>
+                        <label style="display:grid;gap:6px;font-size:14px;">
+                            <span>Client ID</span>
+                            <input type="text" name="qbo_client_id" value="<?php echo htmlspecialchars((string) ($qbo_status['client_id'] ?? '')); ?>" autocomplete="off" style="min-width:320px;">
+                        </label>
+                        <label style="display:grid;gap:6px;font-size:14px;">
+                            <span>Client Secret<?php echo !empty($qbo_status['has_secret']) ? ' (leave blank to keep current)' : ''; ?></span>
+                            <input type="password" name="qbo_client_secret" value="" placeholder="<?php echo !empty($qbo_status['has_secret']) ? '••••••••' : ''; ?>" autocomplete="new-password" style="min-width:320px;">
+                        </label>
+                        <label style="display:grid;gap:6px;font-size:14px;">
+                            <span>Redirect URI (register this in your Intuit app)</span>
+                            <input type="text" readonly value="<?php echo htmlspecialchars((string) ($qbo_status['redirect_uri'] ?? '')); ?>" style="min-width:320px;background:#f9fafb;" onclick="this.select();">
+                        </label>
+                        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                            <button type="submit">Save credentials</button>
+                            <?php if (!empty($qbo_status['has_credentials'])): ?>
+                            <a class="btn-secondary" style="display:inline-block;padding:8px 12px;text-decoration:none;" href="?page=qbo-connect">Connect to QuickBooks</a>
+                            <?php endif; ?>
+                        </div>
+                    </form>
+                    <?php if (!empty($qbo_status['connected'])): ?>
+                    <form method="POST" style="margin-top:12px;" onsubmit="return confirm('Disconnect QuickBooks for this organization? Credentials will be kept.');">
+                        <input type="hidden" name="action" value="qbo_disconnect">
+                        <button type="submit" class="btn-secondary">Disconnect QuickBooks</button>
+                    </form>
+                    <?php endif; ?>
+                </div>
+                <?php elseif ($is_logged_in): ?>
+                <div class="settings-block" style="margin-top:18px;padding-top:16px;border-top:1px solid #e5e7eb;">
+                    <h3 style="margin:0 0 8px;font-size:16px;">QuickBooks Online</h3>
+                    <p style="margin:0;font-size:13px;color:#6b7280;">
+                        <?php if (!empty($qbo_status['connected'])): ?>
+                            Connected<?php echo !empty($qbo_status['company_name']) ? ' to ' . htmlspecialchars((string) $qbo_status['company_name']) : ''; ?>. Ask an admin to change connection settings.
+                        <?php else: ?>
+                            Not connected. An organization admin must configure QuickBooks in Settings.
+                        <?php endif; ?>
+                    </p>
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay" id="appModalQboDateRange" role="dialog" aria-modal="true" aria-labelledby="appModalQboDateRangeTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalQboDateRangeTitle">Sync with QuickBooks</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <p style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;">Select the date range of transactions to pull from QuickBooks Online (max 24 months).</p>
+                <div style="display:grid;gap:12px;max-width:360px;">
+                    <label style="display:grid;gap:6px;font-size:14px;">
+                        <span>Start date</span>
+                        <input type="date" id="qboSyncStartDate">
+                    </label>
+                    <label style="display:grid;gap:6px;font-size:14px;">
+                        <span>End date</span>
+                        <input type="date" id="qboSyncEndDate">
+                    </label>
+                </div>
+                <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+                    <button type="button" class="btn-secondary app-modal-close">Cancel</button>
+                    <button type="button" id="qboSyncPullBtn">Pull transactions</button>
                 </div>
             </div>
         </div>
