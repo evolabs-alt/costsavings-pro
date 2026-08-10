@@ -1214,54 +1214,6 @@ function handleSaveReminderSettings() {
     exit;
 }
 
-function handleSaveQboSettings(): void
-{
-    if (empty($_SESSION['user_id']) || empty($_SESSION['org_id'])) {
-        header('Location: ' . $_SERVER['PHP_SELF']);
-        exit;
-    }
-    if (!OrgRole::isPrivileged((string) ($_SESSION['role'] ?? ''))) {
-        $_SESSION['error'] = 'Only admins can manage QuickBooks settings.';
-        header('Location: ' . $_SERVER['PHP_SELF']);
-        exit;
-    }
-
-    $environment = QboService::normalizeEnvironment((string) ($_POST['qbo_environment'] ?? 'production'));
-    $clientId = trim((string) ($_POST['qbo_client_id'] ?? ''));
-    $clientSecretRaw = (string) ($_POST['qbo_client_secret'] ?? '');
-    $clientSecret = trim($clientSecretRaw) === '' ? null : trim($clientSecretRaw);
-
-    if ($clientId === '') {
-        $_SESSION['error'] = 'QuickBooks Client ID is required.';
-        header('Location: ' . $_SERVER['PHP_SELF']);
-        exit;
-    }
-
-    try {
-        $pdo = getDBConnection();
-        $svc = new QboService($pdo);
-        $existing = $svc->getConnection((int) $_SESSION['org_id']);
-        if ($clientSecret === null && ($existing === null || empty($existing['client_secret']))) {
-            $_SESSION['error'] = 'QuickBooks Client Secret is required the first time you save.';
-            header('Location: ' . $_SERVER['PHP_SELF']);
-            exit;
-        }
-        $svc->saveCredentials(
-            (int) $_SESSION['org_id'],
-            $environment,
-            $clientId,
-            $clientSecret,
-            (int) $_SESSION['user_id']
-        );
-        $_SESSION['message'] = 'QuickBooks credentials saved.';
-    } catch (Throwable $e) {
-        error_log('handleSaveQboSettings: ' . $e->getMessage());
-        $_SESSION['error'] = 'Could not save QuickBooks settings.';
-    }
-    header('Location: ' . $_SERVER['PHP_SELF']);
-    exit;
-}
-
 function handleQboConnectionStatus(): void
 {
     header('Content-Type: application/json');
@@ -1296,7 +1248,7 @@ function handleQboDisconnect(): void
         $pdo = getDBConnection();
         $svc = new QboService($pdo);
         $svc->disconnect((int) $_SESSION['org_id'], (int) $_SESSION['user_id'], true);
-        $_SESSION['message'] = 'QuickBooks disconnected. Credentials were kept.';
+        $_SESSION['message'] = 'QuickBooks company disconnected for this organization.';
     } catch (Throwable $e) {
         error_log('handleQboDisconnect: ' . $e->getMessage());
         $_SESSION['error'] = 'Could not disconnect QuickBooks.';

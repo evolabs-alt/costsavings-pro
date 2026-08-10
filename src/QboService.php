@@ -8,7 +8,7 @@ namespace CostSavings;
  * Payment / security posture (Intuit app listing attestations):
  * - Does not automate merchant application authorization UI (user completes Intuit OAuth in browser).
  * - Does not request or store the user's Intuit user ID (no OpenID `openid`/`profile` scopes; no `sub`/`userid`).
- * - Encrypts secrets and refresh tokens at rest (AES-256-GCM).
+ * - Encrypts refresh tokens at rest (AES-256-GCM). App Client ID/Secret live in config, not per-org UI.
  * - Holds access tokens in process memory only; they are never written to DB, disk, or session.
  */
 class QboService
@@ -35,6 +35,31 @@ class QboService
         $this->pdo = $pdo;
     }
 
+    /**
+     * Global Intuit app credentials from config (same for every customer company).
+     *
+     * @return array{client_id:string, client_secret:string, environment:string}
+     */
+    public static function appCredentials(): array
+    {
+        $clientId = defined('QBO_CLIENT_ID') ? trim((string) QBO_CLIENT_ID) : '';
+        $clientSecret = defined('QBO_CLIENT_SECRET') ? trim((string) QBO_CLIENT_SECRET) : '';
+        $env = defined('QBO_ENVIRONMENT') ? (string) QBO_ENVIRONMENT : self::ENV_PRODUCTION;
+
+        return [
+            'client_id' => $clientId,
+            'client_secret' => $clientSecret,
+            'environment' => self::normalizeEnvironment($env),
+        ];
+    }
+
+    public static function hasAppCredentials(): bool
+    {
+        $c = self::appCredentials();
+
+        return $c['client_id'] !== '' && $c['client_secret'] !== '';
+    }
+
     public static function redirectUri(): string
     {
         if (defined('QBO_REDIRECT_URI')) {
@@ -54,6 +79,8 @@ class QboService
     }
 
     /**
+     * Org connection row merged with global app credentials.
+     *
      * @return array{
      *   org_id:int,
      *   environment:string,
@@ -65,34 +92,35 @@ class QboService
      *   connected_at:?string,
      *   updated_at:?string,
      *   updated_by:?int
-     * }|null
+     * }
      */
-    public function getConnection(int $orgId): ?array
+    public function getConnection(int $orgId): array
     {
+        $app = self::appCredentials();
         $st = $this->pdo->prepare(
-            'SELECT org_id, environment, client_id, client_secret, realm_id, company_name, token_data, connected_at, updated_at, updated_by
+            'SELECT org_id, realm_id, company_name, token_data, connected_at, updated_at, updated_by
              FROM org_qbo_connections WHERE org_id = ? LIMIT 1'
         );
         $st->execute([$orgId]);
         $row = $st->fetch(\PDO::FETCH_ASSOC);
-        if (!$row) {
-            return null;
+
+        $tokens = null;
+        if ($row && !empty($row['token_data'])) {
+            $tokens = self::decodeStoredTokenPayload((string) $row['token_data']);
         }
 
-        $tokens = self::decodeStoredTokenPayload(
-            isset($row['token_data']) ? (string) $row['token_data'] : null
-        );
-        $secretRaw = isset($row['client_secret']) ? (string) $row['client_secret'] : '';
-        $clientSecret = $secretRaw !== '' ? self::decryptString($secretRaw) : null;
-
         return [
-            'org_id' => (int) $row['org_id'],
-            'environment' => self::normalizeEnvironment((string) ($row['environment'] ?? self::ENV_PRODUCTION)),
-            'client_id' => (string) ($row['client_id'] ?? ''),
-            'client_secret' => $clientSecret !== '' ? $clientSecret : null,
+            'org_id' => $orgId,
+            'environment' => $app['environment'],
+            'client_id' => $app['client_id'],
+            'client_secret' => $app['client_secret'] !== '' ? $app['client_secret'] : null,
             // Company realm (not Intuit end-user ID). Required for Accounting API company context.
-            'realm_id' => isset($row['realm_id']) && $row['realm_id'] !== '' ? (string) $row['realm_id'] : null,
-            'company_name' => isset($row['company_name']) && $row['company_name'] !== '' ? (string) $row['company_name'] : null,
+            'realm_id' => ($row && isset($row['realm_id']) && $row['realm_id'] !== '')
+                ? (string) $row['realm_id']
+                : null,
+            'company_name' => ($row && isset($row['company_name']) && $row['company_name'] !== '')
+                ? (string) $row['company_name']
+                : null,
             'token_data' => $tokens,
             'connected_at' => $row['connected_at'] ?? null,
             'updated_at' => $row['updated_at'] ?? null,
@@ -101,27 +129,30 @@ class QboService
     }
 
     /**
-     * @return array{connected:bool,has_credentials:bool,company_name:?string,environment:string,client_id:string,has_secret:bool,redirect_uri:string}
+     * @return array{connected:bool,has_credentials:bool,company_name:?string,environment:string,client_id_masked:string,redirect_uri:string}
      */
     public function connectionStatus(int $orgId): array
     {
         $conn = $this->getConnection($orgId);
-        $clientId = $conn['client_id'] ?? '';
-        $secret = $conn['client_secret'] ?? '';
+        $hasCreds = self::hasAppCredentials();
         $tokens = $conn['token_data'] ?? null;
-        $hasCreds = $clientId !== '' && is_string($secret) && $secret !== '';
         $connected = $hasCreds
             && !empty($conn['realm_id'])
             && is_array($tokens)
             && !empty($tokens['refresh_token']);
+
+        $clientId = $conn['client_id'];
+        $masked = $clientId;
+        if (strlen($clientId) > 8) {
+            $masked = substr($clientId, 0, 4) . '…' . substr($clientId, -4);
+        }
 
         return [
             'connected' => $connected,
             'has_credentials' => $hasCreds,
             'company_name' => $conn['company_name'] ?? null,
             'environment' => $conn['environment'] ?? self::ENV_PRODUCTION,
-            'client_id' => $clientId,
-            'has_secret' => is_string($secret) && $secret !== '',
+            'client_id_masked' => $masked,
             'redirect_uri' => self::redirectUri(),
         ];
     }
@@ -131,64 +162,47 @@ class QboService
         return $this->connectionStatus($orgId)['connected'];
     }
 
-    public function saveCredentials(int $orgId, string $environment, string $clientId, ?string $clientSecret, int $userId): void
+    /** Ensure a row exists so OAuth callback can attach tokens. */
+    public function ensureOrgRow(int $orgId, int $userId): void
     {
-        $environment = self::normalizeEnvironment($environment);
-        $clientId = trim($clientId);
-        $existing = $this->getConnection($orgId);
-        $secretToStore = $clientSecret;
-        if (($secretToStore === null || trim($secretToStore) === '') && $existing) {
-            $secretToStore = $existing['client_secret'];
-        } else {
-            $secretToStore = $clientSecret !== null ? trim($clientSecret) : '';
-        }
-
-        $encryptedSecret = ($secretToStore !== null && $secretToStore !== '')
-            ? self::encryptString((string) $secretToStore)
-            : '';
-
-        if ($existing) {
-            $st = $this->pdo->prepare(
-                'UPDATE org_qbo_connections
-                 SET environment = ?, client_id = ?, client_secret = ?, updated_by = ?
-                 WHERE org_id = ?'
-            );
-            $st->execute([$environment, $clientId, $encryptedSecret, $userId, $orgId]);
-            return;
-        }
-
         $st = $this->pdo->prepare(
-            'INSERT INTO org_qbo_connections (org_id, environment, client_id, client_secret, updated_by)
-             VALUES (?, ?, ?, ?, ?)'
+            'INSERT INTO org_qbo_connections (org_id, updated_by)
+             VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE updated_by = VALUES(updated_by)'
         );
-        $st->execute([$orgId, $environment, $clientId, $encryptedSecret, $userId]);
+        $st->execute([$orgId, $userId]);
     }
 
     public function disconnect(int $orgId, int $userId, bool $keepCredentials = true): void
     {
         unset(self::$accessTokenMemory[$orgId]);
-        if ($keepCredentials) {
-            $st = $this->pdo->prepare(
-                'UPDATE org_qbo_connections
-                 SET realm_id = NULL, company_name = NULL, token_data = NULL, connected_at = NULL, updated_by = ?
-                 WHERE org_id = ?'
-            );
-            $st->execute([$userId, $orgId]);
-            return;
+        // App credentials live in config; only clear this org's company connection tokens.
+        $st = $this->pdo->prepare(
+            'UPDATE org_qbo_connections
+             SET realm_id = NULL, company_name = NULL, token_data = NULL, connected_at = NULL, updated_by = ?
+             WHERE org_id = ?'
+        );
+        $st->execute([$userId, $orgId]);
+        if (!$keepCredentials) {
+            // Column leftovers unused with global app credentials; full delete optional.
+            $del = $this->pdo->prepare('DELETE FROM org_qbo_connections WHERE org_id = ?');
+            $del->execute([$orgId]);
         }
-
-        $st = $this->pdo->prepare('DELETE FROM org_qbo_connections WHERE org_id = ?');
-        $st->execute([$orgId]);
     }
 
     /**
      * @return array{auth_url:string,state:string}
      */
-    public function beginOAuth(int $orgId): array
+    public function beginOAuth(int $orgId, int $userId = 0): array
     {
-        $conn = $this->getConnection($orgId);
-        if ($conn === null || trim($conn['client_id']) === '' || empty($conn['client_secret'])) {
-            throw new \RuntimeException('Save QuickBooks Client ID and Client Secret in Settings first.');
+        if (!self::hasAppCredentials()) {
+            throw new \RuntimeException(
+                'QuickBooks app is not configured. Set QBO_CLIENT_ID and QBO_CLIENT_SECRET in config.php.'
+            );
+        }
+        $app = self::appCredentials();
+        if ($userId > 0) {
+            $this->ensureOrgRow($orgId, $userId);
         }
 
         $state = bin2hex(random_bytes(24));
@@ -196,7 +210,7 @@ class QboService
         $_SESSION['qbo_oauth_org_id'] = $orgId;
 
         $params = http_build_query([
-            'client_id' => $conn['client_id'],
+            'client_id' => $app['client_id'],
             'response_type' => 'code',
             'scope' => self::SCOPE,
             'redirect_uri' => self::redirectUri(),
@@ -224,15 +238,17 @@ class QboService
         if ($code === '' || $realmId === '') {
             throw new \RuntimeException('Missing authorization code or company id (realmId).');
         }
-
-        $conn = $this->getConnection($orgId);
-        if ($conn === null || $conn['client_id'] === '' || empty($conn['client_secret'])) {
-            throw new \RuntimeException('QuickBooks credentials not found for this organization.');
+        if (!self::hasAppCredentials()) {
+            throw new \RuntimeException('QuickBooks app credentials are not configured in config.php.');
         }
 
+        $app = self::appCredentials();
+        $userId = (int) ($_SESSION['user_id'] ?? 0);
+        $this->ensureOrgRow($orgId, $userId > 0 ? $userId : 0);
+
         $tokenPayload = $this->exchangeAuthorizationCode(
-            $conn['client_id'],
-            (string) $conn['client_secret'],
+            $app['client_id'],
+            $app['client_secret'],
             $code
         );
 
@@ -243,7 +259,7 @@ class QboService
         $companyName = null;
         try {
             $companyName = $this->fetchCompanyName(
-                $conn['environment'],
+                $app['environment'],
                 $realmId,
                 (string) $tokenData['access_token']
             );
@@ -254,13 +270,14 @@ class QboService
         // Persist company realm + encrypted refresh token only (no Intuit user ID, no access token).
         $st = $this->pdo->prepare(
             'UPDATE org_qbo_connections
-             SET realm_id = ?, company_name = ?, token_data = ?, connected_at = NOW()
+             SET realm_id = ?, company_name = ?, token_data = ?, connected_at = NOW(), updated_by = ?
              WHERE org_id = ?'
         );
         $st->execute([
             $realmId,
             $companyName,
             self::encodeStoredTokenPayload($tokenData),
+            $userId > 0 ? $userId : null,
             $orgId,
         ]);
     }
@@ -274,7 +291,7 @@ class QboService
     public function ensureAccessToken(int $orgId): array
     {
         $conn = $this->getConnection($orgId);
-        if ($conn === null || empty($conn['realm_id']) || empty($conn['client_id']) || empty($conn['client_secret'])) {
+        if (empty($conn['realm_id']) || empty($conn['client_id']) || empty($conn['client_secret'])) {
             throw new \RuntimeException('QuickBooks is not connected for this organization.');
         }
         $tokens = $conn['token_data'];

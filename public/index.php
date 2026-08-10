@@ -132,9 +132,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'save_reminder_settings':
                 handleSaveReminderSettings();
                 break;
-            case 'save_qbo_settings':
-                handleSaveQboSettings();
-                break;
             case 'qbo_connection_status':
                 handleQboConnectionStatus();
                 break;
@@ -216,11 +213,10 @@ $deadline_reminders_user = true;
 $notification_webhook_url = '';
 $qbo_status = [
     'connected' => false,
-    'has_credentials' => false,
+    'has_credentials' => \CostSavings\QboService::hasAppCredentials(),
     'company_name' => null,
-    'environment' => 'production',
-    'client_id' => '',
-    'has_secret' => false,
+    'environment' => \CostSavings\QboService::appCredentials()['environment'],
+    'client_id_masked' => '',
     'redirect_uri' => \CostSavings\QboService::redirectUri(),
 ];
 if ($is_logged_in && !empty($_SESSION['org_id'])) {
@@ -5723,7 +5719,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     return;
                                 }
                                 if (!d.connected) {
-                                    showSnackbar('Connect QuickBooks Online in Settings first.', 'error');
+                                    if (!d.has_credentials) {
+                                        showSnackbar('QuickBooks app is not configured on the server (QBO_CLIENT_ID / QBO_CLIENT_SECRET).', 'error');
+                                    } else {
+                                        showSnackbar('Connect this company’s QuickBooks in Settings first.', 'error');
+                                    }
                                     openAppModal('appModalSettings');
                                     var block = document.getElementById('qboSettingsBlock');
                                     if (block && block.scrollIntoView) {
@@ -9483,51 +9483,42 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <div class="settings-block" id="qboSettingsBlock" style="margin-top:18px;padding-top:16px;border-top:1px solid #e5e7eb;">
                     <h3 style="margin:0 0 8px;font-size:16px;">QuickBooks Online</h3>
                     <p style="margin:0 0 12px;font-size:13px;color:#6b7280;line-height:1.45;">
-                        Paste Client ID and Client Secret from your Intuit developer app, save, then connect the company to import vendors via Data → Sync with QBO.
+                        Connect this organization’s QuickBooks company. App credentials are configured by Savvy on the server
+                        (same developer app for all customers).
                     </p>
-                    <p style="margin:0 0 12px;font-size:13px;">
+                    <p style="margin:0 0 8px;font-size:13px;">
                         Status:
                         <?php if (!empty($qbo_status['connected'])): ?>
                             <strong style="color:#047857;">Connected<?php echo !empty($qbo_status['company_name']) ? ' — ' . htmlspecialchars((string) $qbo_status['company_name']) : ''; ?></strong>
                         <?php elseif (!empty($qbo_status['has_credentials'])): ?>
-                            <strong style="color:#b45309;">Credentials saved — connect to authorize</strong>
+                            <strong style="color:#b45309;">App ready — connect this company’s books</strong>
                         <?php else: ?>
-                            <strong style="color:#6b7280;">Not configured</strong>
+                            <strong style="color:#b91c1c;">App not configured</strong>
+                            <span style="color:#6b7280;"> (set QBO_CLIENT_ID / QBO_CLIENT_SECRET in config.php)</span>
                         <?php endif; ?>
                     </p>
-                    <form method="POST" style="display:grid;gap:10px;">
-                        <input type="hidden" name="action" value="save_qbo_settings">
-                        <label style="display:grid;gap:6px;font-size:14px;">
-                            <span>Environment</span>
-                            <select name="qbo_environment" style="max-width:240px;">
-                                <option value="production" <?php echo (($qbo_status['environment'] ?? '') === 'production') ? 'selected' : ''; ?>>Production</option>
-                                <option value="sandbox" <?php echo (($qbo_status['environment'] ?? '') === 'sandbox') ? 'selected' : ''; ?>>Sandbox</option>
-                            </select>
-                        </label>
-                        <label style="display:grid;gap:6px;font-size:14px;">
-                            <span>Client ID</span>
-                            <input type="text" name="qbo_client_id" value="<?php echo htmlspecialchars((string) ($qbo_status['client_id'] ?? '')); ?>" autocomplete="off" style="min-width:320px;">
-                        </label>
-                        <label style="display:grid;gap:6px;font-size:14px;">
-                            <span>Client Secret<?php echo !empty($qbo_status['has_secret']) ? ' (leave blank to keep current)' : ''; ?></span>
-                            <input type="password" name="qbo_client_secret" value="" placeholder="<?php echo !empty($qbo_status['has_secret']) ? '••••••••' : ''; ?>" autocomplete="new-password" style="min-width:320px;">
-                        </label>
-                        <label style="display:grid;gap:6px;font-size:14px;">
-                            <span>Redirect URI (register this in your Intuit app)</span>
-                            <input type="text" readonly value="<?php echo htmlspecialchars((string) ($qbo_status['redirect_uri'] ?? '')); ?>" style="min-width:320px;background:#f9fafb;" onclick="this.select();">
-                        </label>
-                        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-                            <button type="submit">Save credentials</button>
-                            <?php if (!empty($qbo_status['has_credentials'])): ?>
-                            <a class="btn-secondary" style="display:inline-block;padding:8px 12px;text-decoration:none;" href="?page=qbo-connect">Connect to QuickBooks</a>
-                            <?php endif; ?>
-                        </div>
-                    </form>
-                    <?php if (!empty($qbo_status['connected'])): ?>
-                    <form method="POST" style="margin-top:12px;" onsubmit="return confirm('Disconnect QuickBooks for this organization? Credentials will be kept.');">
-                        <input type="hidden" name="action" value="qbo_disconnect">
-                        <button type="submit" class="btn-secondary">Disconnect QuickBooks</button>
-                    </form>
+                    <?php if (!empty($qbo_status['has_credentials'])): ?>
+                    <p style="margin:0 0 8px;font-size:13px;color:#6b7280;">
+                        Environment: <?php echo htmlspecialchars((string) ($qbo_status['environment'] ?? 'production')); ?>
+                        <?php if (!empty($qbo_status['client_id_masked'])): ?>
+                            · Client ID: <?php echo htmlspecialchars((string) $qbo_status['client_id_masked']); ?>
+                        <?php endif; ?>
+                    </p>
+                    <label style="display:grid;gap:6px;font-size:14px;margin-bottom:12px;">
+                        <span>Redirect URI (already set on the Intuit app)</span>
+                        <input type="text" readonly value="<?php echo htmlspecialchars((string) ($qbo_status['redirect_uri'] ?? '')); ?>" style="min-width:320px;background:#f9fafb;" onclick="this.select();">
+                    </label>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                        <a class="btn-secondary" style="display:inline-block;padding:8px 12px;text-decoration:none;" href="?page=qbo-connect">
+                            <?php echo !empty($qbo_status['connected']) ? 'Reconnect QuickBooks' : 'Connect to QuickBooks'; ?>
+                        </a>
+                        <?php if (!empty($qbo_status['connected'])): ?>
+                        <form method="POST" style="margin:0;" onsubmit="return confirm('Disconnect QuickBooks for this organization?');">
+                            <input type="hidden" name="action" value="qbo_disconnect">
+                            <button type="submit" class="btn-secondary">Disconnect</button>
+                        </form>
+                        <?php endif; ?>
+                    </div>
                     <?php endif; ?>
                 </div>
                 <?php elseif ($is_logged_in): ?>
@@ -9535,9 +9526,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <h3 style="margin:0 0 8px;font-size:16px;">QuickBooks Online</h3>
                     <p style="margin:0;font-size:13px;color:#6b7280;">
                         <?php if (!empty($qbo_status['connected'])): ?>
-                            Connected<?php echo !empty($qbo_status['company_name']) ? ' to ' . htmlspecialchars((string) $qbo_status['company_name']) : ''; ?>. Ask an admin to change connection settings.
+                            Connected<?php echo !empty($qbo_status['company_name']) ? ' to ' . htmlspecialchars((string) $qbo_status['company_name']) : ''; ?>. Ask an admin to change the connection.
                         <?php else: ?>
-                            Not connected. An organization admin must configure QuickBooks in Settings.
+                            Not connected. An organization admin can connect QuickBooks in Settings.
                         <?php endif; ?>
                     </p>
                 </div>

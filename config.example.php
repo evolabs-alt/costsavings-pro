@@ -11,10 +11,19 @@ if (!defined('BASE_URL')) {
 }
 
 /**
- * QuickBooks Online OAuth callback (optional override).
- * Default: {BASE_URL}index.php?page=qbo-callback — register the same URI in your Intuit app.
- * Per-org Client ID / Secret are stored in Admin → Settings (not here).
+ * QuickBooks Online — single Intuit developer app credentials (all clients use this app).
+ * Client OAuth tokens / realmId are stored per organization after Connect.
  */
+if (!defined('QBO_CLIENT_ID')) {
+    define('QBO_CLIENT_ID', getenv('QBO_CLIENT_ID') ?: '');
+}
+if (!defined('QBO_CLIENT_SECRET')) {
+    define('QBO_CLIENT_SECRET', getenv('QBO_CLIENT_SECRET') ?: '');
+}
+if (!defined('QBO_ENVIRONMENT')) {
+    // sandbox | production
+    define('QBO_ENVIRONMENT', getenv('QBO_ENVIRONMENT') ?: 'production');
+}
 if (!defined('QBO_REDIRECT_URI')) {
     define(
         'QBO_REDIRECT_URI',
@@ -23,7 +32,7 @@ if (!defined('QBO_REDIRECT_URI')) {
 }
 
 /**
- * AES-256 key material for encrypting QBO client secrets + refresh tokens at rest.
+ * AES-256 key material for encrypting QBO refresh tokens at rest.
  * Prefer a long random string via env. Access tokens are never persisted (memory only).
  */
 if (!defined('QBO_TOKEN_ENCRYPTION_KEY')) {

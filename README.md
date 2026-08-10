@@ -50,11 +50,15 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
    - Sign in as the sender mailbox and grant `mail.google.com`.
 6. **QuickBooks Online (vendor sync):**
    - Create an app in the [Intuit Developer](https://developer.intuit.com/) portal with accounting scope `com.intuit.quickbooks.accounting` only (no OpenID / payments scopes).
-   - Register redirect URI `{BASE_URL}index.php?page=qbo-callback` (or your `QBO_REDIRECT_URI`).
-   - Set `QBO_TOKEN_ENCRYPTION_KEY` in `config.php` / env (random long secret) so client secrets and refresh tokens are encrypted at rest.
-   - In the app: Admin → Settings → **QuickBooks Online** — Environment, Client ID, Client Secret → Save credentials → **Connect to QuickBooks** (user completes Intuit UI in browser; app does not automate merchant authorization).
-   - Stores company `realmId` + encrypted refresh token per org (`org_qbo_connections`). Does **not** request/store Intuit user IDs. Access tokens stay in process memory only.
-   - Data → **Sync with QBO** → date range (max 24 months) → select accounts → import.
+   - In `config.php` (or env) set:
+     - `QBO_CLIENT_ID` / `QBO_CLIENT_SECRET` — your single Intuit developer app
+     - `QBO_ENVIRONMENT` — `production` or `sandbox`
+     - `QBO_REDIRECT_URI` — optional; default `{BASE_URL}index.php?page=qbo-callback`
+     - `QBO_TOKEN_ENCRYPTION_KEY` — random secret for encrypting refresh tokens at rest
+   - Register the redirect URI on the Intuit app.
+   - Admin → Settings → **Connect to QuickBooks** (each customer company authorizes once). App Client ID/Secret are not entered in the UI.
+   - Per org: company `realmId` + encrypted refresh token. No Intuit user IDs. Access tokens: process memory only.
+   - Data → **Sync with QBO** → date range → select accounts → import.
 7. **GoHighLevel (reminders):**
    - Set `GHL_API_KEY` (Private Integration Token with Contacts + Conversations scopes).
    - Set `GHL_LOCATION_ID` to the **same location** used by Scorecard Pro.
@@ -71,7 +75,7 @@ Do not commit production secrets. Prefer environment variables for passwords and
 |-------------|----------------|
 | App does not automate merchant application authorization UI | OAuth is a full browser redirect to Intuit; no automated form fill of merchant UI. |
 | App does not request/store user’s Intuit ID | Scope is accounting only (no OpenID). Identity claims are dropped; only company `realmId` is kept for API context. |
-| App encrypts access tokens before storing | Access tokens are never stored. Client secret + refresh tokens are AES-256-GCM encrypted (`QBO_TOKEN_ENCRYPTION_KEY`). |
+| App encrypts access tokens before storing | Access tokens are never stored. Refresh tokens are AES-256-GCM encrypted (`QBO_TOKEN_ENCRYPTION_KEY`). App secret stays in config/env. |
 | App stores access tokens in volatile memory only | Access tokens held in process memory (`QboService` static cache) for the request lifecycle, then discarded. |
 
 ## Requirements

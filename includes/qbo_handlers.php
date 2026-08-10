@@ -26,7 +26,10 @@ function csQboConnect(): void
     try {
         $pdo = getDBConnection();
         $svc = new QboService($pdo);
-        $started = $svc->beginOAuth((int) $_SESSION['org_id']);
+        $started = $svc->beginOAuth(
+            (int) $_SESSION['org_id'],
+            (int) ($_SESSION['user_id'] ?? 0)
+        );
         header('Location: ' . $started['auth_url']);
         exit;
     } catch (Throwable $e) {
