@@ -1285,7 +1285,12 @@ function handlePreviewQboSync(): void
         }
         $rows = $svc->fetchTransactionRows((int) $_SESSION['org_id'], $startDate, $endDate);
         if (count($rows) === 0) {
-            echo json_encode(['success' => false, 'error' => 'No transactions found for the selected date range']);
+            echo json_encode([
+                'success' => false,
+                'error' => 'No transactions found for the selected date range. '
+                    . 'Confirm the company has activity in that period, try a wider range, '
+                    . 'and match QBO_ENVIRONMENT (sandbox vs production) to the books you connected.',
+            ]);
             exit;
         }
         $accounts = QboService::listAccountsFromRows($rows);

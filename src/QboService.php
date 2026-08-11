@@ -410,29 +410,129 @@ class QboService
     {
         $this->assertValidDateRange($startDate, $endDate);
         $conn = $this->getConnection($orgId);
-        if ($conn === null || empty($conn['realm_id'])) {
+        if (empty($conn['realm_id'])) {
             throw new \RuntimeException('QuickBooks is not connected.');
         }
         $tokens = $this->ensureAccessToken($orgId);
         $apiBase = $conn['environment'] === self::ENV_SANDBOX
             ? 'https://sandbox-quickbooks.api.intuit.com'
             : 'https://quickbooks.api.intuit.com';
-
-        $query = http_build_query([
-            'start_date' => $startDate,
-            'end_date' => $endDate,
-            'columns' => 'tx_date,txn_type,name,memo,account_name,nat_amount',
-        ], '', '&', PHP_QUERY_RFC3986);
-
-        $url = $apiBase . '/v3/company/' . rawurlencode((string) $conn['realm_id'])
-            . '/reports/TransactionList?' . $query;
-
-        $report = $this->httpJson('GET', $url, [
+        $realm = rawurlencode((string) $conn['realm_id']);
+        $authHeaders = [
             'Authorization: Bearer ' . $tokens['access_token'],
             'Accept: application/json',
-        ]);
+        ];
 
-        return $this->mapReportToRawRows(is_array($report) ? $report : []);
+        // Prefer API default columns — custom column lists often yield empty/mismatched reports.
+        $attempts = [
+            [
+                'path' => 'TransactionList',
+                'query' => [
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
+                    'minorversion' => '65',
+                ],
+            ],
+            [
+                'path' => 'TransactionList',
+                'query' => [
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
+                    'accounting_method' => 'Cash',
+                    'minorversion' => '65',
+                ],
+            ],
+            [
+                'path' => 'TransactionList',
+                'query' => [
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
+                    'accounting_method' => 'Accrual',
+                    'minorversion' => '65',
+                ],
+            ],
+            [
+                'path' => 'TransactionList',
+                'query' => [
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
+                    'columns' => 'tx_date,txn_type,name,memo,account_name,nat_amount',
+                    'minorversion' => '65',
+                ],
+            ],
+            [
+                'path' => 'TransactionListByVendor',
+                'query' => [
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
+                    'minorversion' => '65',
+                ],
+            ],
+        ];
+
+        $lastError = null;
+        $bestRows = [];
+        foreach ($attempts as $attempt) {
+            try {
+                $qs = http_build_query($attempt['query'], '', '&', PHP_QUERY_RFC3986);
+                $url = $apiBase . '/v3/company/' . $realm . '/reports/' . $attempt['path'] . '?' . $qs;
+                $report = $this->httpJson('GET', $url, $authHeaders);
+                if (!is_array($report)) {
+                    continue;
+                }
+                if ($this->reportHasNoData($report)) {
+                    continue;
+                }
+                $rows = $this->mapReportToRawRows($report);
+                if (count($rows) > count($bestRows)) {
+                    $bestRows = $rows;
+                }
+                if (count($bestRows) > 0) {
+                    return $bestRows;
+                }
+            } catch (\Throwable $e) {
+                $lastError = $e;
+                error_log('QboService report ' . $attempt['path'] . ': ' . $e->getMessage());
+            }
+        }
+
+        if (count($bestRows) > 0) {
+            return $bestRows;
+        }
+        if ($lastError !== null) {
+            throw new \RuntimeException(
+                'Could not read QuickBooks transactions: ' . $lastError->getMessage()
+            );
+        }
+
+        return [];
+    }
+
+    /**
+     * @param array<string, mixed> $report
+     */
+    private function reportHasNoData(array $report): bool
+    {
+        $options = $report['Header']['Option'] ?? null;
+        if (!is_array($options)) {
+            return false;
+        }
+        // Single Option object vs list
+        if (isset($options['Name'])) {
+            $options = [$options];
+        }
+        foreach ($options as $opt) {
+            if (!is_array($opt)) {
+                continue;
+            }
+            if (strtolower((string) ($opt['Name'] ?? '')) === 'noreportdata'
+                && strtolower((string) ($opt['Value'] ?? '')) === 'true'
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -909,7 +1009,7 @@ class QboService
     {
         $colKeys = $this->extractColumnKeys($report);
         $rows = [];
-        $this->walkReportRows($report['Rows']['Row'] ?? [], $colKeys, $rows);
+        $this->walkReportRows($report['Rows']['Row'] ?? [], $colKeys, $rows, '');
 
         return $rows;
     }
@@ -925,6 +1025,34 @@ class QboService
         if (!is_array($columns)) {
             return $map;
         }
+        // Single Column object
+        if (isset($columns['ColTitle']) || isset($columns['MetaData'])) {
+            $columns = [$columns];
+        }
+
+        $titleMap = [
+            'date' => 'tx_date',
+            'transaction date' => 'tx_date',
+            'transaction type' => 'txn_type',
+            'type' => 'txn_type',
+            'name' => 'name',
+            'vendor' => 'name',
+            'customer' => 'name',
+            'payee' => 'name',
+            'memo/description' => 'memo',
+            'memo' => 'memo',
+            'description' => 'memo',
+            'account' => 'account_name',
+            'account full name' => 'account_name',
+            'split' => 'account_name',
+            'amount' => 'nat_amount',
+            'natural amount' => 'nat_amount',
+            'open balance' => 'nat_amount',
+            'subt_nat_amount' => 'nat_amount',
+            'debt_amt' => 'debt_amt',
+            'credit_amt' => 'credit_amt',
+        ];
+
         foreach ($columns as $idx => $col) {
             if (!is_array($col)) {
                 continue;
@@ -932,7 +1060,13 @@ class QboService
             $key = null;
             $meta = $col['MetaData'] ?? [];
             if (is_array($meta)) {
-                foreach ($meta as $m) {
+                // Single MetaData vs list
+                if (isset($meta['Name'])) {
+                    $metaList = [$meta];
+                } else {
+                    $metaList = $meta;
+                }
+                foreach ($metaList as $m) {
                     if (!is_array($m)) {
                         continue;
                     }
@@ -944,20 +1078,38 @@ class QboService
             }
             if ($key === null || $key === '') {
                 $title = strtolower(trim((string) ($col['ColTitle'] ?? '')));
-                $titleMap = [
-                    'date' => 'tx_date',
-                    'transaction type' => 'txn_type',
-                    'name' => 'name',
-                    'memo/description' => 'memo',
-                    'memo' => 'memo',
-                    'account' => 'account_name',
-                    'amount' => 'nat_amount',
-                ];
                 $key = $titleMap[$title] ?? $title;
+            } else {
+                // Normalize known ColKey aliases to our internal keys
+                if (in_array($key, ['subt_nat_amount', 'debt_amt', 'credit_amt', 'amount'], true)) {
+                    // keep subt_nat_amount / debt / credit as aliases readable in get()
+                }
+                if ($key === 'subt_nat_amount') {
+                    // also expose as nat_amount if not set
+                }
             }
             if ($key !== '') {
                 $map[$key] = (int) $idx;
             }
+        }
+
+        // Alias common amount keys so mapDataRow can find them
+        if (!isset($map['nat_amount'])) {
+            foreach (['subt_nat_amount', 'amount', 'debt_amt'] as $alt) {
+                if (isset($map[$alt])) {
+                    $map['nat_amount'] = $map[$alt];
+                    break;
+                }
+            }
+        }
+        if (!isset($map['account_name']) && isset($map['split'])) {
+            $map['account_name'] = $map['split'];
+        }
+        if (!isset($map['tx_date']) && isset($map['date'])) {
+            $map['tx_date'] = $map['date'];
+        }
+        if (!isset($map['txn_type']) && isset($map['type'])) {
+            $map['txn_type'] = $map['type'];
         }
 
         return $map;
@@ -968,7 +1120,7 @@ class QboService
      * @param array<string, int> $colKeys
      * @param array<int, array{vendor_name:string,transaction_date:string,amount:float,transaction_type:string,account:string,memo:string}> $out
      */
-    private function walkReportRows($nodes, array $colKeys, array &$out): void
+    private function walkReportRows($nodes, array $colKeys, array &$out, string $sectionVendor = ''): void
     {
         if (!is_array($nodes)) {
             return;
@@ -982,11 +1134,27 @@ class QboService
             if (!is_array($node)) {
                 continue;
             }
-            if (isset($node['Rows']['Row'])) {
-                $this->walkReportRows($node['Rows']['Row'], $colKeys, $out);
+
+            $localVendor = $sectionVendor;
+            // TransactionListByVendor: vendor name is on the section header
+            if (isset($node['Header']['ColData']) && is_array($node['Header']['ColData'])) {
+                $headerVal = $this->firstColDataValue($node['Header']['ColData']);
+                if ($headerVal !== '' && stripos($headerVal, 'total for') !== 0) {
+                    $localVendor = $headerVal;
+                }
             }
-            if (($node['type'] ?? '') === 'Data' || isset($node['ColData'])) {
-                $mapped = $this->mapDataRow($node['ColData'] ?? [], $colKeys);
+
+            if (isset($node['Rows']['Row'])) {
+                $this->walkReportRows($node['Rows']['Row'], $colKeys, $out, $localVendor);
+            }
+
+            $type = (string) ($node['type'] ?? '');
+            // Skip section/summary headers; only map real data lines (or ColData without type).
+            if ($type === 'Section' || $type === 'section') {
+                continue;
+            }
+            if ($type === 'Data' || $type === 'data' || ($type === '' && isset($node['ColData']))) {
+                $mapped = $this->mapDataRow($node['ColData'] ?? [], $colKeys, $localVendor);
                 if ($mapped !== null) {
                     $out[] = $mapped;
                 }
@@ -996,14 +1164,35 @@ class QboService
 
     /**
      * @param mixed $colData
+     */
+    private function firstColDataValue($colData): string
+    {
+        if (!is_array($colData) || count($colData) === 0) {
+            return '';
+        }
+        $first = $colData[0] ?? reset($colData);
+        if (is_array($first)) {
+            return trim((string) ($first['value'] ?? ''));
+        }
+
+        return trim((string) $first);
+    }
+
+    /**
+     * @param mixed $colData
      * @param array<string, int> $colKeys
      * @return array{vendor_name:string,transaction_date:string,amount:float,transaction_type:string,account:string,memo:string}|null
      */
-    private function mapDataRow($colData, array $colKeys): ?array
+    private function mapDataRow($colData, array $colKeys, string $sectionVendor = ''): ?array
     {
         if (!is_array($colData)) {
             return null;
         }
+        // Single ColData cell object
+        if (isset($colData['value']) && !isset($colData[0])) {
+            $colData = [$colData];
+        }
+
         $values = [];
         foreach ($colData as $i => $cell) {
             if (is_array($cell)) {
@@ -1011,6 +1200,18 @@ class QboService
             } else {
                 $values[$i] = trim((string) $cell);
             }
+        }
+
+        // If columns metadata missing, fall back to common TransactionList column order
+        if (count($colKeys) === 0 && count($values) >= 5) {
+            $colKeys = [
+                'tx_date' => 0,
+                'txn_type' => 1,
+                'name' => min(4, count($values) - 1),
+                'memo' => min(5, count($values) - 1),
+                'account_name' => min(6, count($values) - 1),
+                'nat_amount' => count($values) - 1,
+            ];
         }
 
         $get = static function (string $key) use ($colKeys, $values): string {
@@ -1024,10 +1225,26 @@ class QboService
 
         $vendor = $get('name');
         if ($vendor === '') {
-            return null;
+            $vendor = $sectionVendor;
+        }
+        if ($vendor === '' || stripos($vendor, 'total for') === 0) {
+            // Keep bank/fee lines that still have amount+date; label for review
+            $vendor = $get('memo');
+        }
+        if ($vendor === '' || stripos($vendor, 'total for') === 0) {
+            $vendor = '(Unnamed)';
         }
 
         $dateRaw = $get('tx_date');
+        if ($dateRaw === '') {
+            // Heuristic: first cell that looks like a date
+            foreach ($values as $v) {
+                if (CsvImport::parseDate($v) !== null || preg_match('/^\d{4}-\d{2}-\d{2}/', $v)) {
+                    $dateRaw = $v;
+                    break;
+                }
+            }
+        }
         $date = CsvImport::parseDate($dateRaw);
         if ($date === null && preg_match('/^\d{4}-\d{2}-\d{2}/', $dateRaw)) {
             $date = substr($dateRaw, 0, 10);
@@ -1038,11 +1255,39 @@ class QboService
 
         $amountRaw = $get('nat_amount');
         if ($amountRaw === '') {
+            $amountRaw = $get('subt_nat_amount');
+        }
+        if ($amountRaw === '') {
             $amountRaw = $get('amount');
         }
+        if ($amountRaw === '') {
+            $debt = $get('debt_amt');
+            $credit = $get('credit_amt');
+            if ($debt !== '') {
+                $amountRaw = $debt;
+            } elseif ($credit !== '') {
+                $amountRaw = $credit;
+            }
+        }
+        if ($amountRaw === '') {
+            // Last non-empty cell that parses as money
+            for ($i = count($values) - 1; $i >= 0; $i--) {
+                $try = CsvImport::parseAmount($values[$i]);
+                if ($try !== null && $values[$i] !== $dateRaw) {
+                    $amountRaw = $values[$i];
+                    break;
+                }
+            }
+        }
+
         $amount = CsvImport::parseAmount($amountRaw);
-        if ($amount === null) {
+        if ($amount === null || abs((float) $amount) < 0.00001) {
             return null;
+        }
+
+        $account = $get('account_name');
+        if ($account === '') {
+            $account = $get('account');
         }
 
         return [
@@ -1050,7 +1295,7 @@ class QboService
             'transaction_date' => $date,
             'amount' => abs((float) $amount),
             'transaction_type' => $get('txn_type'),
-            'account' => $get('account_name'),
+            'account' => $account,
             'memo' => $get('memo'),
         ];
     }
