@@ -4046,6 +4046,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             showSnackbar('<?php echo addslashes(htmlspecialchars($_SESSION['message'])); ?>', 'success');
             <?php unset($_SESSION['message']); ?>
         <?php endif; ?>
+        <?php if (isset($_GET['qbo']) && $_GET['qbo'] === 'connected'): ?>
+            showSnackbar('QuickBooks Online connected successfully. Sign in if needed, then use Data → Sync with QBO.', 'success');
+        <?php endif; ?>
     });
     </script>
 

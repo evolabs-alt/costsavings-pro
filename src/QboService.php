@@ -208,6 +208,8 @@ class QboService
         $state = bin2hex(random_bytes(24));
         $_SESSION['qbo_oauth_state'] = $state;
         $_SESSION['qbo_oauth_org_id'] = $orgId;
+        // Durable pending OAuth (Intuit return often drops PHP session cookies).
+        self::storeOAuthPending($state, $orgId, $userId);
 
         $params = http_build_query([
             'client_id' => $app['client_id'],
@@ -225,15 +227,27 @@ class QboService
 
     public function handleCallback(string $code, string $realmId, string $state): void
     {
-        $expectedState = (string) ($_SESSION['qbo_oauth_state'] ?? '');
-        $orgId = (int) ($_SESSION['qbo_oauth_org_id'] ?? 0);
+        $sessionState = (string) ($_SESSION['qbo_oauth_state'] ?? '');
+        $sessionOrgId = (int) ($_SESSION['qbo_oauth_org_id'] ?? 0);
         unset($_SESSION['qbo_oauth_state'], $_SESSION['qbo_oauth_org_id']);
 
-        if ($expectedState === '' || !hash_equals($expectedState, $state)) {
-            throw new \RuntimeException('Invalid OAuth state. Start Connect to QuickBooks again.');
+        $pending = self::consumeOAuthPending($state);
+        $orgId = 0;
+        $userId = (int) ($_SESSION['user_id'] ?? 0);
+
+        if (is_array($pending)) {
+            $orgId = (int) ($pending['org_id'] ?? 0);
+            if ($userId <= 0) {
+                $userId = (int) ($pending['user_id'] ?? 0);
+            }
+        } elseif ($sessionState !== '' && hash_equals($sessionState, $state) && $sessionOrgId > 0) {
+            $orgId = $sessionOrgId;
+        } else {
+            throw new \RuntimeException('Invalid or expired OAuth state. Sign in, then use Connect to QuickBooks again.');
         }
+
         if ($orgId <= 0) {
-            throw new \RuntimeException('OAuth session expired. Start Connect to QuickBooks again.');
+            throw new \RuntimeException('OAuth session expired. Sign in, then use Connect to QuickBooks again.');
         }
         if ($code === '' || $realmId === '') {
             throw new \RuntimeException('Missing authorization code or company id (realmId).');
@@ -243,7 +257,6 @@ class QboService
         }
 
         $app = self::appCredentials();
-        $userId = (int) ($_SESSION['user_id'] ?? 0);
         $this->ensureOrgRow($orgId, $userId > 0 ? $userId : 0);
 
         $tokenPayload = $this->exchangeAuthorizationCode(
@@ -280,6 +293,67 @@ class QboService
             $userId > 0 ? $userId : null,
             $orgId,
         ]);
+    }
+
+    /**
+     * Persist OAuth CSRF/org binding outside PHP session (survives Intuit redirect).
+     */
+    public static function storeOAuthPending(string $state, int $orgId, int $userId): void
+    {
+        if (!preg_match('/^[a-f0-9]{32,64}$/', $state) || $orgId <= 0 || !defined('CACHE_DIR')) {
+            return;
+        }
+        $dir = rtrim((string) CACHE_DIR, '/\\') . DIRECTORY_SEPARATOR;
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            error_log('QboService: cannot write OAuth pending cache');
+            return;
+        }
+        $path = $dir . 'qbo_oauth_' . $state . '.json';
+        $payload = json_encode([
+            'org_id' => $orgId,
+            'user_id' => $userId,
+            'created_at' => time(),
+        ]);
+        if ($payload !== false) {
+            @file_put_contents($path, $payload, LOCK_EX);
+        }
+    }
+
+    /**
+     * @return array{org_id:int,user_id:int}|null
+     */
+    public static function consumeOAuthPending(string $state): ?array
+    {
+        if (!preg_match('/^[a-f0-9]{32,64}$/', $state) || !defined('CACHE_DIR')) {
+            return null;
+        }
+        $path = rtrim((string) CACHE_DIR, '/\\') . DIRECTORY_SEPARATOR . 'qbo_oauth_' . $state . '.json';
+        if (!is_file($path)) {
+            return null;
+        }
+        $raw = @file_get_contents($path);
+        @unlink($path);
+        if ($raw === false) {
+            return null;
+        }
+        $data = json_decode($raw, true);
+        if (!is_array($data)) {
+            return null;
+        }
+        $created = (int) ($data['created_at'] ?? 0);
+        // 30 minutes; Intuit auth codes are short-lived.
+        if ($created <= 0 || (time() - $created) > 1800) {
+            return null;
+        }
+        $orgId = (int) ($data['org_id'] ?? 0);
+        if ($orgId <= 0) {
+            return null;
+        }
+
+        return [
+            'org_id' => $orgId,
+            'user_id' => (int) ($data['user_id'] ?? 0),
+        ];
     }
 
     /**
