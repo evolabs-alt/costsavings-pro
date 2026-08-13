@@ -40,6 +40,10 @@ final class ColumnHelp
                 'title' => 'Category',
                 'html' => '<p class="column-help-intro">Optional grouping label for this vendor row. Categories belong to the current project. Choose an existing category from the dropdown or create a new one on the fly. Use the filter and sort icons to focus on specific categories or uncategorized rows.</p>',
             ],
+            'account' => [
+                'title' => 'Account',
+                'html' => '<p class="column-help-intro">The imported QuickBooks / CSV GL account for this vendor. When a vendor has activity in more than one account, the most common account is shown. This value is set by import (not edited in the grid). Use filter and sort to focus on specific accounts.</p>',
+            ],
             'vendor' => [
                 'title' => 'Vendor',
                 'html' => '<p class="column-help-intro">The vendor or subscription name for this spend line. Administrators edit this field; members can view only. Use the filter icon to search by name (case-insensitive). Use the sort icon to order alphabetically. The list icon on a row opens imported raw transaction history for that vendor.</p>',

@@ -503,6 +503,7 @@ function migrateCostCalculatorSchema(PDO $pdo) {
     migrateProjectCategoriesSchema($pdo);
     migrateVendorDetailSchema($pdo);
     migrateVendorRawTransactionSchema($pdo);
+    migrateCostCalculatorAccountSchema($pdo);
     migrateVendorChatSchema($pdo);
     migrateVendorChatEditSchema($pdo);
     migrateVendorChatReadStateSchema($pdo);
@@ -536,6 +537,113 @@ function migrateProjectCategoriesSchema(PDO $pdo): void
         }
     } catch (PDOException $e) {
         error_log('migrateProjectCategoriesSchema: ' . $e->getMessage());
+    }
+}
+
+/**
+ * GL account on vendor grid rows (most common imported account per payee).
+ *
+ * @param PDO $pdo
+ */
+function migrateCostCalculatorAccountSchema(PDO $pdo): void
+{
+    try {
+        $st = $pdo->query("SHOW COLUMNS FROM `cost_calculator_items` LIKE 'account'");
+        $added = !$st->fetch();
+        if ($added) {
+            $pdo->exec('ALTER TABLE `cost_calculator_items` ADD COLUMN `account` VARCHAR(255) NULL AFTER `category_id`');
+        }
+        try {
+            $pdo->exec('CREATE INDEX `idx_cc_account` ON `cost_calculator_items` (`account`(191))');
+        } catch (PDOException $e) {
+            // ignore duplicate index attempts
+        }
+        if ($added) {
+            backfillCostCalculatorAccountsFromRaw($pdo);
+        }
+    } catch (PDOException $e) {
+        error_log('migrateCostCalculatorAccountSchema: ' . $e->getMessage());
+    }
+}
+
+/**
+ * One-time: set cost_calculator_items.account from most common vendor_raw_transactions.account.
+ *
+ * @param PDO $pdo
+ */
+function backfillCostCalculatorAccountsFromRaw(PDO $pdo): void
+{
+    try {
+        $rawSt = $pdo->query(
+            "SELECT org_id, project_id, vendor_name_normalized, account
+             FROM vendor_raw_transactions
+             WHERE account IS NOT NULL AND TRIM(account) <> '' AND TRIM(account) <> '(No account)'"
+        );
+        if (!$rawSt) {
+            return;
+        }
+        /** @var array<string, array<string, int>> $countsByKey */
+        $countsByKey = [];
+        while ($row = $rawSt->fetch(PDO::FETCH_ASSOC)) {
+            $orgId = (int) ($row['org_id'] ?? 0);
+            $projectId = $row['project_id'] === null || $row['project_id'] === ''
+                ? 'null'
+                : (string) (int) $row['project_id'];
+            $norm = (string) ($row['vendor_name_normalized'] ?? '');
+            $acct = trim((string) ($row['account'] ?? ''));
+            if ($orgId <= 0 || $norm === '' || $acct === '') {
+                continue;
+            }
+            $key = $orgId . '|' . $projectId . '|' . $norm;
+            if (!isset($countsByKey[$key])) {
+                $countsByKey[$key] = [];
+            }
+            if (!isset($countsByKey[$key][$acct])) {
+                $countsByKey[$key][$acct] = 0;
+            }
+            $countsByKey[$key][$acct]++;
+        }
+
+        $pick = static function (array $counts): string {
+            if (count($counts) === 0) {
+                return '';
+            }
+            uksort($counts, static function ($a, $b) use ($counts) {
+                $cmp = $counts[$b] <=> $counts[$a];
+                if ($cmp !== 0) {
+                    return $cmp;
+                }
+
+                return strcasecmp((string) $a, (string) $b);
+            });
+
+            return (string) array_key_first($counts);
+        };
+
+        $upd = $pdo->prepare(
+            'UPDATE cost_calculator_items
+             SET account = ?
+             WHERE org_id = ?
+               AND ((? IS NULL AND project_id IS NULL) OR project_id = ?)
+               AND LOWER(TRIM(vendor_name)) = ?
+               AND (account IS NULL OR account = \'\')'
+        );
+        foreach ($countsByKey as $key => $counts) {
+            $account = $pick($counts);
+            if ($account === '') {
+                continue;
+            }
+            $parts = explode('|', $key, 3);
+            if (count($parts) !== 3) {
+                continue;
+            }
+            $orgId = (int) $parts[0];
+            $projectId = $parts[1] === 'null' ? null : (int) $parts[1];
+            $norm = $parts[2];
+            $upd->execute([$account, $orgId, $projectId, $projectId, $norm]);
+        }
+    } catch (Throwable $e) {
+        error_log('backfillCostCalculatorAccountsFromRaw: ' . $e->getMessage());
     }
 }
 

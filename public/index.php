@@ -577,6 +577,23 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .cost-calculator-grid .category-col {
             min-width: 120px;
             max-width: 140px;
+            display: none;
+        }
+
+        .cost-calculator-grid .account-col {
+            min-width: 130px;
+            max-width: 180px;
+        }
+
+        .cost-calculator-grid .account-col .account-display {
+            display: block;
+            font-size: 13px;
+            line-height: 1.3;
+            color: #374151;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 170px;
         }
 
         .cost-calculator-grid .category-col select {
@@ -1536,8 +1553,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
             .cost-calculator-grid .manager-col,
             .cost-calculator-grid .category-col,
+            .cost-calculator-grid .account-col,
             .cost-calculator-grid .visibility-col {
                 min-width: 85px;
+            }
+
+            .cost-calculator-grid .category-col {
+                display: none;
+            }
+
+            .cost-calculator-grid .account-col .account-display {
+                font-size: 11px;
+                max-width: 110px;
             }
 
             .cost-calculator-grid .row-status {
@@ -4203,6 +4230,26 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     </div>
                                 </div>
                             </th>
+                            <th class="account-col th-with-filter th-sortable" data-vendor-sort-col="account">
+                                <div class="th-with-filter-inner">
+                                    <span class="th-label-with-info">
+                                        <span class="th-with-filter-caption">Account</span>
+                                        <button type="button" class="th-info-btn" data-column-help="account" aria-label="About account" title="About account">&#9432;</button>
+                                    </span>
+                                    <button type="button" class="vendor-col-sort-btn vendor-col-sort-btn--icon" data-vendor-sort="account" aria-label="Sort by account" title="Sort by account">
+                                        <span class="material-symbols-outlined vendor-col-sort-icon" aria-hidden="true">swap_vert</span>
+                                    </button>
+                                    <button type="button" class="vendor-col-filter-btn" data-vendor-filter="account" title="Filter by account" aria-label="Filter by account" aria-haspopup="true" aria-expanded="false">
+                                        <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
+                                    </button>
+                                    <div class="vendor-col-filter-dropdown" data-vendor-filter="account" hidden>
+                                        <div class="vendor-col-filter-list"></div>
+                                        <div class="vendor-col-filter-actions">
+                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="account">Clear</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </th>
                             <th class="vendor-name th-with-filter th-sortable" data-vendor-sort-col="vendor">
                                 <div class="th-with-filter-inner">
                                     <span class="th-label-with-info">
@@ -6127,14 +6174,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             let vendorPageSize = 20;
             let vendorCurrentPage = 1;
 
-            const VENDOR_SORTABLE_COLS = ['vendor', 'category', 'annual_cost', 'manager', 'visibility', 'status'];
+            const VENDOR_SORTABLE_COLS = ['vendor', 'category', 'account', 'annual_cost', 'manager', 'visibility', 'status'];
             let vendorSortColumn = null;
             let vendorSortDirection = 'asc';
 
-            const VENDOR_FILTER_COLS = ['frequency', 'category', 'manager', 'visibility', 'status', 'chat_unread'];
+            const VENDOR_FILTER_COLS = ['frequency', 'category', 'account', 'manager', 'visibility', 'status', 'chat_unread'];
             let vendorColumnFilters = {
                 frequency: new Set(),
                 category: new Set(),
+                account: new Set(),
                 manager: new Set(),
                 visibility: new Set(),
                 status: new Set(),
@@ -6572,6 +6620,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             ${categoryOptionsHtml('')}
                         </select>
                     </td>
+                    <td class="account-col">
+                        <span class="account-display" data-account="" title=""></span>
+                    </td>
                     <td class="vendor-name">
                         <input type="hidden" class="row-db-id" value="" />
                         <div class="vendor-cell-wrap">
@@ -6868,6 +6919,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     const opt = catSel.options[catSel.selectedIndex];
                     return { isUnassigned: false, text: (opt ? opt.text : '').trim().toLowerCase() };
                 }
+                if (col === 'account') {
+                    const acctEl = row.querySelector('.account-display');
+                    const acctVal = acctEl
+                        ? String(acctEl.getAttribute('data-account') || acctEl.textContent || '').trim()
+                        : '';
+                    if (!acctVal) {
+                        return { isUnassigned: true, text: '' };
+                    }
+                    return { isUnassigned: false, text: acctVal.toLowerCase() };
+                }
                 if (col === 'visibility') {
                     const visSel = row.querySelector('.visibility-select');
                     const opt = visSel ? visSel.options[visSel.selectedIndex] : null;
@@ -6889,7 +6950,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
                 if (col === 'annual_cost') {
                     cmp = va - vb;
-                } else if (col === 'manager' || col === 'category') {
+                } else if (col === 'manager' || col === 'category' || col === 'account') {
                     if (va.isUnassigned && !vb.isUnassigned) cmp = 1;
                     else if (!va.isUnassigned && vb.isUnassigned) cmp = -1;
                     else cmp = va.text.localeCompare(vb.text);
@@ -7067,6 +7128,25 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 return (cat === '' || cat === '__new__') ? '__none__' : cat;
             }
 
+            function getRowAccountFilterKey(row) {
+                const acctEl = row.querySelector('.account-display');
+                const acct = acctEl
+                    ? String(acctEl.getAttribute('data-account') || acctEl.textContent || '').trim()
+                    : '';
+                return acct === '' ? '__none__' : acct;
+            }
+
+            function setRowAccountDisplay(row, accountValue) {
+                const acctEl = row.querySelector('.account-display');
+                if (!acctEl) return;
+                const acct = accountValue && String(accountValue).trim() !== '(No account)'
+                    ? String(accountValue).trim()
+                    : '';
+                acctEl.setAttribute('data-account', acct);
+                acctEl.textContent = acct;
+                acctEl.title = acct;
+            }
+
             function rowMatchesColumnFilters(row) {
                 if (vendorNameSearchQuery) {
                     const vendorInput = row.querySelector('input[name="vendor[]"]');
@@ -7078,6 +7158,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
                 if (vendorColumnFilters.category.size) {
                     if (!vendorColumnFilters.category.has(getRowCategoryFilterKey(row))) return false;
+                }
+                if (vendorColumnFilters.account.size) {
+                    if (!vendorColumnFilters.account.has(getRowAccountFilterKey(row))) return false;
                 }
                 if (vendorColumnFilters.manager.size) {
                     if (!vendorColumnFilters.manager.has(getRowManagerFilterKey(row))) return false;
@@ -7202,6 +7285,23 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     opts.push({ value: '__none__', label: 'Uncategorized' });
                     (PROJECT_CATEGORIES || []).forEach(function(c) {
                         opts.push({ value: String(c.id), label: String(c.name || '').replace(/</g, '') });
+                    });
+                } else if (col === 'account') {
+                    opts.push({ value: '__none__', label: 'No account' });
+                    const seen = {};
+                    const tbody = document.getElementById('calculatorRows');
+                    if (tbody) {
+                        tbody.querySelectorAll('tr').forEach(function(row) {
+                            const key = getRowAccountFilterKey(row);
+                            if (key === '__none__' || seen[key]) return;
+                            seen[key] = true;
+                            opts.push({ value: key, label: key.replace(/</g, '') });
+                        });
+                    }
+                    opts.sort(function(a, b) {
+                        if (a.value === '__none__') return -1;
+                        if (b.value === '__none__') return 1;
+                        return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' });
                     });
                 } else if (col === 'visibility') {
                     opts.push({ value: 'public', label: 'Public' });
@@ -7609,6 +7709,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                         if (cid) cat.value = cid;
                                         cat.setAttribute('data-prev-category', cid);
                                     }
+                                    setRowAccountDisplay(lastRow, item.account || '');
                                     if (vis) vis.value = (item.visibility === 'confidential') ? 'confidential' : 'public';
                                     if (dl && item.cancellation_deadline) {
                                         const d = String(item.cancellation_deadline).substring(0, 10);

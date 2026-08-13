@@ -253,6 +253,8 @@ class VendorService
                 ? (int) $row['category_id'] : null,
             'category_name' => isset($row['category_name']) && $row['category_name'] !== null && $row['category_name'] !== ''
                 ? (string) $row['category_name'] : null,
+            'account' => isset($row['account']) && $row['account'] !== null && trim((string) $row['account']) !== ''
+                ? trim((string) $row['account']) : null,
             'cancellation_deadline' => $row['cancellation_deadline'] ?? null,
             'last_payment_date' => $row['last_payment_date'] ?? null,
         ];
@@ -607,8 +609,8 @@ class VendorService
     {
         $email = self::getUserEmail($pdo, $userId);
         $ins = $pdo->prepare(
-            'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+            'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date, account)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         $n = 0;
         try {
@@ -632,6 +634,10 @@ class VendorService
                 }
                 $deadline = self::normDate($item['cancellation_deadline'] ?? null);
                 $lastPay = self::normDate($item['last_payment_date'] ?? null);
+                $account = trim((string) ($item['account'] ?? ''));
+                if ($account === '(No account)') {
+                    $account = '';
+                }
                 $ins->execute([
                     $orgId,
                     $projectId,
@@ -649,6 +655,7 @@ class VendorService
                     $purpose,
                     $deadline,
                     $lastPay,
+                    $account !== '' ? $account : null,
                 ]);
                 ++$n;
             }

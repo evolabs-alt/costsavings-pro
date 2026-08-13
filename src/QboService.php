@@ -658,6 +658,7 @@ class QboService
             $payeeRows[$vendor][] = [
                 'date' => $row['transaction_date'],
                 'amount' => $row['amount'],
+                'account' => $row['account'] ?? '',
             ];
         }
 

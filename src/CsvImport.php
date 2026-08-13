@@ -113,7 +113,11 @@ class CsvImport
             if (!isset($payeeRows[$payee])) {
                 $payeeRows[$payee] = [];
             }
-            $payeeRows[$payee][] = ['date' => $txn['date'], 'amount' => $txn['amount']];
+            $payeeRows[$payee][] = [
+                'date' => $txn['date'],
+                'amount' => $txn['amount'],
+                'account' => $txn['account'],
+            ];
             $rawRows[] = [
                 'vendor_name' => $payee,
                 'transaction_date' => $txn['date'],
@@ -320,7 +324,12 @@ class CsvImport
             if ($amt === null) {
                 continue;
             }
-            $rows[] = ['date' => $dt, 'amount' => abs($amt)];
+            $account = self::csvField(
+                $parsed,
+                $headerMap,
+                ['account', 'account name']
+            );
+            $rows[] = ['date' => $dt, 'amount' => abs($amt), 'account' => $account];
             $rawRows[] = [
                 'vendor_name' => $currentVendor,
                 'transaction_date' => $dt,
@@ -330,11 +339,7 @@ class CsvImport
                     $headerMap,
                     ['transaction type', 'type']
                 ),
-                'account' => self::csvField(
-                    $parsed,
-                    $headerMap,
-                    ['account', 'account name']
-                ),
+                'account' => $account,
                 'memo' => self::csvField(
                     $parsed,
                     $headerMap,
@@ -394,6 +399,43 @@ class CsvImport
      * @param array<int, array{date:string, amount:float}> $rows
      * @return array{vendor_name:string,cost_per_period:float,frequency:string,annual_cost:float,last_payment_date:?string}
      */
+    /**
+     * Most frequent non-empty account name. Ties: alphabetically first.
+     *
+     * @param array<int, string> $accounts
+     */
+    public static function mostCommonAccount(array $accounts): string
+    {
+        $counts = [];
+        foreach ($accounts as $a) {
+            $key = trim((string) $a);
+            if ($key === '' || $key === '(No account)') {
+                continue;
+            }
+            if (!isset($counts[$key])) {
+                $counts[$key] = 0;
+            }
+            $counts[$key]++;
+        }
+        if (count($counts) === 0) {
+            return '';
+        }
+        uksort($counts, static function ($a, $b) use ($counts) {
+            $cmp = $counts[$b] <=> $counts[$a];
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+
+            return strcasecmp((string) $a, (string) $b);
+        });
+
+        return (string) array_key_first($counts);
+    }
+
+    /**
+     * @param array<int, array{date:string,amount:float,account?:string}> $rows
+     * @return array{vendor_name:string,cost_per_period:float,frequency:string,annual_cost:float,last_payment_date:?string,account:string}
+     */
     public static function buildVendorSummary(string $vendorName, array $rows): array
     {
         usort($rows, function ($a, $b) {
@@ -416,12 +458,20 @@ class CsvImport
         $annual = $latestAmount * $mult;
         $last = $dates[count($dates) - 1] ?? null;
 
+        $accountNames = [];
+        foreach ($rows as $r) {
+            if (isset($r['account'])) {
+                $accountNames[] = (string) $r['account'];
+            }
+        }
+
         return [
             'vendor_name' => $vendorName,
             'cost_per_period' => round($latestAmount, 2),
             'frequency' => $frequency,
             'annual_cost' => round($annual, 2),
             'last_payment_date' => $last,
+            'account' => self::mostCommonAccount($accountNames),
         ];
     }
 
