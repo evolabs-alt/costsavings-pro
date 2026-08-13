@@ -5043,7 +5043,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             var suppressCsvMappingModalCleanup = false;
             var CSV_ACCOUNT_INTRO_QB = 'Choose which GL accounts to include. Vendor rows are grouped by payee (Name) from the selected accounts only.';
             var CSV_ACCOUNT_INTRO_MAPPED = 'Choose which account values to include from your mapped column.';
-            var CSV_ACCOUNT_INTRO_QBO = 'Choose which accounts to include from QuickBooks Online. Vendor rows are grouped by payee from the selected accounts only.';
+            var CSV_ACCOUNT_INTRO_QBO = 'Choose which GL accounts to include from QuickBooks Online. Vendor rows are grouped by payee from the selected accounts only.';
             function setCsvAccountModalIntro(mode) {
                 var intro = document.getElementById('appModalCsvAccountsIntro');
                 if (!intro) return;

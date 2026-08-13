@@ -423,10 +423,46 @@ class QboService
             'Accept: application/json',
         ];
 
-        // Prefer API default columns — custom column lists often yield empty/mismatched reports.
+        // Prefer General Ledger (grouped by CoA / GL account, like CSV "Transaction Detail by Account").
+        // Fall back to Transaction List with Split (expense/GL side) preferred over bank Account.
         $attempts = [
             [
+                'path' => 'GeneralLedger',
+                'query' => [
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
+                    'minorversion' => '65',
+                ],
+            ],
+            [
+                'path' => 'GeneralLedger',
+                'query' => [
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
+                    'accounting_method' => 'Accrual',
+                    'minorversion' => '65',
+                ],
+            ],
+            [
+                'path' => 'GeneralLedger',
+                'query' => [
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
+                    'accounting_method' => 'Cash',
+                    'minorversion' => '65',
+                ],
+            ],
+            [
                 'path' => 'TransactionList',
+                'query' => [
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
+                    'columns' => 'tx_date,txn_type,name,memo,split_acc,account_name,nat_amount',
+                    'minorversion' => '65',
+                ],
+            ],
+            [
+                'path' => 'TransactionListWithSplits',
                 'query' => [
                     'start_date' => $startDate,
                     'end_date' => $endDate,
@@ -438,7 +474,6 @@ class QboService
                 'query' => [
                     'start_date' => $startDate,
                     'end_date' => $endDate,
-                    'accounting_method' => 'Cash',
                     'minorversion' => '65',
                 ],
             ],
@@ -456,7 +491,7 @@ class QboService
                 'query' => [
                     'start_date' => $startDate,
                     'end_date' => $endDate,
-                    'columns' => 'tx_date,txn_type,name,memo,account_name,nat_amount',
+                    'accounting_method' => 'Cash',
                     'minorversion' => '65',
                 ],
             ],
@@ -473,9 +508,17 @@ class QboService
         $lastError = null;
         $bestRows = [];
         foreach ($attempts as $attempt) {
+            $path = (string) $attempt['path'];
+            $preferGl = $this->reportGroupBy($path) === 'account'
+                || $path === 'TransactionListWithSplits'
+                || (
+                    isset($attempt['query']['columns'])
+                    && is_string($attempt['query']['columns'])
+                    && str_contains($attempt['query']['columns'], 'split_acc')
+                );
             try {
                 $qs = http_build_query($attempt['query'], '', '&', PHP_QUERY_RFC3986);
-                $url = $apiBase . '/v3/company/' . $realm . '/reports/' . $attempt['path'] . '?' . $qs;
+                $url = $apiBase . '/v3/company/' . $realm . '/reports/' . $path . '?' . $qs;
                 $report = $this->httpJson('GET', $url, $authHeaders);
                 if (!is_array($report)) {
                     continue;
@@ -483,16 +526,17 @@ class QboService
                 if ($this->reportHasNoData($report)) {
                     continue;
                 }
-                $rows = $this->mapReportToRawRows($report);
+                $rows = $this->mapReportToRawRows($report, $path);
                 if (count($rows) > count($bestRows)) {
                     $bestRows = $rows;
                 }
-                if (count($bestRows) > 0) {
-                    return $bestRows;
+                // Stop on first successful GL-oriented report; keep scanning weaker fallbacks.
+                if (count($rows) > 0 && $preferGl) {
+                    return $rows;
                 }
             } catch (\Throwable $e) {
                 $lastError = $e;
-                error_log('QboService report ' . $attempt['path'] . ': ' . $e->getMessage());
+                error_log('QboService report ' . $path . ': ' . $e->getMessage());
             }
         }
 
@@ -1002,14 +1046,37 @@ class QboService
     }
 
     /**
+     * @return 'account'|'vendor'|''
+     */
+    private function reportGroupBy(string $reportPath): string
+    {
+        $path = strtolower(trim($reportPath));
+        if ($path === 'generalledger' || $path === 'generalledgerdetail') {
+            return 'account';
+        }
+        if ($path === 'transactionlistbyvendor') {
+            return 'vendor';
+        }
+
+        return '';
+    }
+
+    /**
      * @param array<string, mixed> $report
      * @return array<int, array{vendor_name:string,transaction_date:string,amount:float,transaction_type:string,account:string,memo:string}>
      */
-    private function mapReportToRawRows(array $report): array
+    private function mapReportToRawRows(array $report, string $reportPath = ''): array
     {
         $colKeys = $this->extractColumnKeys($report);
         $rows = [];
-        $this->walkReportRows($report['Rows']['Row'] ?? [], $colKeys, $rows, '');
+        $this->walkReportRows(
+            $report['Rows']['Row'] ?? [],
+            $colKeys,
+            $rows,
+            '',
+            '',
+            $this->reportGroupBy($reportPath)
+        );
 
         return $rows;
     }
@@ -1030,6 +1097,7 @@ class QboService
             $columns = [$columns];
         }
 
+        // Keep split separate from account so we can prefer Split (GL) over Account (often bank/cash).
         $titleMap = [
             'date' => 'tx_date',
             'transaction date' => 'tx_date',
@@ -1044,13 +1112,16 @@ class QboService
             'description' => 'memo',
             'account' => 'account_name',
             'account full name' => 'account_name',
-            'split' => 'account_name',
+            'split' => 'split',
+            'split account' => 'split',
             'amount' => 'nat_amount',
             'natural amount' => 'nat_amount',
             'open balance' => 'nat_amount',
             'subt_nat_amount' => 'nat_amount',
             'debt_amt' => 'debt_amt',
             'credit_amt' => 'credit_amt',
+            'debit' => 'debt_amt',
+            'credit' => 'credit_amt',
         ];
 
         foreach ($columns as $idx => $col) {
@@ -1079,14 +1150,9 @@ class QboService
             if ($key === null || $key === '') {
                 $title = strtolower(trim((string) ($col['ColTitle'] ?? '')));
                 $key = $titleMap[$title] ?? $title;
-            } else {
-                // Normalize known ColKey aliases to our internal keys
-                if (in_array($key, ['subt_nat_amount', 'debt_amt', 'credit_amt', 'amount'], true)) {
-                    // keep subt_nat_amount / debt / credit as aliases readable in get()
-                }
-                if ($key === 'subt_nat_amount') {
-                    // also expose as nat_amount if not set
-                }
+            }
+            if ($key === 'split_acc') {
+                $key = 'split';
             }
             if ($key !== '') {
                 $map[$key] = (int) $idx;
@@ -1102,8 +1168,8 @@ class QboService
                 }
             }
         }
-        if (!isset($map['account_name']) && isset($map['split'])) {
-            $map['account_name'] = $map['split'];
+        if (!isset($map['split']) && isset($map['split_acc'])) {
+            $map['split'] = $map['split_acc'];
         }
         if (!isset($map['tx_date']) && isset($map['date'])) {
             $map['tx_date'] = $map['date'];
@@ -1119,9 +1185,16 @@ class QboService
      * @param mixed $nodes
      * @param array<string, int> $colKeys
      * @param array<int, array{vendor_name:string,transaction_date:string,amount:float,transaction_type:string,account:string,memo:string}> $out
+     * @param 'account'|'vendor'|'' $groupBy
      */
-    private function walkReportRows($nodes, array $colKeys, array &$out, string $sectionVendor = ''): void
-    {
+    private function walkReportRows(
+        $nodes,
+        array $colKeys,
+        array &$out,
+        string $sectionVendor = '',
+        string $sectionAccount = '',
+        string $groupBy = ''
+    ): void {
         if (!is_array($nodes)) {
             return;
         }
@@ -1136,16 +1209,28 @@ class QboService
             }
 
             $localVendor = $sectionVendor;
-            // TransactionListByVendor: vendor name is on the section header
+            $localAccount = $sectionAccount;
+            // Section headers: GeneralLedger = GL account; TransactionListByVendor = vendor/payee.
             if (isset($node['Header']['ColData']) && is_array($node['Header']['ColData'])) {
                 $headerVal = $this->firstColDataValue($node['Header']['ColData']);
                 if ($headerVal !== '' && stripos($headerVal, 'total for') !== 0) {
-                    $localVendor = $headerVal;
+                    if ($groupBy === 'account') {
+                        $localAccount = $headerVal;
+                    } elseif ($groupBy === 'vendor') {
+                        $localVendor = $headerVal;
+                    }
                 }
             }
 
             if (isset($node['Rows']['Row'])) {
-                $this->walkReportRows($node['Rows']['Row'], $colKeys, $out, $localVendor);
+                $this->walkReportRows(
+                    $node['Rows']['Row'],
+                    $colKeys,
+                    $out,
+                    $localVendor,
+                    $localAccount,
+                    $groupBy
+                );
             }
 
             $type = (string) ($node['type'] ?? '');
@@ -1154,7 +1239,12 @@ class QboService
                 continue;
             }
             if ($type === 'Data' || $type === 'data' || ($type === '' && isset($node['ColData']))) {
-                $mapped = $this->mapDataRow($node['ColData'] ?? [], $colKeys, $localVendor);
+                $mapped = $this->mapDataRow(
+                    $node['ColData'] ?? [],
+                    $colKeys,
+                    $localVendor,
+                    $localAccount
+                );
                 if ($mapped !== null) {
                     $out[] = $mapped;
                 }
@@ -1183,8 +1273,12 @@ class QboService
      * @param array<string, int> $colKeys
      * @return array{vendor_name:string,transaction_date:string,amount:float,transaction_type:string,account:string,memo:string}|null
      */
-    private function mapDataRow($colData, array $colKeys, string $sectionVendor = ''): ?array
-    {
+    private function mapDataRow(
+        $colData,
+        array $colKeys,
+        string $sectionVendor = '',
+        string $sectionAccount = ''
+    ): ?array {
         if (!is_array($colData)) {
             return null;
         }
@@ -1285,7 +1379,17 @@ class QboService
             return null;
         }
 
-        $account = $get('account_name');
+        // Prefer GL attribution: section account (General Ledger) → Split → Account (often bank/cash).
+        $account = trim($sectionAccount);
+        if ($account === '') {
+            $account = $get('split');
+        }
+        if ($account === '') {
+            $account = $get('split_acc');
+        }
+        if ($account === '') {
+            $account = $get('account_name');
+        }
         if ($account === '') {
             $account = $get('account');
         }
