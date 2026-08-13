@@ -7128,12 +7128,35 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 return (cat === '' || cat === '__new__') ? '__none__' : cat;
             }
 
-            function getRowAccountFilterKey(row) {
+            function getRowAccountList(row) {
                 const acctEl = row.querySelector('.account-display');
-                const acct = acctEl
+                const raw = acctEl
                     ? String(acctEl.getAttribute('data-account') || acctEl.textContent || '').trim()
                     : '';
-                return acct === '' ? '__none__' : acct;
+                if (!raw) return [];
+                return raw.split(',').map(function(part) {
+                    return part.trim();
+                }).filter(function(part) {
+                    return part !== '' && part !== '(No account)';
+                });
+            }
+
+            function getRowAccountFilterKey(row) {
+                const list = getRowAccountList(row);
+                return list.length === 0 ? '__none__' : list.join(', ');
+            }
+
+            function rowMatchesAccountFilter(row) {
+                const selected = vendorColumnFilters.account;
+                if (!selected || !selected.size) return true;
+                const list = getRowAccountList(row);
+                if (list.length === 0) {
+                    return selected.has('__none__');
+                }
+                for (let i = 0; i < list.length; i++) {
+                    if (selected.has(list[i])) return true;
+                }
+                return false;
             }
 
             function setRowAccountDisplay(row, accountValue) {
@@ -7160,7 +7183,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     if (!vendorColumnFilters.category.has(getRowCategoryFilterKey(row))) return false;
                 }
                 if (vendorColumnFilters.account.size) {
-                    if (!vendorColumnFilters.account.has(getRowAccountFilterKey(row))) return false;
+                    if (!rowMatchesAccountFilter(row)) return false;
                 }
                 if (vendorColumnFilters.manager.size) {
                     if (!vendorColumnFilters.manager.has(getRowManagerFilterKey(row))) return false;
@@ -7292,10 +7315,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     const tbody = document.getElementById('calculatorRows');
                     if (tbody) {
                         tbody.querySelectorAll('tr').forEach(function(row) {
-                            const key = getRowAccountFilterKey(row);
-                            if (key === '__none__' || seen[key]) return;
-                            seen[key] = true;
-                            opts.push({ value: key, label: key.replace(/</g, '') });
+                            const list = getRowAccountList(row);
+                            if (list.length === 0) return;
+                            list.forEach(function(acct) {
+                                if (seen[acct]) return;
+                                seen[acct] = true;
+                                opts.push({ value: acct, label: acct.replace(/</g, '') });
+                            });
                         });
                     }
                     opts.sort(function(a, b) {

@@ -394,42 +394,27 @@ class CsvImport
     }
 
     /**
-     * cost_per_period is the chronologically latest transaction amount.
-     *
-     * @param array<int, array{date:string, amount:float}> $rows
-     * @return array{vendor_name:string,cost_per_period:float,frequency:string,annual_cost:float,last_payment_date:?string}
-     */
-    /**
-     * Most frequent non-empty account name. Ties: alphabetically first.
+     * Unique non-empty account names, sorted alphabetically, joined with ", ".
      *
      * @param array<int, string> $accounts
      */
-    public static function mostCommonAccount(array $accounts): string
+    public static function uniqueAccountsJoined(array $accounts): string
     {
-        $counts = [];
+        $unique = [];
         foreach ($accounts as $a) {
             $key = trim((string) $a);
             if ($key === '' || $key === '(No account)') {
                 continue;
             }
-            if (!isset($counts[$key])) {
-                $counts[$key] = 0;
-            }
-            $counts[$key]++;
+            $unique[$key] = true;
         }
-        if (count($counts) === 0) {
+        if (count($unique) === 0) {
             return '';
         }
-        uksort($counts, static function ($a, $b) use ($counts) {
-            $cmp = $counts[$b] <=> $counts[$a];
-            if ($cmp !== 0) {
-                return $cmp;
-            }
+        $names = array_keys($unique);
+        natcasesort($names);
 
-            return strcasecmp((string) $a, (string) $b);
-        });
-
-        return (string) array_key_first($counts);
+        return implode(', ', array_values($names));
     }
 
     /**
@@ -471,7 +456,7 @@ class CsvImport
             'frequency' => $frequency,
             'annual_cost' => round($annual, 2),
             'last_payment_date' => $last,
-            'account' => self::mostCommonAccount($accountNames),
+            'account' => self::uniqueAccountsJoined($accountNames),
         ];
     }
 

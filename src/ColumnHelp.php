@@ -42,7 +42,7 @@ final class ColumnHelp
             ],
             'account' => [
                 'title' => 'Account',
-                'html' => '<p class="column-help-intro">The imported QuickBooks / CSV GL account for this vendor. When a vendor has activity in more than one account, the most common account is shown. This value is set by import (not edited in the grid). Use filter and sort to focus on specific accounts.</p>',
+                'html' => '<p class="column-help-intro">The imported QuickBooks / CSV GL account(s) for this vendor. When a vendor has activity in more than one account, all unique accounts are shown comma-separated (e.g. Advertising, Software). This value is set by import (not edited in the grid). Use filter and sort to focus on specific accounts.</p>',
             ],
             'vendor' => [
                 'title' => 'Vendor',

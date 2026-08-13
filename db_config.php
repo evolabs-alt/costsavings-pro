@@ -541,7 +541,7 @@ function migrateProjectCategoriesSchema(PDO $pdo): void
 }
 
 /**
- * GL account on vendor grid rows (most common imported account per payee).
+ * GL account on vendor grid rows (unique imported accounts, comma-separated).
  *
  * @param PDO $pdo
  */
@@ -549,17 +549,29 @@ function migrateCostCalculatorAccountSchema(PDO $pdo): void
 {
     try {
         $st = $pdo->query("SHOW COLUMNS FROM `cost_calculator_items` LIKE 'account'");
-        $added = !$st->fetch();
+        $col = $st ? $st->fetch(PDO::FETCH_ASSOC) : false;
+        $added = !$col;
         if ($added) {
-            $pdo->exec('ALTER TABLE `cost_calculator_items` ADD COLUMN `account` VARCHAR(255) NULL AFTER `category_id`');
+            $pdo->exec('ALTER TABLE `cost_calculator_items` ADD COLUMN `account` TEXT NULL AFTER `category_id`');
+        } else {
+            $type = strtolower((string) ($col['Type'] ?? ''));
+            if (str_starts_with($type, 'varchar')) {
+                $pdo->exec('ALTER TABLE `cost_calculator_items` MODIFY COLUMN `account` TEXT NULL');
+            }
         }
-        try {
-            $pdo->exec('CREATE INDEX `idx_cc_account` ON `cost_calculator_items` (`account`(191))');
-        } catch (PDOException $e) {
-            // ignore duplicate index attempts
-        }
-        if ($added) {
+
+        // One-time (re)backfill as unique comma-separated account lists.
+        $idx = $pdo->query("SHOW INDEX FROM `cost_calculator_items` WHERE Key_name = 'idx_cc_account_unique_csv'");
+        $needUniqueBackfill = $idx && !$idx->fetch();
+        if ($added || $needUniqueBackfill) {
             backfillCostCalculatorAccountsFromRaw($pdo);
+        }
+        if ($needUniqueBackfill) {
+            try {
+                $pdo->exec('CREATE INDEX `idx_cc_account_unique_csv` ON `cost_calculator_items` (`account`(191))');
+            } catch (PDOException $e) {
+                // ignore duplicate index attempts
+            }
         }
     } catch (PDOException $e) {
         error_log('migrateCostCalculatorAccountSchema: ' . $e->getMessage());
@@ -567,7 +579,7 @@ function migrateCostCalculatorAccountSchema(PDO $pdo): void
 }
 
 /**
- * One-time: set cost_calculator_items.account from most common vendor_raw_transactions.account.
+ * Set cost_calculator_items.account from unique vendor_raw_transactions.account values (comma-separated).
  *
  * @param PDO $pdo
  */
@@ -582,8 +594,8 @@ function backfillCostCalculatorAccountsFromRaw(PDO $pdo): void
         if (!$rawSt) {
             return;
         }
-        /** @var array<string, array<string, int>> $countsByKey */
-        $countsByKey = [];
+        /** @var array<string, array<string, true>> $uniqueByKey */
+        $uniqueByKey = [];
         while ($row = $rawSt->fetch(PDO::FETCH_ASSOC)) {
             $orgId = (int) ($row['org_id'] ?? 0);
             $projectId = $row['project_id'] === null || $row['project_id'] === ''
@@ -595,29 +607,20 @@ function backfillCostCalculatorAccountsFromRaw(PDO $pdo): void
                 continue;
             }
             $key = $orgId . '|' . $projectId . '|' . $norm;
-            if (!isset($countsByKey[$key])) {
-                $countsByKey[$key] = [];
+            if (!isset($uniqueByKey[$key])) {
+                $uniqueByKey[$key] = [];
             }
-            if (!isset($countsByKey[$key][$acct])) {
-                $countsByKey[$key][$acct] = 0;
-            }
-            $countsByKey[$key][$acct]++;
+            $uniqueByKey[$key][$acct] = true;
         }
 
-        $pick = static function (array $counts): string {
-            if (count($counts) === 0) {
+        $joinAccounts = static function (array $unique): string {
+            if (count($unique) === 0) {
                 return '';
             }
-            uksort($counts, static function ($a, $b) use ($counts) {
-                $cmp = $counts[$b] <=> $counts[$a];
-                if ($cmp !== 0) {
-                    return $cmp;
-                }
+            $names = array_keys($unique);
+            natcasesort($names);
 
-                return strcasecmp((string) $a, (string) $b);
-            });
-
-            return (string) array_key_first($counts);
+            return implode(', ', array_values($names));
         };
 
         $upd = $pdo->prepare(
@@ -625,11 +628,10 @@ function backfillCostCalculatorAccountsFromRaw(PDO $pdo): void
              SET account = ?
              WHERE org_id = ?
                AND ((? IS NULL AND project_id IS NULL) OR project_id = ?)
-               AND LOWER(TRIM(vendor_name)) = ?
-               AND (account IS NULL OR account = \'\')'
+               AND LOWER(TRIM(vendor_name)) = ?'
         );
-        foreach ($countsByKey as $key => $counts) {
-            $account = $pick($counts);
+        foreach ($uniqueByKey as $key => $unique) {
+            $account = $joinAccounts($unique);
             if ($account === '') {
                 continue;
             }
