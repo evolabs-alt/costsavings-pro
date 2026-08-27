@@ -4136,7 +4136,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             <?php unset($_SESSION['message']); ?>
         <?php endif; ?>
         <?php if (isset($_GET['qbo']) && $_GET['qbo'] === 'connected'): ?>
-            showSnackbar('QuickBooks Online connected successfully. Sign in if needed, then use Data → Sync with QBO.', 'success');
+            <?php if (!empty($_GET['resume_qbo_sync'])): ?>
+            showSnackbar('QuickBooks Online connected. Choose a date range to sync.', 'success');
+            <?php else: ?>
+            showSnackbar('QuickBooks Online connected successfully.', 'success');
+            <?php endif; ?>
+        <?php endif; ?>
+        <?php if (isset($_GET['qbo']) && $_GET['qbo'] === 'denied'): ?>
+            showSnackbar('QuickBooks authorization was cancelled or denied.', 'error');
         <?php endif; ?>
     });
     </script>
@@ -4679,7 +4686,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 active: false,
                 projectId: 0,
                 projectName: '',
-                dataMode: 'upload_after',
+                dataMode: 'qbo_after',
                 previousActiveProjectId: 0,
                 step: null,
                 importCompleted: false,
@@ -4690,20 +4697,76 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 copyCategories: null,
                 overwriteBlankPurposes: false
             };
+            var QBO_ORG_CONNECTED = <?php echo !empty($qbo_status['connected']) ? 'true' : 'false'; ?>;
+            var POST_CREATE_FLOW_STORAGE_KEY = 'savvy_post_create_qbo_flow';
 
             function isPostCreateUploadWaiting() {
-                return postProjectCreateFlow.active && postProjectCreateFlow.step === 'upload_waiting_import';
+                return postProjectCreateFlow.active && (
+                    postProjectCreateFlow.step === 'upload_waiting_import'
+                    || postProjectCreateFlow.step === 'qbo_waiting_sync'
+                );
+            }
+
+            function isPostCreateQboWaiting() {
+                return postProjectCreateFlow.active && postProjectCreateFlow.step === 'qbo_waiting_sync';
             }
 
             function isPostCreateCsvModalId(modalId) {
-                return modalId === 'appModalCsvAccounts' || modalId === 'appModalCsvMapping';
+                return modalId === 'appModalCsvAccounts' || modalId === 'appModalCsvMapping' || modalId === 'appModalQboDateRange';
+            }
+
+            function savePostCreateFlowToSessionStorage() {
+                try {
+                    sessionStorage.setItem(POST_CREATE_FLOW_STORAGE_KEY, JSON.stringify({
+                        active: true,
+                        projectId: postProjectCreateFlow.projectId,
+                        projectName: postProjectCreateFlow.projectName,
+                        previousActiveProjectId: postProjectCreateFlow.previousActiveProjectId,
+                        step: 'qbo_waiting_sync',
+                        dataMode: postProjectCreateFlow.dataMode || 'qbo_after'
+                    }));
+                } catch (e) {}
+            }
+
+            function loadPostCreateFlowFromSessionStorage() {
+                try {
+                    var raw = sessionStorage.getItem(POST_CREATE_FLOW_STORAGE_KEY);
+                    if (!raw) return null;
+                    var data = JSON.parse(raw);
+                    return data && typeof data === 'object' ? data : null;
+                } catch (e) {
+                    return null;
+                }
+            }
+
+            function clearPostCreateFlowSessionStorage() {
+                try { sessionStorage.removeItem(POST_CREATE_FLOW_STORAGE_KEY); } catch (e) {}
+            }
+
+            function openPostCreateQboSyncModal() {
+                postProjectCreateFlow.step = 'qbo_waiting_sync';
+                closeAppModal('appModalPostCreateUpload');
+                var range = defaultQboDateRange();
+                var startEl = document.getElementById('qboSyncStartDate');
+                var endEl = document.getElementById('qboSyncEndDate');
+                if (startEl) startEl.value = range.start;
+                if (endEl) endEl.value = range.end;
+                openAppModal('appModalQboDateRange');
             }
 
             function reopenPostCreateUploadModal() {
-                postProjectCreateFlow.step = 'upload';
+                postProjectCreateFlow.step = 'qbo';
                 postProjectCreateFlow.importCompleted = false;
                 setPostCreateSubtitle('postCreateUploadSubtitle', 1);
+                refreshPostCreateQboButtons();
                 openAppModal('appModalPostCreateUpload');
+            }
+
+            function refreshPostCreateQboButtons() {
+                var connectBtn = document.getElementById('postCreateQboConnectBtn');
+                var syncBtn = document.getElementById('postCreateQboSyncBtn');
+                if (connectBtn) connectBtn.style.display = QBO_ORG_CONNECTED ? 'none' : '';
+                if (syncBtn) syncBtn.style.display = QBO_ORG_CONNECTED ? '' : 'none';
             }
 
             function handlePostCreateImportFailure() {
@@ -4711,6 +4774,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 postProjectCreateFlow.postCreateCsvImportInFlight = false;
                 closeAppModal('appModalCsvAccounts');
                 closeAppModal('appModalCsvMapping');
+                closeAppModal('appModalQboDateRange');
                 reopenPostCreateUploadModal();
             }
 
@@ -4899,7 +4963,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 if (!postProjectCreateFlow.active) return;
                 var step = postProjectCreateFlow.step;
                 if (step === 'purpose_check') return;
-                if (step === 'upload' || step === 'upload_waiting_import') {
+                if (step === 'upload' || step === 'upload_waiting_import' || step === 'qbo' || step === 'qbo_waiting_sync') {
+                    clearPostCreateFlowSessionStorage();
                     postProjectCreateFlow.step = 'purpose_check';
                     proceedToPurposeOrInvite();
                     return;
@@ -4918,6 +4983,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 postProjectCreateFlow.importCompleted = false;
                 postProjectCreateFlow.purposeCheckInFlight = false;
                 postProjectCreateFlow.postCreateCsvImportInFlight = false;
+                clearPostCreateFlowSessionStorage();
                 closeAppModal('appModalPostCreateUpload');
                 closeAppModal('appModalPostCreatePurpose');
                 closeAppModal('appModalPostCreateInvite');
@@ -4938,14 +5004,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 postProjectCreateFlow.active = true;
                 postProjectCreateFlow.projectId = parseInt(opts.projectId, 10) || 0;
                 postProjectCreateFlow.projectName = opts.projectName || '';
-                postProjectCreateFlow.dataMode = opts.dataMode || 'upload_after';
+                postProjectCreateFlow.dataMode = opts.dataMode || 'qbo_after';
                 postProjectCreateFlow.previousActiveProjectId = parseInt(opts.previousActiveProjectId, 10) || 0;
                 postProjectCreateFlow.importCompleted = false;
                 postProjectCreateFlow.purposeCheckInFlight = false;
                 postProjectCreateFlow.postCreateCsvImportInFlight = false;
-                if (postProjectCreateFlow.dataMode === 'upload_after') {
-                    postProjectCreateFlow.step = 'upload';
+                if (postProjectCreateFlow.dataMode === 'qbo_after' || postProjectCreateFlow.dataMode === 'upload_after') {
+                    postProjectCreateFlow.step = 'qbo';
                     setPostCreateSubtitle('postCreateUploadSubtitle', 1);
+                    refreshPostCreateQboButtons();
                     openAppModal('appModalPostCreateUpload');
                 } else {
                     postProjectCreateFlow.step = 'purpose_check';
@@ -4953,21 +5020,83 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
             }
 
+            function resumePostCreateQboSyncFromOAuth() {
+                var stored = loadPostCreateFlowFromSessionStorage();
+                <?php
+                $qboResumeFromSession = null;
+                if (!empty($_SESSION['qbo_resume_wizard']) && is_array($_SESSION['qbo_resume_wizard'])) {
+                    $qboResumeFromSession = $_SESSION['qbo_resume_wizard'];
+                    unset($_SESSION['qbo_resume_wizard']);
+                }
+                ?>
+                var phpResume = <?php echo json_encode($qboResumeFromSession, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
+                var params = new URLSearchParams(window.location.search);
+                var shouldResume = params.get('resume_qbo_sync') === '1' || (phpResume && phpResume.project_id);
+                if (!shouldResume) return;
+
+                QBO_ORG_CONNECTED = true;
+                var projectId = (phpResume && phpResume.project_id) || (stored && stored.projectId) || 0;
+                var projectName = (phpResume && phpResume.project_name) || (stored && stored.projectName) || '';
+                var prevId = (stored && stored.previousActiveProjectId) || 0;
+                if (!projectId) return;
+
+                postProjectCreateFlow.active = true;
+                postProjectCreateFlow.projectId = parseInt(projectId, 10) || 0;
+                postProjectCreateFlow.projectName = projectName || '';
+                postProjectCreateFlow.previousActiveProjectId = parseInt(prevId, 10) || 0;
+                postProjectCreateFlow.dataMode = 'qbo_after';
+                postProjectCreateFlow.importCompleted = false;
+
+                var syncActive = postJson({ action: 'project_set_active', project_id: postProjectCreateFlow.projectId })
+                    .then(function(d) {
+                        if (d && d.success) {
+                            currentActiveProjectId = postProjectCreateFlow.projectId;
+                        }
+                    })
+                    .catch(function() {});
+
+                syncActive.then(function() {
+                    return loadProjectsIntoMenu();
+                }).then(function() {
+                    openPostCreateQboSyncModal();
+                    if (window.history && window.history.replaceState) {
+                        var url = new URL(window.location.href);
+                        url.searchParams.delete('qbo');
+                        url.searchParams.delete('resume_qbo_sync');
+                        window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+                    }
+                });
+            }
+
             function initPostProjectCreateFlow() {
-                var chooseBtn = document.getElementById('postCreateUploadChooseBtn');
                 var skipBtn = document.getElementById('postCreateUploadSkipBtn');
-                var csvIn = document.getElementById('postCreateCsvImportInput');
-                if (csvIn && !csvIn.dataset.csvBound) {
-                    csvIn.dataset.csvBound = '1';
-                    csvIn.addEventListener('change', function() {
-                        handleMappedCsvFileSelected(this.files[0], this);
+                var connectBtn = document.getElementById('postCreateQboConnectBtn');
+                var syncBtn = document.getElementById('postCreateQboSyncBtn');
+                if (connectBtn) {
+                    connectBtn.addEventListener('click', function() {
+                        if (!postProjectCreateFlow.active) return;
+                        savePostCreateFlowToSessionStorage();
+                        var qs = new URLSearchParams({
+                            page: 'qbo-connect',
+                            resume_wizard: '1',
+                            project_id: String(postProjectCreateFlow.projectId || 0),
+                            project_name: postProjectCreateFlow.projectName || ''
+                        });
+                        window.location.href = '?' + qs.toString();
                     });
                 }
-                if (chooseBtn && csvIn) {
-                    chooseBtn.addEventListener('click', function() {
-                        closeAppModal('appModalPostCreateUpload');
-                        postProjectCreateFlow.step = 'upload_waiting_import';
-                        csvIn.click();
+                if (syncBtn) {
+                    syncBtn.addEventListener('click', function() {
+                        if (!postProjectCreateFlow.active) return;
+                        var projectId = postProjectCreateFlow.projectId || 0;
+                        var ensureActive = projectId
+                            ? postJson({ action: 'project_set_active', project_id: projectId }).then(function(d) {
+                                if (d && d.success) currentActiveProjectId = projectId;
+                            }).catch(function() {})
+                            : Promise.resolve();
+                        ensureActive.then(function() {
+                            openPostCreateQboSyncModal();
+                        });
                     });
                 }
                 if (skipBtn) {
@@ -5104,7 +5233,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const form = document.getElementById('projectWizardForm');
                 if (!form) return;
                 const previousActiveProjectId = currentActiveProjectId || 0;
-                const dataMode = (document.querySelector('input[name="projectWizardDataMode"]:checked') || {}).value || 'upload_after';
+                const dataMode = (document.querySelector('input[name="projectWizardDataMode"]:checked') || {}).value || 'qbo_after';
                 const projectName = (document.getElementById('projectWizardName') || {}).value || '';
                 const payload = {
                     action: 'project_create',
@@ -5872,6 +6001,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
             }
             function runQboImport(selectedAccounts) {
+                var flowActive = isPostCreateQboWaiting() || isPostCreateUploadWaiting();
+                if (flowActive) {
+                    postProjectCreateFlow.postCreateCsvImportInFlight = true;
+                }
                 var fd = new FormData();
                 fd.append('action', 'import_qbo_sync');
                 fd.append('selected_accounts', JSON.stringify(selectedAccounts || []));
@@ -5884,12 +6017,26 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         if (d.success) {
                             var rawCount = parseInt(d.raw_inserted || 0, 10) || 0;
                             showSnackbar('Imported ' + (d.inserted || 0) + ' vendor(s), ' + rawCount + ' raw transactions', 'success');
-                            return reloadCalculatorAfterImport(false);
+                            if (flowActive) {
+                                postProjectCreateFlow.importCompleted = true;
+                            }
+                            return reloadCalculatorAfterImport(flowActive);
                         }
                         showSnackbar(d.error || 'Import failed', 'error');
+                        if (flowActive) {
+                            handlePostCreateImportFailure();
+                        }
                     })
                     .catch(function() {
                         showSnackbar('Import failed', 'error');
+                        if (flowActive) {
+                            handlePostCreateImportFailure();
+                        }
+                    })
+                    .finally(function() {
+                        if (flowActive) {
+                            postProjectCreateFlow.postCreateCsvImportInFlight = false;
+                        }
                     });
             }
             function defaultQboDateRange() {
@@ -5987,8 +6134,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 csvAccountPickerMode = 'qbo';
                                 setCsvAccountModalIntro('qbo');
                                 renderCsvAccountList(d.accounts || [], false);
+                                if (isPostCreateQboWaiting()) {
+                                    postProjectCreateFlow.postCreateCsvImportInFlight = true;
+                                }
                                 closeAppModal(document.getElementById('appModalQboDateRange'));
                                 openAppModal('appModalCsvAccounts');
+                                if (isPostCreateQboWaiting()) {
+                                    setTimeout(function() {
+                                        postProjectCreateFlow.postCreateCsvImportInFlight = false;
+                                    }, 0);
+                                }
                             })
                             .catch(function() {
                                 showSnackbar('Could not pull from QuickBooks', 'error');
@@ -8208,6 +8363,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     });
                 }
                 initPostProjectCreateFlow();
+                resumePostCreateQboSyncFromOAuth();
                 initNavSubmenus();
                 initPurposeColumnToggle();
                 initVendorPageSizeSelect();
@@ -9666,8 +9822,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <input type="date" id="projectWizardEndDate">
                     </label>
                     <label>
-                        <input type="radio" name="projectWizardDataMode" id="projectWizardDataModeUpload" value="upload_after" checked>
-                        I will upload data after creating this project.
+                        <input type="radio" name="projectWizardDataMode" id="projectWizardDataModeUpload" value="qbo_after" checked>
+                        I will connect QuickBooks after creating this project.
                     </label>
                     <div style="display:flex;gap:8px;justify-content:flex-end;">
                         <button type="button" class="btn-secondary app-modal-close project-wizard-cancel-btn">Cancel</button>
@@ -9701,15 +9857,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
     <div class="app-modal-overlay post-create-flow-modal" id="appModalPostCreateUpload" role="dialog" aria-modal="true" aria-labelledby="appModalPostCreateUploadTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
-                <h2 id="appModalPostCreateUploadTitle">Import your data</h2>
+                <h2 id="appModalPostCreateUploadTitle">Connect QuickBooks</h2>
             </div>
             <div class="app-modal-body">
                 <p id="postCreateUploadSubtitle" style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;"></p>
-                <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.5;">Upload a CSV file, then map columns to import vendor data for this project.</p>
+                <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.5;">
+                    Link this organization to QuickBooks Online, then sync transactions into this project.
+                    You must be an organization super admin to connect.
+                </p>
                 <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
                     <button type="button" class="btn-secondary" id="postCreateUploadSkipBtn">Skip for now</button>
-                    <button type="button" id="postCreateUploadChooseBtn">Choose CSV file</button>
-                    <input type="file" id="postCreateCsvImportInput" accept=".csv,text/csv" style="display:none;">
+                    <button type="button" id="postCreateQboConnectBtn" style="<?php echo !empty($qbo_status['connected']) ? 'display:none;' : ''; ?>">Connect to QuickBooks</button>
+                    <button type="button" id="postCreateQboSyncBtn" style="<?php echo empty($qbo_status['connected']) ? 'display:none;' : ''; ?>">Sync with QuickBooks</button>
                 </div>
             </div>
         </div>

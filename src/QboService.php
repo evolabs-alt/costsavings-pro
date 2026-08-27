@@ -193,7 +193,11 @@ class QboService
     /**
      * @return array{auth_url:string,state:string}
      */
-    public function beginOAuth(int $orgId, int $userId = 0): array
+    /**
+     * @param array{resume_wizard?:bool,project_id?:int,project_name?:string} $resume
+     * @return array{auth_url:string,state:string}
+     */
+    public function beginOAuth(int $orgId, int $userId = 0, array $resume = []): array
     {
         if (!self::hasAppCredentials()) {
             throw new \RuntimeException(
@@ -209,7 +213,7 @@ class QboService
         $_SESSION['qbo_oauth_state'] = $state;
         $_SESSION['qbo_oauth_org_id'] = $orgId;
         // Durable pending OAuth (Intuit return often drops PHP session cookies).
-        self::storeOAuthPending($state, $orgId, $userId);
+        self::storeOAuthPending($state, $orgId, $userId, $resume);
 
         $params = http_build_query([
             'client_id' => $app['client_id'],
@@ -225,7 +229,10 @@ class QboService
         ];
     }
 
-    public function handleCallback(string $code, string $realmId, string $state): void
+    /**
+     * @return array{org_id:int,user_id:int,resume_wizard:bool,project_id:int,project_name:string}
+     */
+    public function handleCallback(string $code, string $realmId, string $state): array
     {
         $sessionState = (string) ($_SESSION['qbo_oauth_state'] ?? '');
         $sessionOrgId = (int) ($_SESSION['qbo_oauth_org_id'] ?? 0);
@@ -234,12 +241,18 @@ class QboService
         $pending = self::consumeOAuthPending($state);
         $orgId = 0;
         $userId = (int) ($_SESSION['user_id'] ?? 0);
+        $resumeWizard = false;
+        $projectId = 0;
+        $projectName = '';
 
         if (is_array($pending)) {
             $orgId = (int) ($pending['org_id'] ?? 0);
             if ($userId <= 0) {
                 $userId = (int) ($pending['user_id'] ?? 0);
             }
+            $resumeWizard = !empty($pending['resume_wizard']);
+            $projectId = (int) ($pending['project_id'] ?? 0);
+            $projectName = (string) ($pending['project_name'] ?? '');
         } elseif ($sessionState !== '' && hash_equals($sessionState, $state) && $sessionOrgId > 0) {
             $orgId = $sessionOrgId;
         } else {
@@ -293,12 +306,22 @@ class QboService
             $userId > 0 ? $userId : null,
             $orgId,
         ]);
+
+        return [
+            'org_id' => $orgId,
+            'user_id' => $userId,
+            'resume_wizard' => $resumeWizard,
+            'project_id' => $projectId,
+            'project_name' => $projectName,
+        ];
     }
 
     /**
      * Persist OAuth CSRF/org binding outside PHP session (survives Intuit redirect).
+     *
+     * @param array{resume_wizard?:bool,project_id?:int,project_name?:string} $resume
      */
-    public static function storeOAuthPending(string $state, int $orgId, int $userId): void
+    public static function storeOAuthPending(string $state, int $orgId, int $userId, array $resume = []): void
     {
         if (!preg_match('/^[a-f0-9]{32,64}$/', $state) || $orgId <= 0 || !defined('CACHE_DIR')) {
             return;
@@ -313,6 +336,9 @@ class QboService
             'org_id' => $orgId,
             'user_id' => $userId,
             'created_at' => time(),
+            'resume_wizard' => !empty($resume['resume_wizard']),
+            'project_id' => (int) ($resume['project_id'] ?? 0),
+            'project_name' => (string) ($resume['project_name'] ?? ''),
         ]);
         if ($payload !== false) {
             @file_put_contents($path, $payload, LOCK_EX);
@@ -320,7 +346,7 @@ class QboService
     }
 
     /**
-     * @return array{org_id:int,user_id:int}|null
+     * @return array{org_id:int,user_id:int,resume_wizard:bool,project_id:int,project_name:string}|null
      */
     public static function consumeOAuthPending(string $state): ?array
     {
@@ -353,6 +379,9 @@ class QboService
         return [
             'org_id' => $orgId,
             'user_id' => (int) ($data['user_id'] ?? 0),
+            'resume_wizard' => !empty($data['resume_wizard']),
+            'project_id' => (int) ($data['project_id'] ?? 0),
+            'project_name' => (string) ($data['project_name'] ?? ''),
         ];
     }
 
