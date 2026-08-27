@@ -13,9 +13,16 @@ class ProjectService
      */
     public static function listForUser(PDO $pdo, int $orgId, int $userId, string $role): array
     {
-        $st = $pdo->prepare('SELECT id, name, start_date, end_date, created_at FROM projects WHERE org_id = ? ORDER BY created_at ASC, id ASC');
-        $st->execute([$orgId]);
+        $st = $pdo->prepare(
+            'SELECT p.id, p.name, p.start_date, p.end_date, p.created_at, pm.role AS member_role
+             FROM projects p
+             INNER JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = ?
+             WHERE p.org_id = ?
+             ORDER BY p.created_at ASC, p.id ASC'
+        );
+        $st->execute([$userId, $orgId]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
         return is_array($rows) ? $rows : [];
     }
 
@@ -28,16 +35,24 @@ class ProjectService
 
     public static function canAccessProject(PDO $pdo, int $projectId, int $orgId, int $userId, string $role): bool
     {
-        if ($projectId <= 0) {
+        if ($projectId <= 0 || $userId <= 0) {
             return false;
         }
-        $st = $pdo->prepare('SELECT 1 FROM projects WHERE id = ? AND org_id = ?');
-        $st->execute([$projectId, $orgId]);
+        $st = $pdo->prepare(
+            'SELECT 1
+             FROM projects p
+             INNER JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = ?
+             WHERE p.id = ? AND p.org_id = ?
+             LIMIT 1'
+        );
+        $st->execute([$userId, $projectId, $orgId]);
+
         return (bool) $st->fetchColumn();
     }
 
     /**
      * @param array<int,int> $memberIds
+     * @param array<int,string> $memberRoles user_id => role
      * @return array{success:bool,project_id?:int,error?:string}
      */
     public static function createProject(
@@ -47,7 +62,8 @@ class ProjectService
         string $projectName,
         string $startDate,
         ?string $endDate,
-        array $memberIds
+        array $memberIds,
+        array $memberRoles = []
     ): array {
         $name = trim($projectName);
         if ($name === '') {
@@ -66,6 +82,7 @@ class ProjectService
         if (!in_array($createdByUserId, $memberIds, true)) {
             $memberIds[] = $createdByUserId;
         }
+        $memberRoles[$createdByUserId] = OrgRole::ROLE_SUPER_ADMIN;
 
         $pdo->beginTransaction();
         try {
@@ -81,7 +98,7 @@ class ProjectService
                 ':created_by' => $createdByUserId,
             ]);
             $projectId = (int) $pdo->lastInsertId();
-            self::assignMembers($pdo, $projectId, $createdByUserId, $memberIds);
+            self::assignMembers($pdo, $projectId, $createdByUserId, $memberIds, $memberRoles);
             $pdo->commit();
             return ['success' => true, 'project_id' => $projectId];
         } catch (PDOException $e) {
@@ -101,18 +118,25 @@ class ProjectService
 
     /**
      * @param array<int,int> $memberIds
+     * @param array<int,string> $memberRoles user_id => role
      */
-    public static function assignMembers(PDO $pdo, int $projectId, int $assignedBy, array $memberIds): void
+    public static function assignMembers(PDO $pdo, int $projectId, int $assignedBy, array $memberIds, array $memberRoles = []): void
     {
         $ins = $pdo->prepare(
-            'INSERT IGNORE INTO project_members (project_id, user_id, assigned_by)
-             VALUES (?,?,?)'
+            'INSERT INTO project_members (project_id, user_id, role, assigned_by)
+             VALUES (?,?,?,?)
+             ON DUPLICATE KEY UPDATE role = VALUES(role), assigned_by = VALUES(assigned_by)'
         );
         foreach ($memberIds as $userId) {
             if ((int) $userId <= 0) {
                 continue;
             }
-            $ins->execute([$projectId, (int) $userId, $assignedBy]);
+            $uid = (int) $userId;
+            $role = strtolower(trim((string) ($memberRoles[$uid] ?? OrgRole::ROLE_MEMBER)));
+            if (!in_array($role, [OrgRole::ROLE_SUPER_ADMIN, OrgRole::ROLE_ADMIN, OrgRole::ROLE_MEMBER], true)) {
+                $role = OrgRole::ROLE_MEMBER;
+            }
+            $ins->execute([$projectId, $uid, $role, $assignedBy]);
         }
     }
 
@@ -121,9 +145,17 @@ class ProjectService
         if ($sessionProjectId !== null && self::canAccessProject($pdo, $sessionProjectId, $orgId, $userId, $role)) {
             return $sessionProjectId;
         }
-        $st = $pdo->prepare('SELECT id FROM projects WHERE org_id = ? ORDER BY created_at ASC, id ASC LIMIT 1');
-        $st->execute([$orgId]);
+        $st = $pdo->prepare(
+            'SELECT p.id
+             FROM projects p
+             INNER JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = ?
+             WHERE p.org_id = ?
+             ORDER BY p.created_at ASC, p.id ASC
+             LIMIT 1'
+        );
+        $st->execute([$userId, $orgId]);
         $id = (int) $st->fetchColumn();
+
         return $id > 0 ? $id : null;
     }
 
@@ -343,6 +375,34 @@ class ProjectService
     }
 
     /**
+     * @return array<int, array<string,mixed>>
+     */
+    public static function listProjectMembers(PDO $pdo, int $projectId, int $orgId): array
+    {
+        $st = $pdo->prepare(
+            'SELECT u.id, u.username, u.display_name, u.email, pm.role, pm.user_id
+             FROM project_members pm
+             INNER JOIN users u ON u.id = pm.user_id
+             INNER JOIN projects p ON p.id = pm.project_id
+             WHERE pm.project_id = ? AND p.org_id = ?
+             ORDER BY u.username, u.email'
+        );
+        $st->execute([$projectId, $orgId]);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @param array<int,int> $memberIds
+     * @return array<int,int>
+     */
+    public static function filterOrgMemberUserIds(PDO $pdo, int $orgId, array $memberIds): array
+    {
+        return self::filterOrgUsers($pdo, $orgId, $memberIds);
+    }
+
+    /**
      * @param array<int,int> $memberIds
      * @return array<int,int>
      */
@@ -356,12 +416,13 @@ class ProjectService
         }
         $in = implode(',', array_fill(0, count($clean), '?'));
         $params = array_merge([$orgId], $clean);
-        $st = $pdo->prepare("SELECT id FROM users WHERE org_id = ? AND id IN ($in)");
+        $st = $pdo->prepare("SELECT user_id FROM user_organizations WHERE org_id = ? AND is_disabled = 0 AND user_id IN ($in)");
         $st->execute($params);
         $valid = [];
         while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
-            $valid[] = (int) $row['id'];
+            $valid[] = (int) $row['user_id'];
         }
+
         return $valid;
     }
 

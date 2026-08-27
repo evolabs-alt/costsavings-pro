@@ -123,7 +123,11 @@ class ReminderService
         $nextMonth = $now->modify('+1 month');
         $ym = $nextMonth->format('Y-m');
 
-        $users = $pdo->query('SELECT id, email, org_id, role FROM users WHERE email IS NOT NULL AND email <> \'\'')->fetchAll(PDO::FETCH_ASSOC);
+        $users = $pdo->query(
+            'SELECT u.id, u.email
+             FROM users u
+             WHERE u.email IS NOT NULL AND TRIM(u.email) <> \'\''
+        )->fetchAll(PDO::FETCH_ASSOC);
         foreach ($users as $u) {
             $uid = (int) $u['id'];
             $email = (string) $u['email'];
@@ -144,25 +148,42 @@ class ReminderService
                 continue;
             }
 
-            $role = $u['role'] ?? 'member';
-            $orgId = (int) $u['org_id'];
-            if (OrgRole::isSuperAdmin((string) $role)) {
-                $q = $pdo->prepare('SELECT * FROM cost_calculator_items WHERE org_id = ?');
-                $q->execute([$orgId]);
-            } elseif (OrgRole::isPrivileged((string) $role)) {
-                $q = $pdo->prepare(
-                    'SELECT * FROM cost_calculator_items WHERE org_id = ? AND visibility = \'public\''
-                );
-                $q->execute([$orgId]);
-            } else {
-                $q = $pdo->prepare(
-                    'SELECT * FROM cost_calculator_items WHERE org_id = ? AND (
-                        visibility = \'public\' OR (visibility = \'confidential\' AND manager_user_id = ?)
-                    )'
-                );
-                $q->execute([$orgId, $uid]);
+            $memberships = $pdo->prepare(
+                'SELECT pm.project_id, pm.role, p.org_id
+                 FROM project_members pm
+                 INNER JOIN projects p ON p.id = pm.project_id
+                 WHERE pm.user_id = ?'
+            );
+            $memberships->execute([$uid]);
+            $rows = [];
+            while ($mem = $memberships->fetch(PDO::FETCH_ASSOC)) {
+                $projectId = (int) ($mem['project_id'] ?? 0);
+                $orgId = (int) ($mem['org_id'] ?? 0);
+                $role = (string) ($mem['role'] ?? OrgRole::ROLE_MEMBER);
+                if ($projectId <= 0 || $orgId <= 0) {
+                    continue;
+                }
+                if (OrgRole::isSuperAdmin($role)) {
+                    $q = $pdo->prepare('SELECT * FROM cost_calculator_items WHERE org_id = ? AND project_id = ?');
+                    $q->execute([$orgId, $projectId]);
+                } elseif (OrgRole::isPrivileged($role)) {
+                    $q = $pdo->prepare(
+                        'SELECT * FROM cost_calculator_items WHERE org_id = ? AND project_id = ? AND visibility = \'public\''
+                    );
+                    $q->execute([$orgId, $projectId]);
+                } else {
+                    $q = $pdo->prepare(
+                        'SELECT * FROM cost_calculator_items WHERE org_id = ? AND project_id = ? AND (
+                            visibility = \'public\' OR (visibility = \'confidential\' AND manager_user_id = ?)
+                        )'
+                    );
+                    $q->execute([$orgId, $projectId, $uid]);
+                }
+                $projectRows = $q->fetchAll(PDO::FETCH_ASSOC);
+                foreach ($projectRows as $projectRow) {
+                    $rows[] = $projectRow;
+                }
             }
-            $rows = $q->fetchAll(PDO::FETCH_ASSOC);
             $lines = [];
             foreach ($rows as $row) {
                 $status = VendorService::resolveStatusFromRow($row);

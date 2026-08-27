@@ -10,6 +10,7 @@ use CostSavings\MappedCsvImport;
 use CostSavings\OrgRole;
 use CostSavings\ProjectService;
 use CostSavings\QboService;
+use CostSavings\RoleContext;
 use CostSavings\VendorChatService;
 use CostSavings\VendorPurposeService;
 use CostSavings\VendorService;
@@ -19,8 +20,7 @@ function normalizeUserEmail($email) {
 }
 
 /**
- * Refresh org role (and org id) from the database into the session.
- * Role is only written to SESSION at login; migrations or manual updates otherwise diverge from SESSION.
+ * Refresh org and project roles from the database into the session.
  */
 function syncSessionOrgRoleFromDatabase(): void
 {
@@ -29,21 +29,30 @@ function syncSessionOrgRoleFromDatabase(): void
     }
     try {
         $pdo = getDBConnection();
-        $st = $pdo->prepare('SELECT role, org_id FROM users WHERE id = ? LIMIT 1');
-        $st->execute([(int) $_SESSION['user_id']]);
-        $row = $st->fetch(PDO::FETCH_ASSOC);
-        if (!$row) {
+        $userId = (int) $_SESSION['user_id'];
+        $orgId = (int) ($_SESSION['org_id'] ?? 0);
+        if ($orgId < 1) {
+            $orgId = RoleContext::resolveDefaultOrgId($pdo, $userId);
+        }
+        if ($orgId < 1) {
             return;
         }
-        if (isset($row['role']) && $row['role'] !== '') {
-            $_SESSION['role'] = $row['role'];
-        }
-        if (isset($row['org_id']) && (int) $row['org_id'] > 0) {
-            $_SESSION['org_id'] = (int) $row['org_id'];
-        }
+        $projectId = isset($_SESSION['active_project_id']) ? (int) $_SESSION['active_project_id'] : null;
+        RoleContext::syncSession($pdo, $userId, $orgId, $projectId);
+        $_SESSION['user_orgs'] = RoleContext::listUserOrganizations($pdo, $userId);
     } catch (\PDOException $e) {
         error_log('syncSessionOrgRoleFromDatabase: ' . $e->getMessage());
     }
+}
+
+function sessionOrgRole(): string
+{
+    return RoleContext::sessionOrgRole();
+}
+
+function sessionProjectRole(): string
+{
+    return RoleContext::sessionProjectRole();
 }
 
 /**
@@ -188,19 +197,17 @@ function ensureUserOrganizationId(PDO $pdo, int $userId): int {
     if ($userId < 1) {
         return 0;
     }
-    $st = $pdo->prepare('SELECT org_id, email, username, display_name FROM users WHERE id = ? LIMIT 1');
+    backfillUserOrganizationsFromLegacyUsers($pdo);
+    $orgId = RoleContext::resolveDefaultOrgId($pdo, $userId);
+    if ($orgId >= 1) {
+        return $orgId;
+    }
+
+    $st = $pdo->prepare('SELECT email, username, display_name FROM users WHERE id = ? LIMIT 1');
     $st->execute([$userId]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
     if (!$row) {
         return 0;
-    }
-    $current = isset($row['org_id']) && $row['org_id'] !== null && $row['org_id'] !== '' ? (int) $row['org_id'] : 0;
-    if ($current >= 1) {
-        $chk = $pdo->prepare('SELECT 1 FROM organizations WHERE id = ?');
-        $chk->execute([$current]);
-        if ($chk->fetchColumn()) {
-            return $current;
-        }
     }
     $label = trim((string) ($row['display_name'] ?? ''));
     if ($label === '') {
@@ -224,8 +231,8 @@ function ensureUserOrganizationId(PDO $pdo, int $userId): int {
             error_log('ensureUserOrganizationId: lastInsertId invalid for user ' . $userId);
             return 0;
         }
-        $upd = $pdo->prepare('UPDATE users SET org_id = ? WHERE id = ?');
-        $upd->execute([$newOrgId, $userId]);
+        RoleContext::upsertOrgMembership($pdo, $userId, $newOrgId, OrgRole::ROLE_SUPER_ADMIN);
+        RoleContext::persistLastOrgId($pdo, $userId, $newOrgId);
         return $newOrgId;
     } catch (PDOException $e) {
         error_log('ensureUserOrganizationId: ' . $e->getMessage());
@@ -303,8 +310,8 @@ function handleSsoConsume(): void
         $display = $local;
         try {
             $ins = $pdo->prepare(
-                'INSERT INTO users (org_id, username, email, password_hash, role, display_name)
-                 VALUES (NULL, ?, ?, NULL, \'member\', ?)'
+                'INSERT INTO users (username, email, password_hash, display_name)
+                 VALUES (?, ?, NULL, ?)'
             );
             $ins->execute([$username, $email, $display]);
             $newId = (int) $pdo->lastInsertId();
@@ -338,26 +345,25 @@ function establishUserSession(PDO $pdo, array $row): void
 {
     session_regenerate_id(true);
     $_SESSION['user_id'] = (int) $row['id'];
-    $_SESSION['role'] = $row['role'];
     $_SESSION['username'] = $row['username'] ?? '';
     $_SESSION['user_email'] = normalizeUserEmail($row['email']);
     $userId = (int) $row['id'];
+    backfillUserOrganizationsFromLegacyUsers($pdo);
     $orgId = ensureUserOrganizationId($pdo, $userId);
     if ($orgId < 1) {
         $_SESSION['error'] = 'Your account organization could not be set up. Please contact support.';
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     }
-    $_SESSION['org_id'] = $orgId;
-    $role = (string) ($row['role'] ?? 'member');
+    RoleContext::persistLastOrgId($pdo, $userId, $orgId);
+    $orgRole = RoleContext::orgRole($pdo, $userId, $orgId) ?? OrgRole::ROLE_MEMBER;
     $projectCount = ProjectService::orgProjectCount($pdo, $orgId);
-    $_SESSION['project_onboarding_required'] = (OrgRole::isSuperAdmin($role) && $projectCount === 0);
-    $activeProjectId = ProjectService::resolveActiveProjectId($pdo, $orgId, $userId, $role, null);
+    $_SESSION['project_onboarding_required'] = OrgRole::isSuperAdmin($orgRole) && $projectCount === 0;
+    $activeProjectId = ProjectService::resolveActiveProjectId($pdo, $orgId, $userId, $orgRole, null);
+    RoleContext::syncSession($pdo, $userId, $orgId, $activeProjectId);
+    $_SESSION['user_orgs'] = RoleContext::listUserOrganizations($pdo, $userId);
     if ($activeProjectId !== null) {
-        $_SESSION['active_project_id'] = $activeProjectId;
         ProjectService::backfillNullProjectRows($pdo, $orgId, $activeProjectId);
-    } else {
-        unset($_SESSION['active_project_id']);
     }
 }
 
@@ -366,18 +372,23 @@ function requireActiveProjectId(PDO $pdo): ?int
     if (empty($_SESSION['user_id'])) {
         return null;
     }
+    $userId = (int) $_SESSION['user_id'];
+    $orgId = (int) ($_SESSION['org_id'] ?? 0);
     $projectId = isset($_SESSION['active_project_id']) ? (int) $_SESSION['active_project_id'] : null;
     $resolved = ProjectService::resolveActiveProjectId(
         $pdo,
-        (int) $_SESSION['org_id'],
-        (int) $_SESSION['user_id'],
-        (string) ($_SESSION['role'] ?? 'member'),
+        $orgId,
+        $userId,
+        sessionProjectRole(),
         $projectId
     );
     if ($resolved !== null) {
-        $_SESSION['active_project_id'] = $resolved;
-        ProjectService::backfillNullProjectRows($pdo, (int) $_SESSION['org_id'], $resolved);
+        RoleContext::syncSession($pdo, $userId, $orgId, $resolved);
+        ProjectService::backfillNullProjectRows($pdo, $orgId, $resolved);
+    } else {
+        RoleContext::syncSession($pdo, $userId, $orgId, null);
     }
+
     return $resolved;
 }
 
@@ -397,12 +408,40 @@ function parseMemberIds($raw): array
     }));
 }
 
+function parseMemberRoles($raw): array
+{
+    if (is_array($raw)) {
+        $out = [];
+        foreach ($raw as $userId => $role) {
+            $uid = (int) $userId;
+            if ($uid > 0) {
+                $out[$uid] = (string) $role;
+            }
+        }
+
+        return $out;
+    }
+    $decoded = json_decode((string) $raw, true);
+    if (!is_array($decoded)) {
+        return [];
+    }
+    $out = [];
+    foreach ($decoded as $userId => $role) {
+        $uid = (int) $userId;
+        if ($uid > 0) {
+            $out[$uid] = (string) $role;
+        }
+    }
+
+    return $out;
+}
+
 function handleInviteMember() {
     $redir = function () {
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     };
-    if (empty($_SESSION['user_id']) || !OrgRole::isPrivileged((string) ($_SESSION['role'] ?? ''))) {
+    if (empty($_SESSION['user_id']) || !OrgRole::isPrivileged(sessionOrgRole())) {
         $_SESSION['error'] = 'Only admins can invite members.';
         $redir();
     }
@@ -415,7 +454,7 @@ function handleInviteMember() {
     $orgId = (int) $_SESSION['org_id'];
 
     $inviteRole = OrgRole::ROLE_MEMBER;
-    if (OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
+    if (OrgRole::isSuperAdmin(sessionOrgRole())) {
         $rawRole = strtolower(trim((string) ($_POST['invite_role'] ?? '')));
         if ($rawRole === OrgRole::ROLE_ADMIN) {
             $inviteRole = OrgRole::ROLE_ADMIN;
@@ -429,18 +468,24 @@ function handleInviteMember() {
         'invite_role' => $inviteRole,
     ]);
     $maxUsers = getOrganizationMaxUsers($pdo, $orgId);
-    $c = (int) $pdo->query('SELECT COUNT(*) AS c FROM users WHERE org_id = ' . (int) $orgId)->fetch()['c'];
+    $c = getOrganizationMemberCount($pdo, $orgId);
     if ($c >= $maxUsers) {
         logInviteEvent('blocked_org_limit', ['org_id' => $orgId, 'users' => $c, 'max_users' => $maxUsers]);
         $_SESSION['error'] = 'Organization is at the maximum of ' . $maxUsers . ' users.';
         $redir();
     }
-    $exists = $pdo->prepare('SELECT id FROM users WHERE email = ?');
+    $exists = $pdo->prepare('SELECT id FROM users WHERE email = ? LIMIT 1');
     $exists->execute([$email]);
-    if ($exists->fetch()) {
-        logInviteEvent('blocked_existing_user', ['org_id' => $orgId, 'email' => $email]);
-        $_SESSION['error'] = 'A user with this email already exists.';
-        $redir();
+    $existingUser = $exists->fetch(PDO::FETCH_ASSOC);
+    if ($existingUser) {
+        $existingUserId = (int) ($existingUser['id'] ?? 0);
+        $alreadyMember = $pdo->prepare('SELECT 1 FROM user_organizations WHERE user_id = ? AND org_id = ? LIMIT 1');
+        $alreadyMember->execute([$existingUserId, $orgId]);
+        if ($alreadyMember->fetchColumn()) {
+            logInviteEvent('blocked_existing_member', ['org_id' => $orgId, 'email' => $email]);
+            $_SESSION['error'] = 'This user is already a member of your organization.';
+            $redir();
+        }
     }
     $pending = $pdo->prepare(
         'SELECT id FROM invitations WHERE org_id = ? AND email = ? AND consumed_at IS NULL AND expires_at > NOW() LIMIT 1'
@@ -825,7 +870,7 @@ function handleExportVendors() {
         (int) $_SESSION['user_id'],
         (int) $_SESSION['org_id'],
         $activeProjectId,
-        $_SESSION['role'] ?? 'member'
+        sessionProjectRole()
     );
     $fmt = $_GET['format'] ?? $_POST['format'] ?? 'xlsx';
     if ($fmt === 'xlsx') {
@@ -892,7 +937,7 @@ function handleAiAsk() {
         (int) $_SESSION['user_id'],
         (int) $_SESSION['org_id'],
         $activeProjectId,
-        $_SESSION['role'] ?? 'member'
+        sessionProjectRole()
     );
     if ($focusItemId > 0) {
         $focused = array_values(array_filter($items, static function ($item) use ($focusItemId) {
@@ -972,7 +1017,7 @@ function handleAutoPopulatePurpose() {
     $pdo = getDBConnection();
     $orgId = (int) $_SESSION['org_id'];
     $userId = (int) $_SESSION['user_id'];
-    $role = (string) ($_SESSION['role'] ?? 'member');
+    $role = sessionProjectRole();
     $projectId = (int) ($_POST['project_id'] ?? 0);
     if ($projectId <= 0) {
         $activeProjectId = requireActiveProjectId($pdo);
@@ -1114,7 +1159,13 @@ function handleLoadTeamMembers() {
         exit;
     }
     $pdo = getDBConnection();
-    $st = $pdo->prepare('SELECT id, username, display_name, email, role, is_disabled FROM users WHERE org_id = ? ORDER BY username, email');
+    $st = $pdo->prepare(
+        'SELECT u.id, u.username, u.display_name, u.email, uo.role, uo.is_disabled
+         FROM user_organizations uo
+         INNER JOIN users u ON u.id = uo.user_id
+         WHERE uo.org_id = ?
+         ORDER BY u.username, u.email'
+    );
     $st->execute([(int) $_SESSION['org_id']]);
     $members = $st->fetchAll(PDO::FETCH_ASSOC);
     echo json_encode(['success' => true, 'members' => $members]);
@@ -1127,7 +1178,7 @@ function handleToggleMemberDisabled(): void
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     };
-    if (empty($_SESSION['user_id']) || !OrgRole::isPrivileged((string) ($_SESSION['role'] ?? ''))) {
+    if (empty($_SESSION['user_id']) || !OrgRole::isPrivileged(sessionOrgRole())) {
         $_SESSION['error'] = 'Only admins can manage member status.';
         $redir();
     }
@@ -1140,26 +1191,26 @@ function handleToggleMemberDisabled(): void
 
     $pdo = getDBConnection();
     $orgId = (int) $_SESSION['org_id'];
-    $lookup = $pdo->prepare('SELECT id, role FROM users WHERE id = ? AND org_id = ? LIMIT 1');
+    $lookup = $pdo->prepare('SELECT role FROM user_organizations WHERE user_id = ? AND org_id = ? LIMIT 1');
     $lookup->execute([$memberId, $orgId]);
     $member = $lookup->fetch(PDO::FETCH_ASSOC);
     if (!$member) {
         $_SESSION['error'] = 'Member not found.';
         $redir();
     }
-    if (($member['role'] ?? '') !== 'member') {
+    if (($member['role'] ?? '') !== OrgRole::ROLE_MEMBER) {
         $_SESSION['error'] = 'Only members can be disabled or enabled.';
         $redir();
     }
 
-    $upd = $pdo->prepare('UPDATE users SET is_disabled = ? WHERE id = ? AND org_id = ?');
+    $upd = $pdo->prepare('UPDATE user_organizations SET is_disabled = ? WHERE user_id = ? AND org_id = ?');
     $upd->execute([$disable, $memberId, $orgId]);
     $_SESSION['message'] = $disable === 1 ? 'Member disabled successfully.' : 'Member enabled successfully.';
     $redir();
 }
 
 function handleSaveOrgReminders() {
-    if (empty($_SESSION['user_id']) || !OrgRole::isPrivileged((string) ($_SESSION['role'] ?? ''))) {
+    if (empty($_SESSION['user_id']) || !OrgRole::isPrivileged(sessionOrgRole())) {
         $_SESSION['error'] = 'Only admins can change organization settings.';
 
         return;
@@ -1191,7 +1242,7 @@ function handleSaveReminderSettings() {
         return;
     }
     $pdo = getDBConnection();
-    $isAdmin = OrgRole::isPrivileged((string) ($_SESSION['role'] ?? ''));
+    $isAdmin = OrgRole::isPrivileged(sessionOrgRole());
 
     if ($isAdmin) {
         $orgOn = isset($_POST['deadline_reminders_enabled']) && $_POST['deadline_reminders_enabled'] === '1';
@@ -1239,7 +1290,7 @@ function handleQboDisconnect(): void
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     }
-    if (!OrgRole::isPrivileged((string) ($_SESSION['role'] ?? ''))) {
+    if (!OrgRole::isPrivileged(sessionOrgRole())) {
         $_SESSION['error'] = 'Only admins can disconnect QuickBooks.';
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
@@ -1392,7 +1443,7 @@ function handleSaveCostCalculator() {
     $pdo = getDBConnection();
     $orgId = (int) $_SESSION['org_id'];
     $uid = (int) $_SESSION['user_id'];
-    $role = $_SESSION['role'] ?? 'member';
+    $role = sessionProjectRole();
     $activeProjectId = requireActiveProjectId($pdo);
     if ($activeProjectId === null) {
         echo json_encode(['success' => false, 'error' => 'No active project selected']);
@@ -1543,7 +1594,7 @@ function handleLoadCostCalculator() {
             (int) $_SESSION['user_id'],
             (int) $_SESSION['org_id'],
             $activeProjectId,
-            $_SESSION['role'] ?? 'member'
+            sessionProjectRole()
         );
         $uid = (int) $_SESSION['user_id'];
         $counts = VendorChatService::unreadCountsForUserProject(
@@ -1551,14 +1602,14 @@ function handleLoadCostCalculator() {
             (int) $_SESSION['org_id'],
             $activeProjectId,
             $uid,
-            (string) ($_SESSION['role'] ?? 'member')
+        sessionProjectRole()
         );
         $tagged = VendorChatService::taggedCountsForUserProject(
             $pdo,
             (int) $_SESSION['org_id'],
             $activeProjectId,
             $uid,
-            (string) ($_SESSION['role'] ?? 'member')
+        sessionProjectRole()
         );
         foreach ($items as &$it) {
             if (!is_array($it)) {
@@ -1622,7 +1673,7 @@ function handleLoadVendorRawData() {
         (int) $_SESSION['org_id'],
         $activeProjectId,
         (int) $_SESSION['user_id'],
-        (string) ($_SESSION['role'] ?? 'member'),
+        sessionProjectRole(),
         $vendorName
     );
     echo json_encode([
@@ -1659,7 +1710,7 @@ function handleLoadVendorChatMessages() {
         $activeProjectId,
         $vendorItemId,
         (int) $_SESSION['user_id'],
-        (string) ($_SESSION['role'] ?? 'member')
+        sessionProjectRole()
     );
     echo json_encode($result);
     exit;
@@ -1703,7 +1754,7 @@ function handleAddVendorChatMessage() {
         (int) $_SESSION['user_id'],
         $username,
         $message,
-        (string) ($_SESSION['role'] ?? 'member')
+        sessionProjectRole()
     );
     echo json_encode($result);
     exit;
@@ -1746,7 +1797,7 @@ function handleEditVendorChatMessage() {
         $vendorItemId,
         $messageId,
         (int) $_SESSION['user_id'],
-        (string) ($_SESSION['role'] ?? 'member'),
+        sessionProjectRole(),
         $message
     );
     echo json_encode($result);
@@ -1773,14 +1824,14 @@ function handleVendorChatUnreadCounts() {
         (int) $_SESSION['org_id'],
         $activeProjectId,
         $uid,
-        (string) ($_SESSION['role'] ?? 'member')
+        sessionProjectRole()
     );
     $tagged = VendorChatService::taggedCountsForUserProject(
         $pdo,
         (int) $_SESSION['org_id'],
         $activeProjectId,
         $uid,
-        (string) ($_SESSION['role'] ?? 'member')
+        sessionProjectRole()
     );
     $sparse = [];
     foreach ($counts as $vid => $n) {
@@ -1810,7 +1861,7 @@ function handleProjectList() {
         $pdo,
         (int) $_SESSION['org_id'],
         (int) $_SESSION['user_id'],
-        (string) ($_SESSION['role'] ?? 'member')
+        sessionProjectRole()
     );
     $activeProjectId = requireActiveProjectId($pdo);
     echo json_encode([
@@ -1835,13 +1886,14 @@ function handleProjectSetActive() {
         $projectId,
         (int) $_SESSION['org_id'],
         (int) $_SESSION['user_id'],
-        (string) ($_SESSION['role'] ?? 'member')
+        sessionProjectRole()
     )) {
         echo json_encode(['success' => false, 'error' => 'You do not have access to this project.']);
         exit;
     }
     $_SESSION['active_project_id'] = $projectId;
-    echo json_encode(['success' => true, 'active_project_id' => $projectId]);
+    RoleContext::syncSession($pdo, (int) $_SESSION['user_id'], (int) $_SESSION['org_id'], $projectId);
+    echo json_encode(['success' => true, 'active_project_id' => $projectId, 'project_role' => sessionProjectRole()]);
     exit;
 }
 
@@ -1851,7 +1903,7 @@ function handleProjectCreate() {
         echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
+    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
         echo json_encode(['success' => false, 'error' => 'Only a super admin can create projects.']);
         exit;
     }
@@ -1862,6 +1914,7 @@ function handleProjectCreate() {
     }
     $endDate = trim((string) ($_POST['end_date'] ?? ''));
     $memberIds = parseMemberIds($_POST['member_ids'] ?? []);
+    $memberRoles = parseMemberRoles($_POST['member_roles'] ?? []);
     $copyFromActive = isset($_POST['copy_from_active']) && (string) $_POST['copy_from_active'] === '1';
     $sourceProjectId = isset($_POST['source_project_id']) ? (int) $_POST['source_project_id'] : 0;
 
@@ -1880,7 +1933,8 @@ function handleProjectCreate() {
         $projectName,
         $startDate,
         $endDate === '' ? null : $endDate,
-        $memberIds
+        $memberIds,
+        $memberRoles
     );
     if (!($create['success'] ?? false)) {
         echo json_encode($create);
@@ -1893,13 +1947,150 @@ function handleProjectCreate() {
             $sourceProjectId = isset($_SESSION['active_project_id']) ? (int) $_SESSION['active_project_id'] : 0;
         }
         if ($sourceProjectId > 0) {
-            ProjectService::copyProjectData($pdo, $orgId, $sourceProjectId, $newProjectId, $userId, (string) ($_SESSION['role'] ?? 'member'));
+            ProjectService::copyProjectData($pdo, $orgId, $sourceProjectId, $newProjectId, $userId, sessionProjectRole());
         }
     }
 
     $_SESSION['active_project_id'] = $newProjectId;
     $_SESSION['project_onboarding_required'] = false;
+    RoleContext::syncSession($pdo, $userId, $orgId, $newProjectId);
     echo json_encode(['success' => true, 'project_id' => $newProjectId]);
+    exit;
+}
+
+function handleListOrganizations(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'organizations' => []]);
+        exit;
+    }
+    $pdo = getDBConnection();
+    $orgs = RoleContext::listUserOrganizations($pdo, (int) $_SESSION['user_id']);
+    echo json_encode([
+        'success' => true,
+        'organizations' => $orgs,
+        'active_org_id' => (int) ($_SESSION['org_id'] ?? 0),
+    ]);
+    exit;
+}
+
+function handleOrgSetActive(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Not logged in']);
+        exit;
+    }
+    $orgId = (int) ($_POST['org_id'] ?? 0);
+    $userId = (int) $_SESSION['user_id'];
+    $pdo = getDBConnection();
+    $orgRole = RoleContext::orgRole($pdo, $userId, $orgId);
+    if ($orgRole === null) {
+        echo json_encode(['success' => false, 'error' => 'You are not a member of that organization.']);
+        exit;
+    }
+    RoleContext::persistLastOrgId($pdo, $userId, $orgId);
+    $projectCount = ProjectService::orgProjectCount($pdo, $orgId);
+    $_SESSION['project_onboarding_required'] = OrgRole::isSuperAdmin($orgRole) && $projectCount === 0;
+    $activeProjectId = ProjectService::resolveActiveProjectId($pdo, $orgId, $userId, $orgRole, null);
+    RoleContext::syncSession($pdo, $userId, $orgId, $activeProjectId);
+    $_SESSION['user_orgs'] = RoleContext::listUserOrganizations($pdo, $userId);
+    if ($activeProjectId !== null) {
+        ProjectService::backfillNullProjectRows($pdo, $orgId, $activeProjectId);
+    }
+    echo json_encode([
+        'success' => true,
+        'org_id' => $orgId,
+        'org_role' => sessionOrgRole(),
+        'active_project_id' => $activeProjectId,
+        'project_role' => sessionProjectRole(),
+    ]);
+    exit;
+}
+
+function handleLoadProjectMembers(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'members' => []]);
+        exit;
+    }
+    if (!OrgRole::isPrivileged(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only admins can view project members.']);
+        exit;
+    }
+    $projectId = (int) ($_POST['project_id'] ?? $_GET['project_id'] ?? 0);
+    if ($projectId <= 0) {
+        $projectId = (int) ($_SESSION['active_project_id'] ?? 0);
+    }
+    $pdo = getDBConnection();
+    $orgId = (int) $_SESSION['org_id'];
+    $userId = (int) $_SESSION['user_id'];
+    if (!ProjectService::canAccessProject($pdo, $projectId, $orgId, $userId, sessionProjectRole())) {
+        echo json_encode(['success' => false, 'error' => 'You do not have access to this project.']);
+        exit;
+    }
+    $members = ProjectService::listProjectMembers($pdo, $projectId, $orgId);
+    $orgMembers = $pdo->prepare(
+        'SELECT u.id, u.username, u.display_name, u.email
+         FROM user_organizations uo
+         INNER JOIN users u ON u.id = uo.user_id
+         WHERE uo.org_id = ? AND uo.is_disabled = 0
+         ORDER BY u.username, u.email'
+    );
+    $orgMembers->execute([$orgId]);
+    echo json_encode([
+        'success' => true,
+        'project_id' => $projectId,
+        'members' => $members,
+        'org_members' => $orgMembers->fetchAll(PDO::FETCH_ASSOC),
+    ]);
+    exit;
+}
+
+function handleSaveProjectMembers(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Not logged in']);
+        exit;
+    }
+    if (!OrgRole::isPrivileged(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only admins can manage project members.']);
+        exit;
+    }
+    $projectId = (int) ($_POST['project_id'] ?? 0);
+    $memberIds = parseMemberIds($_POST['member_ids'] ?? []);
+    $memberRoles = parseMemberRoles($_POST['member_roles'] ?? []);
+    $pdo = getDBConnection();
+    $orgId = (int) $_SESSION['org_id'];
+    $userId = (int) $_SESSION['user_id'];
+    if ($projectId <= 0 || !ProjectService::canAccessProject($pdo, $projectId, $orgId, $userId, sessionProjectRole())) {
+        echo json_encode(['success' => false, 'error' => 'Invalid project.']);
+        exit;
+    }
+    if (count($memberIds) === 0) {
+        echo json_encode(['success' => false, 'error' => 'Select at least one member.']);
+        exit;
+    }
+    $filtered = ProjectService::filterOrgMemberUserIds($pdo, $orgId, $memberIds);
+    if (count($filtered) === 0) {
+        echo json_encode(['success' => false, 'error' => 'No valid organization members selected.']);
+        exit;
+    }
+    ProjectService::assignMembers($pdo, $projectId, $userId, $filtered, $memberRoles);
+    if (count($filtered) > 0) {
+        $in = implode(',', array_fill(0, count($filtered), '?'));
+        $del = $pdo->prepare("DELETE FROM project_members WHERE project_id = ? AND user_id NOT IN ($in)");
+        $del->execute(array_merge([$projectId], $filtered));
+    } else {
+        $pdo->prepare('DELETE FROM project_members WHERE project_id = ?')->execute([$projectId]);
+    }
+    if ($projectId === (int) ($_SESSION['active_project_id'] ?? 0)) {
+        RoleContext::syncSession($pdo, $userId, $orgId, $projectId);
+    }
+    echo json_encode(['success' => true, 'members' => ProjectService::listProjectMembers($pdo, $projectId, $orgId)]);
     exit;
 }
 
@@ -1909,7 +2100,7 @@ function handleCopyProjectPurposes() {
         echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
+    if (!OrgRole::isSuperAdmin(sessionProjectRole())) {
         echo json_encode(['success' => false, 'error' => 'Only a super admin can copy project purposes.']);
         exit;
     }
@@ -1926,7 +2117,7 @@ function handleCopyProjectPurposes() {
     $pdo = getDBConnection();
     $userId = (int) $_SESSION['user_id'];
     $orgId = (int) ($_SESSION['org_id'] ?? 0);
-    $role = (string) ($_SESSION['role'] ?? 'member');
+    $role = sessionProjectRole();
     if ($orgId < 1) {
         echo json_encode(['success' => false, 'error' => 'Organization could not be loaded.']);
         exit;
@@ -1956,7 +2147,7 @@ function handleCopyProjectChats() {
         echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
+    if (!OrgRole::isSuperAdmin(sessionProjectRole())) {
         echo json_encode(['success' => false, 'error' => 'Only a super admin can copy project chats.']);
         exit;
     }
@@ -1973,7 +2164,7 @@ function handleCopyProjectChats() {
     $pdo = getDBConnection();
     $userId = (int) $_SESSION['user_id'];
     $orgId = (int) ($_SESSION['org_id'] ?? 0);
-    $role = (string) ($_SESSION['role'] ?? 'member');
+    $role = sessionProjectRole();
     if ($orgId < 1) {
         echo json_encode(['success' => false, 'error' => 'Organization could not be loaded.']);
         exit;
@@ -2033,7 +2224,7 @@ function handleCopyProjectCategories() {
         echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
+    if (!OrgRole::isSuperAdmin(sessionProjectRole())) {
         echo json_encode(['success' => false, 'error' => 'Only a super admin can copy project categories.']);
         exit;
     }
@@ -2050,7 +2241,7 @@ function handleCopyProjectCategories() {
     $pdo = getDBConnection();
     $userId = (int) $_SESSION['user_id'];
     $orgId = (int) ($_SESSION['org_id'] ?? 0);
-    $role = (string) ($_SESSION['role'] ?? 'member');
+    $role = sessionProjectRole();
     if ($orgId < 1) {
         echo json_encode(['success' => false, 'error' => 'Organization could not be loaded.']);
         exit;
@@ -2078,7 +2269,7 @@ function handleProjectDelete() {
         echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? ''))) {
+    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
         echo json_encode(['success' => false, 'error' => 'Only a super admin can delete projects.']);
         exit;
     }
@@ -2086,7 +2277,7 @@ function handleProjectDelete() {
     $pdo = getDBConnection();
     $orgId = (int) $_SESSION['org_id'];
     $userId = (int) $_SESSION['user_id'];
-    $role = (string) ($_SESSION['role'] ?? 'member');
+    $role = sessionProjectRole();
 
     $result = ProjectService::deleteProject($pdo, $orgId, $projectId, $userId, $role);
     if (!($result['success'] ?? false)) {

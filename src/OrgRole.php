@@ -51,16 +51,16 @@ final class OrgRole
         return [
             [
                 'title' => 'Super admin',
-                'description' => 'Full organization access: create and delete projects, all vendor rows, choose invite role, and copy project data.',
-                'note' => 'Not assignable via invite; shown for context.',
+                'description' => 'Organization: invite members, org settings, create/delete projects. Project: full vendor access including confidential rows and copy operations.',
+                'note' => 'Org super admin can create projects; project super admin controls vendor data within a project.',
             ],
             [
                 'title' => 'Administrator',
-                'description' => 'Can invite users (as Member unless the inviter is a Super admin), manage members, and work with public vendor rows org-wide. Cannot create or delete projects.',
+                'description' => 'Organization: invite members (as Member), manage members, org settings. Project: public vendor rows only within assigned projects.',
             ],
             [
                 'title' => 'Member',
-                'description' => 'Sees public vendor rows plus confidential rows they manage. Can update status, purpose, and chat on rows they manage or unassigned rows; cannot change vendor, cost, or frequency.',
+                'description' => 'Organization: basic membership. Project: public rows plus confidential rows they manage in assigned projects.',
             ],
         ];
     }

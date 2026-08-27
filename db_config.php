@@ -354,6 +354,7 @@ function migrateSchema(PDO $pdo) {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
         migrateProjectSchema($pdo);
+        migrateUserOrganizationsSchema($pdo);
         migrateCostCalculatorSchema($pdo);
         seedInitialAdminIfNeeded($pdo);
         $migrated = true;
@@ -388,6 +389,7 @@ function migrateProjectSchema(PDO $pdo): void
             `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             `project_id` INT UNSIGNED NOT NULL,
             `user_id` INT UNSIGNED NOT NULL,
+            `role` ENUM('super_admin','admin','member') NOT NULL DEFAULT 'member',
             `assigned_by` INT UNSIGNED NOT NULL,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY `uk_project_members` (`project_id`, `user_id`),
@@ -396,8 +398,123 @@ function migrateProjectSchema(PDO $pdo): void
             CONSTRAINT `fk_project_members_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
             CONSTRAINT `fk_project_members_assigned_by` FOREIGN KEY (`assigned_by`) REFERENCES `users` (`id`) ON DELETE RESTRICT
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $pmRoleCol = $pdo->query("SHOW COLUMNS FROM `project_members` LIKE 'role'")->fetch();
+        if (!$pmRoleCol) {
+            $pdo->exec("ALTER TABLE `project_members` ADD COLUMN `role` ENUM('super_admin','admin','member') NOT NULL DEFAULT 'member' AFTER `user_id`");
+        }
     } catch (PDOException $e) {
         error_log('migrateProjectSchema: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Multi-org membership and per-scope roles.
+ *
+ * @param PDO $pdo
+ */
+function migrateUserOrganizationsSchema(PDO $pdo): void
+{
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `user_organizations` (
+            `user_id` INT UNSIGNED NOT NULL,
+            `org_id` INT UNSIGNED NOT NULL,
+            `role` ENUM('super_admin','admin','member') NOT NULL DEFAULT 'member',
+            `is_disabled` TINYINT(1) NOT NULL DEFAULT 0,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`user_id`, `org_id`),
+            KEY `idx_uo_org` (`org_id`),
+            CONSTRAINT `fk_uo_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_uo_org` FOREIGN KEY (`org_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $lastOrgCol = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'last_org_id'")->fetch();
+        if (!$lastOrgCol) {
+            $pdo->exec('ALTER TABLE `users` ADD COLUMN `last_org_id` INT UNSIGNED NULL AFTER `org_id`');
+        }
+
+        backfillUserOrganizationsFromLegacyUsers($pdo);
+        backfillProjectMemberRolesFromLegacyUsers($pdo);
+        backfillMissingProjectMembersForOrgUsers($pdo);
+    } catch (PDOException $e) {
+        error_log('migrateUserOrganizationsSchema: ' . $e->getMessage());
+    }
+}
+
+/**
+ * @param PDO $pdo
+ */
+function backfillUserOrganizationsFromLegacyUsers(PDO $pdo): void
+{
+    try {
+        $pdo->exec(
+            'INSERT IGNORE INTO user_organizations (user_id, org_id, role, is_disabled)
+             SELECT u.id, u.org_id, u.role, u.is_disabled
+             FROM users u
+             WHERE u.org_id IS NOT NULL AND u.org_id > 0'
+        );
+    } catch (PDOException $e) {
+        error_log('backfillUserOrganizationsFromLegacyUsers: ' . $e->getMessage());
+    }
+}
+
+/**
+ * @param PDO $pdo
+ */
+function backfillProjectMemberRolesFromLegacyUsers(PDO $pdo): void
+{
+    try {
+        $pdo->exec(
+            'UPDATE project_members pm
+             INNER JOIN users u ON u.id = pm.user_id
+             SET pm.role = u.role
+             WHERE pm.role = \'member\' AND u.role <> \'member\''
+        );
+    } catch (PDOException $e) {
+        error_log('backfillProjectMemberRolesFromLegacyUsers: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Users in an org with projects but no project_members row get first project only.
+ *
+ * @param PDO $pdo
+ */
+function backfillMissingProjectMembersForOrgUsers(PDO $pdo): void
+{
+    try {
+        $st = $pdo->query(
+            'SELECT uo.user_id, uo.org_id, uo.role,
+                    (SELECT p.id FROM projects p WHERE p.org_id = uo.org_id ORDER BY p.created_at ASC, p.id ASC LIMIT 1) AS first_project_id
+             FROM user_organizations uo
+             WHERE uo.is_disabled = 0'
+        );
+        if (!$st) {
+            return;
+        }
+        $ins = $pdo->prepare(
+            'INSERT IGNORE INTO project_members (project_id, user_id, role, assigned_by)
+             VALUES (?, ?, ?, ?)'
+        );
+        while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+            $projectId = (int) ($row['first_project_id'] ?? 0);
+            $userId = (int) ($row['user_id'] ?? 0);
+            if ($projectId <= 0 || $userId <= 0) {
+                continue;
+            }
+            $chk = $pdo->prepare('SELECT 1 FROM project_members WHERE user_id = ? AND project_id IN (SELECT id FROM projects WHERE org_id = ?) LIMIT 1');
+            $chk->execute([$userId, (int) $row['org_id']]);
+            if ($chk->fetchColumn()) {
+                continue;
+            }
+            $role = (string) ($row['role'] ?? 'member');
+            if (!in_array($role, ['super_admin', 'admin', 'member'], true)) {
+                $role = 'member';
+            }
+            $ins->execute([$projectId, $userId, $role, $userId]);
+        }
+    } catch (PDOException $e) {
+        error_log('backfillMissingProjectMembersForOrgUsers: ' . $e->getMessage());
     }
 }
 
@@ -848,6 +965,15 @@ function seedInitialAdminIfNeeded(PDO $pdo) {
         ':admin' => 'super_admin',
         ':dn' => 'Test Admin',
     ]);
+    $newUserId = (int) $pdo->lastInsertId();
+    if ($newUserId > 0) {
+        try {
+            $pdo->prepare('INSERT IGNORE INTO user_organizations (user_id, org_id, role) VALUES (?, 1, ?)')
+                ->execute([$newUserId, 'super_admin']);
+        } catch (PDOException $e) {
+            error_log('seedInitialAdmin user_organizations: ' . $e->getMessage());
+        }
+    }
 }
 
 /**
@@ -863,6 +989,29 @@ function getOrganizationMaxUsers(PDO $pdo, int $orgId): int
     $m = (int) ($row['max_users'] ?? 20);
 
     return $m > 0 ? $m : 20;
+}
+
+/**
+ * Active (non-disabled) members in an organization.
+ *
+ * @return int
+ */
+function getOrganizationMemberCount(PDO $pdo, int $orgId): int
+{
+    try {
+        $st = $pdo->prepare('SELECT COUNT(*) FROM user_organizations WHERE org_id = ? AND is_disabled = 0');
+        $st->execute([$orgId]);
+        $c = (int) $st->fetchColumn();
+        if ($c > 0) {
+            return $c;
+        }
+    } catch (PDOException $e) {
+        error_log('getOrganizationMemberCount: ' . $e->getMessage());
+    }
+    $fallback = $pdo->prepare('SELECT COUNT(*) FROM users WHERE org_id = ? AND is_disabled = 0');
+    $fallback->execute([$orgId]);
+
+    return (int) $fallback->fetchColumn();
 }
 
 /**

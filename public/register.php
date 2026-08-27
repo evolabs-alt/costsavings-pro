@@ -8,11 +8,84 @@ if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
 }
 require_once __DIR__ . '/../includes/mail.php';
 
+use CostSavings\OrgRole;
+use CostSavings\RoleContext;
+
 $error = '';
 $token = $_POST['token'] ?? ($_GET['token'] ?? '');
+$inviteAcceptOnly = false;
+$inviteEmail = '';
+
+if ($token !== '') {
+    try {
+        $pdoPreview = getDBConnection();
+        $hashPreview = hash('sha256', $token);
+        $stPreview = $pdoPreview->prepare(
+            'SELECT email FROM invitations WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > NOW() LIMIT 1'
+        );
+        $stPreview->execute([$hashPreview]);
+        $invPreview = $stPreview->fetch(PDO::FETCH_ASSOC);
+        if ($invPreview) {
+            $inviteEmail = strtolower(trim((string) ($invPreview['email'] ?? '')));
+            if ($inviteEmail !== '') {
+                $existsPreview = $pdoPreview->prepare('SELECT id FROM users WHERE email = ? LIMIT 1');
+                $existsPreview->execute([$inviteEmail]);
+                $inviteAcceptOnly = (bool) $existsPreview->fetch(PDO::FETCH_ASSOC);
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('[invite-register] preview: ' . $e->getMessage());
+    }
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && $token === '') {
     $error = 'Open this page using the link from your invitation email.';
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accept_invite'])) {
+    $token = $_POST['token'] ?? '';
+    if ($token === '') {
+        $error = 'Invalid invitation link.';
+    } else {
+        $hash = hash('sha256', $token);
+        $pdo = getDBConnection();
+        $st = $pdo->prepare(
+            'SELECT * FROM invitations WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > NOW()'
+        );
+        $st->execute([$hash]);
+        $inv = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$inv) {
+            $error = 'Invalid or expired invitation link.';
+        } else {
+            $orgId = (int) $inv['org_id'];
+            $email = strtolower(trim($inv['email']));
+            $existing = $pdo->prepare('SELECT id FROM users WHERE email = ? LIMIT 1');
+            $existing->execute([$email]);
+            $existingUser = $existing->fetch(PDO::FETCH_ASSOC);
+            if (!$existingUser) {
+                $error = 'No existing account found for this invitation. Please complete registration.';
+            } else {
+                $existingUserId = (int) ($existingUser['id'] ?? 0);
+                $inOrg = $pdo->prepare('SELECT 1 FROM user_organizations WHERE user_id = ? AND org_id = ? LIMIT 1');
+                $inOrg->execute([$existingUserId, $orgId]);
+                if ($inOrg->fetchColumn()) {
+                    $error = 'You are already a member of this organization. Please log in.';
+                } elseif (getOrganizationMemberCount($pdo, $orgId) >= getOrganizationMaxUsers($pdo, $orgId)) {
+                    $error = 'This organization already has the maximum number of users.';
+                } else {
+                    $desiredRole = strtolower(trim((string) ($inv['invite_role'] ?? 'member')));
+                    if ($desiredRole !== OrgRole::ROLE_ADMIN && $desiredRole !== OrgRole::ROLE_MEMBER) {
+                        $desiredRole = OrgRole::ROLE_MEMBER;
+                    }
+                    RoleContext::upsertOrgMembership($pdo, $existingUserId, $orgId, $desiredRole);
+                    $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
+                    $_SESSION['message'] = 'You have been added to the organization. Please log in.';
+                    header('Location: index.php');
+                    exit;
+                }
+            }
+        }
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
@@ -44,43 +117,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
             $email = strtolower(trim($inv['email']));
             error_log('[invite-register] token_valid org_id=' . $orgId . ' email=' . $email);
             $maxUsers = getOrganizationMaxUsers($pdo, $orgId);
-            $c = (int) $pdo->query('SELECT COUNT(*) AS c FROM users WHERE org_id = ' . $orgId)->fetch()['c'];
+            $c = getOrganizationMemberCount($pdo, $orgId);
             if ($c >= $maxUsers) {
                 error_log('[invite-register] blocked_org_limit org_id=' . $orgId . ' users=' . $c . ' max=' . $maxUsers);
                 $error = 'This organization already has the maximum number of users (' . $maxUsers . ').';
             } else {
-                $dup = $pdo->prepare('SELECT id FROM users WHERE username = ? OR email = ?');
-                $dup->execute([$username, $email]);
+                $existing = $pdo->prepare('SELECT id, username FROM users WHERE email = ? LIMIT 1');
+                $existing->execute([$email]);
+                $existingUser = $existing->fetch(PDO::FETCH_ASSOC);
+
+                if ($existingUser) {
+                    $existingUserId = (int) ($existingUser['id'] ?? 0);
+                    $inOrg = $pdo->prepare('SELECT 1 FROM user_organizations WHERE user_id = ? AND org_id = ? LIMIT 1');
+                    $inOrg->execute([$existingUserId, $orgId]);
+                    if ($inOrg->fetchColumn()) {
+                        error_log('[invite-register] blocked_existing_member org_id=' . $orgId . ' email=' . $email);
+                        $error = 'You are already a member of this organization. Please log in.';
+                    } else {
+                        $inviterId = (int) ($inv['invited_by_user_id'] ?? 0);
+                        $desiredRole = strtolower(trim((string) ($inv['invite_role'] ?? 'member')));
+                        if ($desiredRole !== OrgRole::ROLE_ADMIN && $desiredRole !== OrgRole::ROLE_MEMBER) {
+                            $desiredRole = OrgRole::ROLE_MEMBER;
+                        }
+                        $inviterRole = OrgRole::ROLE_MEMBER;
+                        if ($inviterId > 0) {
+                            $inviterRole = RoleContext::orgRole($pdo, $inviterId, $orgId) ?? OrgRole::ROLE_MEMBER;
+                        }
+                        if ($desiredRole !== OrgRole::ROLE_MEMBER && !OrgRole::canElevateOrgRoles($inviterRole)) {
+                            $desiredRole = OrgRole::ROLE_MEMBER;
+                        }
+                        RoleContext::upsertOrgMembership($pdo, $existingUserId, $orgId, $desiredRole);
+                        $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
+                        error_log('[invite-register] existing_user_added org_id=' . $orgId . ' email=' . $email);
+                        $_SESSION['message'] = 'You have been added to the organization. Please log in.';
+                        header('Location: index.php');
+                        exit;
+                    }
+                } else {
+                $dup = $pdo->prepare('SELECT id FROM users WHERE username = ? LIMIT 1');
+                $dup->execute([$username]);
                 if ($dup->fetch()) {
-                    error_log('[invite-register] blocked_duplicate_user org_id=' . $orgId . ' email=' . $email . ' username=' . $username);
-                    $error = 'Username or email is already taken.';
+                    error_log('[invite-register] blocked_duplicate_username org_id=' . $orgId . ' email=' . $email . ' username=' . $username);
+                    $error = 'Username is already taken.';
                 } else {
                     $inviterId = (int) ($inv['invited_by_user_id'] ?? 0);
                     $desiredRole = strtolower(trim((string) ($inv['invite_role'] ?? 'member')));
-                    if ($desiredRole !== \CostSavings\OrgRole::ROLE_ADMIN && $desiredRole !== \CostSavings\OrgRole::ROLE_MEMBER) {
-                        $desiredRole = \CostSavings\OrgRole::ROLE_MEMBER;
+                    if ($desiredRole !== OrgRole::ROLE_ADMIN && $desiredRole !== OrgRole::ROLE_MEMBER) {
+                        $desiredRole = OrgRole::ROLE_MEMBER;
                     }
-                    $inviterRole = 'member';
+                    $inviterRole = OrgRole::ROLE_MEMBER;
                     if ($inviterId > 0) {
-                        $ir = $pdo->prepare('SELECT role FROM users WHERE id = ? LIMIT 1');
-                        $ir->execute([$inviterId]);
-                        $inviterRole = (string) ($ir->fetchColumn() ?: 'member');
+                        $inviterRole = RoleContext::orgRole($pdo, $inviterId, $orgId) ?? OrgRole::ROLE_MEMBER;
                     }
-                    if ($desiredRole !== \CostSavings\OrgRole::ROLE_MEMBER && !\CostSavings\OrgRole::canElevateOrgRoles($inviterRole)) {
-                        $desiredRole = \CostSavings\OrgRole::ROLE_MEMBER;
+                    if ($desiredRole !== OrgRole::ROLE_MEMBER && !OrgRole::canElevateOrgRoles($inviterRole)) {
+                        $desiredRole = OrgRole::ROLE_MEMBER;
                     }
 
                     $ph = password_hash($password, PASSWORD_DEFAULT);
                     $ins = $pdo->prepare(
-                        'INSERT INTO users (org_id, username, email, password_hash, role, display_name) VALUES (?,?,?,?,?,?)'
+                        'INSERT INTO users (username, email, password_hash, display_name) VALUES (?,?,?,?)'
                     );
-                    $ins->execute([$orgId, $username, $email, $ph, $desiredRole, $displayName]);
+                    $ins->execute([$username, $email, $ph, $displayName]);
+                    $newUserId = (int) $pdo->lastInsertId();
+                    RoleContext::upsertOrgMembership($pdo, $newUserId, $orgId, $desiredRole);
                     error_log('[invite-register] user_created org_id=' . $orgId . ' email=' . $email . ' username=' . $username);
                     $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
                     error_log('[invite-register] invite_consumed invitation_id=' . (int) $inv['id']);
                     $_SESSION['message'] = 'Registration complete. You can log in.';
                     header('Location: index.php');
                     exit;
+                }
                 }
             }
         }
@@ -171,6 +277,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
     <h1>Savvy Saver</h1>
     <p style="text-align:center;color:#4B5563;margin:0 0 20px;font-size:15px;">Complete your registration</p>
     <?php if ($error): ?><p class="err"><?php echo htmlspecialchars($error); ?></p><?php endif; ?>
+    <?php if ($inviteAcceptOnly): ?>
+    <p style="font-size:14px;color:#374151;line-height:1.5;">An account already exists for <strong><?php echo htmlspecialchars($inviteEmail); ?></strong>. Accept this invitation to join the organization.</p>
+    <form method="post" style="margin-top:16px;">
+        <input type="hidden" name="token" value="<?php echo htmlspecialchars($token); ?>">
+        <input type="hidden" name="accept_invite" value="1">
+        <button type="submit">Accept invitation</button>
+    </form>
+    <?php else: ?>
     <form method="post">
         <input type="hidden" name="token" value="<?php echo htmlspecialchars($token); ?>">
         <input type="hidden" name="register" value="1">
@@ -184,6 +298,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
         <input type="password" name="password_confirm" required minlength="8">
         <button type="submit">Register</button>
     </form>
+    <?php endif; ?>
     <p><a href="index.php">Back to login</a></p>
 </body>
 </html>

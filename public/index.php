@@ -168,6 +168,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'copy_project_categories':
                 handleCopyProjectCategories();
                 break;
+            case 'list_organizations':
+                handleListOrganizations();
+                break;
+            case 'org_set_active':
+                handleOrgSetActive();
+                break;
+            case 'load_project_members':
+                handleLoadProjectMembers();
+                break;
+            case 'save_project_members':
+                handleSaveProjectMembers();
+                break;
         }
     }
 }
@@ -204,9 +216,33 @@ if ($is_logged_in) {
     $current_view = 'placeholder';
 }
 
-$is_admin = ($is_logged_in && \CostSavings\OrgRole::isPrivileged((string) ($_SESSION['role'] ?? '')));
-$can_create_projects = ($is_logged_in && \CostSavings\OrgRole::isSuperAdmin((string) ($_SESSION['role'] ?? '')));
+$org_role = ($is_logged_in && function_exists('sessionOrgRole'))
+    ? sessionOrgRole()
+    : (string) ($_SESSION['org_role'] ?? $_SESSION['role'] ?? 'member');
+$project_role = ($is_logged_in && function_exists('sessionProjectRole'))
+    ? sessionProjectRole()
+    : (string) ($_SESSION['project_role'] ?? $_SESSION['role'] ?? 'member');
+$is_org_admin = ($is_logged_in && \CostSavings\OrgRole::isPrivileged($org_role));
+$is_admin = ($is_logged_in && \CostSavings\OrgRole::isPrivileged($project_role));
+$can_create_projects = ($is_logged_in && \CostSavings\OrgRole::isSuperAdmin($org_role));
 $invite_can_choose_org_role = $can_create_projects;
+$user_orgs = ($is_logged_in && !empty($_SESSION['user_orgs']) && is_array($_SESSION['user_orgs']))
+    ? $_SESSION['user_orgs']
+    : [];
+$user_orgs_json = json_encode($user_orgs, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+$active_org_id = (int) ($_SESSION['org_id'] ?? 0);
+$show_org_switcher = count($user_orgs) > 1;
+if ($is_logged_in && empty($user_orgs) && !empty($_SESSION['user_id'])) {
+    try {
+        $pdoOrgs = getDBConnection();
+        $user_orgs = \CostSavings\RoleContext::listUserOrganizations($pdoOrgs, (int) $_SESSION['user_id']);
+        $_SESSION['user_orgs'] = $user_orgs;
+        $user_orgs_json = json_encode($user_orgs, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+        $show_org_switcher = count($user_orgs) > 1;
+    } catch (Exception $e) {
+        // ignore
+    }
+}
 
 $deadline_reminders_org = true;
 $deadline_reminders_user = true;
@@ -253,11 +289,17 @@ $team_members_max = 20;
 if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id'])) {
     try {
         $pdoTeam = getDBConnection();
-        $stTeam = $pdoTeam->prepare('SELECT id, username, display_name, email, role, is_disabled FROM users WHERE org_id = ? ORDER BY username, email');
+        $stTeam = $pdoTeam->prepare(
+            'SELECT u.id, u.username, u.display_name, u.email, uo.role, uo.is_disabled
+             FROM user_organizations uo
+             INNER JOIN users u ON u.id = uo.user_id
+             WHERE uo.org_id = ?
+             ORDER BY u.username, u.email'
+        );
         $stTeam->execute([(int) $_SESSION['org_id']]);
         $team_members_rows = $stTeam->fetchAll(PDO::FETCH_ASSOC);
         $team_members_json = json_encode($team_members_rows, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
-        $team_members_count = count($team_members_rows);
+        $team_members_count = getOrganizationMemberCount($pdoTeam, (int) $_SESSION['org_id']);
         $team_members_max = getOrganizationMaxUsers($pdoTeam, (int) $_SESSION['org_id']);
     } catch (Exception $e) {
         $team_members_rows = [];
@@ -4096,10 +4138,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <li class="app-nav-item has-submenu" id="appMembersNavItem">
                             <button type="button" class="app-nav-link" id="appMembersMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appMembersSubmenu">Members</button>
                             <ul class="app-submenu" id="appMembersSubmenu" role="menu" aria-label="Members actions">
-                                <?php if ($is_admin): ?>
+                                <?php if ($is_org_admin): ?>
                                 <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersInvite">Invite</button></li>
                                 <?php endif; ?>
                                 <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage</button></li>
+                                <?php if ($is_org_admin): ?>
+                                <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalProjectMembers">Project members</button></li>
+                                <?php endif; ?>
                             </ul>
                         </li>
                         <li class="app-nav-item has-submenu" id="appProjectNavItem">
@@ -4142,6 +4187,20 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <li class="app-nav-item has-submenu" id="appAdminNavItem">
                             <button type="button" class="app-nav-link" id="appAdminMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appAdminSubmenu"><?php echo htmlspecialchars($_SESSION['username'] ?? $_SESSION['user_email'] ?? 'Account'); ?></button>
                             <ul class="app-submenu" id="appAdminSubmenu" role="menu" aria-label="Account actions">
+                                <?php if ($show_org_switcher): ?>
+                                <li role="none">
+                                    <label class="app-submenu-item" for="orgSwitcherSelect">
+                                        <span class="app-submenu-label">Organization</span>
+                                        <select id="orgSwitcherSelect" class="app-submenu-select">
+                                            <?php foreach ($user_orgs as $uo): ?>
+                                            <option value="<?php echo (int) ($uo['id'] ?? 0); ?>"<?php echo ((int) ($uo['id'] ?? 0) === $active_org_id) ? ' selected' : ''; ?>>
+                                                <?php echo htmlspecialchars((string) ($uo['name'] ?? 'Organization')); ?>
+                                            </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </label>
+                                </li>
+                                <?php endif; ?>
                                 <li role="none">
                                     <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings">Settings</button>
                                 </li>
@@ -4466,12 +4525,78 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         });
                         currentActiveProjectId = parseInt(d.active_project_id || 0, 10) || null;
                         updateActiveProjectHeader(sel);
+                        const projectMembersProjectSelect = document.getElementById('projectMembersProjectSelect');
+                        if (projectMembersProjectSelect) {
+                            projectMembersProjectSelect.innerHTML = '';
+                            (d.projects || []).forEach(function(p) {
+                                const opt = document.createElement('option');
+                                opt.value = String(p.id);
+                                opt.textContent = p.name;
+                                if (parseInt(p.id, 10) === parseInt(d.active_project_id || 0, 10)) {
+                                    opt.selected = true;
+                                }
+                                projectMembersProjectSelect.appendChild(opt);
+                            });
+                        }
                         const hasNoProjects = !Array.isArray(d.projects) || d.projects.length === 0;
                         if (canCreateProjects && (d.onboarding_required || hasNoProjects)) {
                             openAppModal('appModalProjectWizard');
                         }
                     })
                     .catch(function() {});
+            }
+
+            function escapeHtml(text) {
+                const d = document.createElement('div');
+                d.textContent = text == null ? '' : String(text);
+                return d.innerHTML;
+            }
+
+            function renderProjectMembersTable(members, orgMembers) {
+                const tbody = document.getElementById('projectMembersTableBody');
+                if (!tbody) return;
+                tbody.innerHTML = '';
+                const assigned = {};
+                (members || []).forEach(function(m) {
+                    assigned[String(m.id || m.user_id)] = m.role || 'member';
+                });
+                (orgMembers || []).forEach(function(m) {
+                    const uid = String(m.id);
+                    const tr = document.createElement('tr');
+                    tr.setAttribute('data-user-id', uid);
+                    const isAssigned = Object.prototype.hasOwnProperty.call(assigned, uid);
+                    const role = assigned[uid] || 'member';
+                    tr.innerHTML =
+                        '<td><input type="checkbox" class="project-member-include"' + (isAssigned ? ' checked' : '') + ' data-user-id="' + uid + '"></td>' +
+                        '<td>' + escapeHtml(m.display_name || m.username || m.email || '—') + '</td>' +
+                        '<td>' + escapeHtml(m.email || '') + '</td>' +
+                        '<td><select class="project-member-role-select">' +
+                        '<option value="member"' + (role === 'member' ? ' selected' : '') + '>Member</option>' +
+                        '<option value="admin"' + (role === 'admin' ? ' selected' : '') + '>Administrator</option>' +
+                        '<option value="super_admin"' + (role === 'super_admin' ? ' selected' : '') + '>Super admin</option>' +
+                        '</select></td>';
+                    tbody.appendChild(tr);
+                });
+            }
+
+            function loadProjectMembersModal() {
+                const projectSelect = document.getElementById('projectMembersProjectSelect');
+                const projectId = parseInt((projectSelect && projectSelect.value) || currentActiveProjectId || 0, 10) || 0;
+                if (!projectId) {
+                    showSnackbar('Select a project first.', 'error');
+                    return;
+                }
+                postJson({ action: 'load_project_members', project_id: projectId })
+                    .then(function(d) {
+                        if (!d || !d.success) {
+                            showSnackbar((d && d.error) || 'Could not load project members.', 'error');
+                            return;
+                        }
+                        renderProjectMembersTable(d.members || [], d.org_members || []);
+                    })
+                    .catch(function() {
+                        showSnackbar('Could not load project members.', 'error');
+                    });
             }
 
             function syncDeleteProjectConfirmState() {
@@ -8088,6 +8213,69 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     projectSwitcher.addEventListener('input', handleProjectSwitch);
                     projectSwitcher.addEventListener('change', handleProjectSwitch);
                 }
+                const orgSwitcher = document.getElementById('orgSwitcherSelect');
+                if (orgSwitcher) {
+                    const handleOrgSwitch = function() {
+                        const nextOrgId = parseInt(this.value, 10) || 0;
+                        if (!nextOrgId) return;
+                        postJson({ action: 'org_set_active', org_id: nextOrgId })
+                            .then(function(d) {
+                                if (!d || !d.success) {
+                                    showSnackbar((d && d.error) || 'Could not switch organization.', 'error');
+                                    return;
+                                }
+                                window.location.reload();
+                            })
+                            .catch(function() {
+                                showSnackbar('Could not switch organization.', 'error');
+                            });
+                    };
+                    orgSwitcher.addEventListener('input', handleOrgSwitch);
+                    orgSwitcher.addEventListener('change', handleOrgSwitch);
+                }
+                const projectMembersSaveBtn = document.getElementById('projectMembersSaveBtn');
+                if (projectMembersSaveBtn) {
+                    projectMembersSaveBtn.addEventListener('click', function() {
+                        const projectId = parseInt((document.getElementById('projectMembersProjectSelect') || {}).value, 10) || 0;
+                        const tbody = document.getElementById('projectMembersTableBody');
+                        if (!tbody || !projectId) return;
+                        const memberIds = [];
+                        const memberRoles = {};
+                        tbody.querySelectorAll('tr').forEach(function(row) {
+                            const includeCb = row.querySelector('.project-member-include');
+                            if (!includeCb || !includeCb.checked) return;
+                            const uid = parseInt(row.getAttribute('data-user-id'), 10) || 0;
+                            const roleSel = row.querySelector('.project-member-role-select');
+                            if (uid > 0) {
+                                memberIds.push(uid);
+                                memberRoles[uid] = roleSel ? roleSel.value : 'member';
+                            }
+                        });
+                        postJson({
+                            action: 'save_project_members',
+                            project_id: projectId,
+                            member_ids: memberIds,
+                            member_roles: memberRoles
+                        }).then(function(d) {
+                            if (!d || !d.success) {
+                                showSnackbar((d && d.error) || 'Could not save project members.', 'error');
+                                return;
+                            }
+                            showSnackbar('Project members saved.', 'success');
+                        }).catch(function() {
+                            showSnackbar('Could not save project members.', 'error');
+                        });
+                    });
+                }
+                document.querySelectorAll('[data-open-modal="appModalProjectMembers"]').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        loadProjectMembersModal();
+                    });
+                });
+                const projectMembersProjectSelect = document.getElementById('projectMembersProjectSelect');
+                if (projectMembersProjectSelect) {
+                    projectMembersProjectSelect.addEventListener('change', loadProjectMembersModal);
+                }
                 const projectWizardForm = document.getElementById('projectWizardForm');
                 if (projectWizardForm) {
                     const startDateInput = document.getElementById('projectWizardStartDate');
@@ -9274,6 +9462,45 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         </div>
     </div>
 
+    <?php if ($is_org_admin): ?>
+    <div class="app-modal-overlay" id="appModalProjectMembers" role="dialog" aria-modal="true" aria-labelledby="appModalProjectMembersTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1" style="max-width:720px;">
+            <div class="app-modal-header">
+                <h2 id="appModalProjectMembersTitle">Project members &amp; roles</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <p style="margin:0 0 12px;color:#4b5563;font-size:14px;line-height:1.5;">
+                    Assign organization members to the active project with an explicit project role.
+                    Organization roles control invites and settings; project roles control vendor access within this project.
+                </p>
+                <label style="display:grid;gap:6px;font-size:14px;max-width:360px;margin-bottom:12px;">
+                    <span>Project</span>
+                    <select id="projectMembersProjectSelect" class="app-submenu-select"></select>
+                </label>
+                <div class="members-table-wrap">
+                    <table class="members-table">
+                        <thead>
+                            <tr>
+                                <th>Include</th>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Project role</th>
+                            </tr>
+                        </thead>
+                        <tbody id="projectMembersTableBody">
+                            <tr><td colspan="4">Loading…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div style="margin-top:14px;">
+                    <button type="button" id="projectMembersSaveBtn">Save project members</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <?php if (!empty($invite_can_choose_org_role)): ?>
     <div class="app-modal-overlay" id="appModalOrgRolesInfo" role="dialog" aria-modal="true" aria-labelledby="appModalOrgRolesInfoTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1" style="max-width:480px;">
@@ -9312,15 +9539,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <tr>
                                 <th>Name</th>
                                 <th>Email</th>
-                                <th>Role</th>
+                                <th>Org role</th>
                                 <th>Status</th>
-                                <?php if ($is_admin): ?>
+                                <?php if ($is_org_admin): ?>
                                 <th>Action</th>
                                 <?php endif; ?>
                             </tr>
                         </thead>
                         <tbody>
-                            <?php $members_colspan = $is_admin ? 5 : 4; ?>
+                            <?php $members_colspan = $is_org_admin ? 5 : 4; ?>
                             <?php if (empty($team_members_rows)): ?>
                             <tr><td colspan="<?php echo (int) $members_colspan; ?>">No members in this organization yet.</td></tr>
                             <?php else: ?>
@@ -9337,7 +9564,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     <span class="member-status-pill member-status-pill--active">Active</span>
                                     <?php endif; ?>
                                 </td>
-                                <?php if ($is_admin): ?>
+                                <?php if ($is_org_admin): ?>
                                 <td>
                                     <?php if (($tm['role'] ?? 'member') === 'member'): ?>
                                     <form method="post" style="margin:0;">
@@ -9588,7 +9815,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <div class="settings-block">
                     <form method="POST" style="display:grid;gap:10px;">
                         <input type="hidden" name="action" value="save_reminder_settings">
-                        <?php if ($is_admin): ?>
+                        <?php if ($is_org_admin): ?>
                         <label><input type="checkbox" name="deadline_reminders_enabled" value="1" <?php echo $deadline_reminders_org ? 'checked' : ''; ?>> Email monthly executive summary</label>
                         <label style="display:grid;gap:6px;font-size:14px;">
                             <span>Webhook for notifications</span>
@@ -9609,7 +9836,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <div><button type="submit">Save</button></div>
                     </form>
                 </div>
-                <?php if ($is_admin): ?>
+                <?php if ($is_org_admin): ?>
                 <div class="settings-block" id="qboSettingsBlock" style="margin-top:18px;padding-top:16px;border-top:1px solid #e5e7eb;">
                     <h3 style="margin:0 0 8px;font-size:16px;">QuickBooks Online</h3>
                     <p style="margin:0 0 12px;font-size:13px;color:#6b7280;line-height:1.45;">
