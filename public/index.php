@@ -174,6 +174,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'org_set_active':
                 handleOrgSetActive();
                 break;
+            case 'org_create':
+                handleOrgCreate();
+                break;
             case 'load_project_members':
                 handleLoadProjectMembers();
                 break;
@@ -225,6 +228,7 @@ $project_role = ($is_logged_in && function_exists('sessionProjectRole'))
 $is_org_admin = ($is_logged_in && \CostSavings\OrgRole::isPrivileged($org_role));
 $is_admin = ($is_logged_in && \CostSavings\OrgRole::isPrivileged($project_role));
 $can_create_projects = ($is_logged_in && \CostSavings\OrgRole::isSuperAdmin($org_role));
+$can_manage_qbo = ($is_logged_in && \CostSavings\OrgRole::isSuperAdmin($org_role));
 $invite_can_choose_org_role = $can_create_projects;
 $user_orgs = ($is_logged_in && !empty($_SESSION['user_orgs']) && is_array($_SESSION['user_orgs']))
     ? $_SESSION['user_orgs']
@@ -232,6 +236,13 @@ $user_orgs = ($is_logged_in && !empty($_SESSION['user_orgs']) && is_array($_SESS
 $user_orgs_json = json_encode($user_orgs, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
 $active_org_id = (int) ($_SESSION['org_id'] ?? 0);
 $show_org_switcher = count($user_orgs) > 1;
+$active_org_name = 'Organization';
+foreach ($user_orgs as $uo) {
+    if ((int) ($uo['id'] ?? 0) === $active_org_id) {
+        $active_org_name = (string) ($uo['name'] ?? 'Organization');
+        break;
+    }
+}
 if ($is_logged_in && empty($user_orgs) && !empty($_SESSION['user_id'])) {
     try {
         $pdoOrgs = getDBConnection();
@@ -239,6 +250,15 @@ if ($is_logged_in && empty($user_orgs) && !empty($_SESSION['user_id'])) {
         $_SESSION['user_orgs'] = $user_orgs;
         $user_orgs_json = json_encode($user_orgs, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
         $show_org_switcher = count($user_orgs) > 1;
+        foreach ($user_orgs as $uo) {
+            if ((int) ($uo['id'] ?? 0) === $active_org_id) {
+                $active_org_name = (string) ($uo['name'] ?? 'Organization');
+                break;
+            }
+        }
+        if ($active_org_name === 'Organization' && count($user_orgs) > 0) {
+            $active_org_name = (string) ($user_orgs[0]['name'] ?? 'Organization');
+        }
     } catch (Exception $e) {
         // ignore
     }
@@ -4172,9 +4192,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     <button type="button" role="menuitem" class="app-submenu-item" id="appImportMappedCsvBtn">Custom CSV import</button>
                                     <input type="file" id="mappedCsvImportInput" accept=".csv,text/csv" style="display:none;">
                                 </li>
+                                <?php if ($can_manage_qbo): ?>
                                 <li role="none">
                                     <button type="button" role="menuitem" class="app-submenu-item" id="appSyncQboBtn">Sync with QBO</button>
                                 </li>
+                                <?php endif; ?>
                             </ul>
                         </li>
                         <li class="app-nav-item has-submenu" id="appAiNavItem">
@@ -4187,8 +4209,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <li class="app-nav-item has-submenu" id="appAdminNavItem">
                             <button type="button" class="app-nav-link" id="appAdminMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appAdminSubmenu"><?php echo htmlspecialchars($_SESSION['username'] ?? $_SESSION['user_email'] ?? 'Account'); ?></button>
                             <ul class="app-submenu" id="appAdminSubmenu" role="menu" aria-label="Account actions">
-                                <?php if ($show_org_switcher): ?>
                                 <li role="none">
+                                    <?php if ($show_org_switcher): ?>
                                     <label class="app-submenu-item" for="orgSwitcherSelect">
                                         <span class="app-submenu-label">Organization</span>
                                         <select id="orgSwitcherSelect" class="app-submenu-select">
@@ -4199,8 +4221,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                             <?php endforeach; ?>
                                         </select>
                                     </label>
+                                    <?php else: ?>
+                                    <span class="app-submenu-item" style="cursor:default;">
+                                        <span class="app-submenu-label">Organization</span>
+                                        <span style="display:block;font-size:13px;color:#4b5563;margin-top:2px;"><?php echo htmlspecialchars($active_org_name); ?></span>
+                                    </span>
+                                    <?php endif; ?>
                                 </li>
-                                <?php endif; ?>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalCreateOrg">Create organization…</button>
+                                </li>
                                 <li role="none">
                                     <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings">Settings</button>
                                 </li>
@@ -8233,6 +8263,35 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     orgSwitcher.addEventListener('input', handleOrgSwitch);
                     orgSwitcher.addEventListener('change', handleOrgSwitch);
                 }
+                const createOrgForm = document.getElementById('createOrgForm');
+                if (createOrgForm) {
+                    createOrgForm.addEventListener('submit', function(e) {
+                        e.preventDefault();
+                        const nameEl = document.getElementById('createOrgName');
+                        const orgName = nameEl ? String(nameEl.value || '').trim() : '';
+                        if (!orgName) {
+                            showSnackbar('Organization name is required.', 'error');
+                            return;
+                        }
+                        const submitBtn = createOrgForm.querySelector('button[type="submit"]');
+                        if (submitBtn) submitBtn.disabled = true;
+                        postJson({ action: 'org_create', org_name: orgName })
+                            .then(function(d) {
+                                if (!d || !d.success) {
+                                    showSnackbar((d && d.error) || 'Could not create organization.', 'error');
+                                    return;
+                                }
+                                showSnackbar('Organization created.', 'success');
+                                window.location.reload();
+                            })
+                            .catch(function() {
+                                showSnackbar('Could not create organization.', 'error');
+                            })
+                            .finally(function() {
+                                if (submitBtn) submitBtn.disabled = false;
+                            });
+                    });
+                }
                 const projectMembersSaveBtn = document.getElementById('projectMembersSaveBtn');
                 if (projectMembersSaveBtn) {
                     projectMembersSaveBtn.addEventListener('click', function() {
@@ -9805,6 +9864,30 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         </div>
     </div>
 
+    <div class="app-modal-overlay" id="appModalCreateOrg" role="dialog" aria-modal="true" aria-labelledby="appModalCreateOrgTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1" style="max-width:440px;">
+            <div class="app-modal-header">
+                <h2 id="appModalCreateOrgTitle">Create organization</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <p style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;">
+                    You will become the super admin of this organization and can invite members, create projects, and connect QuickBooks.
+                </p>
+                <form id="createOrgForm" style="display:grid;gap:12px;">
+                    <label style="display:grid;gap:6px;font-size:14px;">
+                        <span>Organization name</span>
+                        <input type="text" id="createOrgName" name="org_name" required maxlength="255" placeholder="Acme Corp" style="min-width:280px;">
+                    </label>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                        <button type="button" class="btn-secondary app-modal-close">Cancel</button>
+                        <button type="submit">Create</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <div class="app-modal-overlay" id="appModalSettings" role="dialog" aria-modal="true" aria-labelledby="appModalSettingsTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
@@ -9836,12 +9919,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <div><button type="submit">Save</button></div>
                     </form>
                 </div>
-                <?php if ($is_org_admin): ?>
+                <?php if ($can_manage_qbo): ?>
                 <div class="settings-block" id="qboSettingsBlock" style="margin-top:18px;padding-top:16px;border-top:1px solid #e5e7eb;">
                     <h3 style="margin:0 0 8px;font-size:16px;">QuickBooks Online</h3>
                     <p style="margin:0 0 12px;font-size:13px;color:#6b7280;line-height:1.45;">
-                        Connect this organization’s QuickBooks company. App credentials are configured by Savvy on the server
-                        (same developer app for all customers).
+                        Connect this organization’s QuickBooks company. Only organization super admins can link or sync QBO.
+                        App credentials are configured by Savvy on the server (same developer app for all customers).
                     </p>
                     <p style="margin:0 0 8px;font-size:13px;">
                         Status:
@@ -9883,9 +9966,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <h3 style="margin:0 0 8px;font-size:16px;">QuickBooks Online</h3>
                     <p style="margin:0;font-size:13px;color:#6b7280;">
                         <?php if (!empty($qbo_status['connected'])): ?>
-                            Connected<?php echo !empty($qbo_status['company_name']) ? ' to ' . htmlspecialchars((string) $qbo_status['company_name']) : ''; ?>. Ask an admin to change the connection.
+                            Connected<?php echo !empty($qbo_status['company_name']) ? ' to ' . htmlspecialchars((string) $qbo_status['company_name']) : ''; ?>. Ask an organization super admin to change the connection.
                         <?php else: ?>
-                            Not connected. An organization admin can connect QuickBooks in Settings.
+                            Not connected. An organization super admin can connect QuickBooks in Settings.
                         <?php endif; ?>
                     </p>
                 </div>

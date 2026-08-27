@@ -1290,8 +1290,8 @@ function handleQboDisconnect(): void
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     }
-    if (!OrgRole::isPrivileged(sessionOrgRole())) {
-        $_SESSION['error'] = 'Only admins can disconnect QuickBooks.';
+    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
+        $_SESSION['error'] = 'Only a super admin can disconnect QuickBooks.';
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     }
@@ -1313,6 +1313,10 @@ function handlePreviewQboSync(): void
     header('Content-Type: application/json');
     if (empty($_SESSION['user_id']) || empty($_SESSION['org_id'])) {
         echo json_encode(['success' => false, 'error' => 'Not authenticated']);
+        exit;
+    }
+    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only a super admin can sync QuickBooks.']);
         exit;
     }
     $startDate = trim((string) ($_POST['start_date'] ?? ''));
@@ -1373,6 +1377,10 @@ function handleImportQboSync(): void
     header('Content-Type: application/json');
     if (empty($_SESSION['user_id']) || empty($_SESSION['org_id'])) {
         echo json_encode(['success' => false, 'error' => 'Not authenticated']);
+        exit;
+    }
+    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only a super admin can import QuickBooks data.']);
         exit;
     }
     $cacheKey = trim((string) ($_POST['cache_key'] ?? ($_SESSION['pending_qbo_sync_key'] ?? '')));
@@ -2006,6 +2014,48 @@ function handleOrgSetActive(): void
         'active_project_id' => $activeProjectId,
         'project_role' => sessionProjectRole(),
     ]);
+    exit;
+}
+
+function handleOrgCreate(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Not logged in']);
+        exit;
+    }
+    $orgName = trim((string) ($_POST['org_name'] ?? ''));
+    if ($orgName === '') {
+        echo json_encode(['success' => false, 'error' => 'Organization name is required.']);
+        exit;
+    }
+    if (strlen($orgName) > 255) {
+        $orgName = substr($orgName, 0, 255);
+    }
+    $userId = (int) $_SESSION['user_id'];
+    $pdo = getDBConnection();
+    try {
+        $ins = $pdo->prepare('INSERT INTO organizations (name, max_users) VALUES (?, 20)');
+        $ins->execute([$orgName]);
+        $newOrgId = (int) $pdo->lastInsertId();
+        if ($newOrgId < 1) {
+            echo json_encode(['success' => false, 'error' => 'Could not create organization.']);
+            exit;
+        }
+        RoleContext::upsertOrgMembership($pdo, $userId, $newOrgId, OrgRole::ROLE_SUPER_ADMIN);
+        RoleContext::persistLastOrgId($pdo, $userId, $newOrgId);
+        $_SESSION['project_onboarding_required'] = true;
+        RoleContext::syncSession($pdo, $userId, $newOrgId, null);
+        $_SESSION['user_orgs'] = RoleContext::listUserOrganizations($pdo, $userId);
+        echo json_encode([
+            'success' => true,
+            'org_id' => $newOrgId,
+            'org_role' => OrgRole::ROLE_SUPER_ADMIN,
+        ]);
+    } catch (PDOException $e) {
+        error_log('handleOrgCreate: ' . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => 'Could not create organization.']);
+    }
     exit;
 }
 

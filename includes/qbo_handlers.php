@@ -13,8 +13,8 @@ function csQboRequireAdminSession(): void
         exit;
     }
     $role = function_exists('sessionOrgRole') ? sessionOrgRole() : (string) ($_SESSION['org_role'] ?? $_SESSION['role'] ?? '');
-    if (!OrgRole::isPrivileged($role)) {
-        $_SESSION['error'] = 'Only admins can connect QuickBooks.';
+    if (!OrgRole::isSuperAdmin($role)) {
+        $_SESSION['error'] = 'Only a super admin can connect QuickBooks.';
         header('Location: ' . (function_exists('publicAppBaseUrl') ? publicAppBaseUrl() : '/') . 'index.php');
         exit;
     }
