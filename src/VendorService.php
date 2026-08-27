@@ -314,14 +314,14 @@ class VendorService
      * @param array<int, array<string, mixed>> $items
      * @return array{success:bool, error?:string, cancelKeep?:string}
      */
-    public static function saveAdmin(PDO $pdo, int $orgId, int $projectId, int $adminUserId, string $actingRole, array $items): array
+    public static function saveAdmin(PDO $pdo, int $orgId, int $projectId, int $adminUserId, string $actingRole, array $items, bool $fullSync = false): array
     {
         $items = self::normalizeMarkForCancellationDeadlines($items);
         $v = self::validateItems($items);
         if (!$v['success']) {
             return $v;
         }
-        if (count($items) === 0) {
+        if (count($items) === 0 && !$fullSync) {
             return ['success' => true, 'cancelKeep' => ''];
         }
 
@@ -448,7 +448,8 @@ class VendorService
                 }
             }
 
-            if ($payloadHasKnownId && count($allowedIds) > 0) {
+            $shouldSyncDeletes = $fullSync || $payloadHasKnownId;
+            if ($shouldSyncDeletes && count($allowedIds) > 0) {
                 $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE id = ? AND org_id = ? AND project_id = ?');
                 foreach ($allowedIds as $id => $_unused) {
                     if (!isset($payloadIds[$id])) {
@@ -472,12 +473,15 @@ class VendorService
      * @param array<int, array<string, mixed>> $items
      * @return array{success:bool, error?:string, cancelKeep?:string}
      */
-    public static function saveMember(PDO $pdo, int $orgId, int $projectId, int $userId, array $items): array
+    public static function saveMember(PDO $pdo, int $orgId, int $projectId, int $userId, array $items, bool $fullSync = false): array
     {
         $items = self::normalizeMarkForCancellationDeadlines($items);
         $v = self::validateItems($items);
         if (!$v['success']) {
             return $v;
+        }
+        if (count($items) === 0 && !$fullSync) {
+            return ['success' => true, 'cancelKeep' => ''];
         }
 
         $pdo->beginTransaction();
@@ -549,10 +553,25 @@ class VendorService
                 }
             }
 
-            foreach (array_keys($allowedIds) as $aid) {
-                if (!isset($payloadIds[$aid])) {
-                    $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE id = ? AND org_id = ? AND project_id = ? AND (manager_user_id IS NULL OR manager_user_id = ?)');
-                    $del->execute([$aid, $orgId, $projectId, $userId]);
+            $payloadHasKnownId = false;
+            foreach ($items as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+                $rowId = isset($item['id']) ? (int) $item['id'] : 0;
+                if ($rowId > 0 && isset($allowedIds[$rowId])) {
+                    $payloadHasKnownId = true;
+                    break;
+                }
+            }
+
+            $shouldSyncDeletes = $fullSync || $payloadHasKnownId;
+            if ($shouldSyncDeletes) {
+                foreach (array_keys($allowedIds) as $aid) {
+                    if (!isset($payloadIds[$aid])) {
+                        $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE id = ? AND org_id = ? AND project_id = ? AND (manager_user_id IS NULL OR manager_user_id = ?)');
+                        $del->execute([$aid, $orgId, $projectId, $userId]);
+                    }
                 }
             }
 

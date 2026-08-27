@@ -6742,7 +6742,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 calculateConfirmedSavings();
                 const bulkItemsSnapshot = collectCostCalculatorItemsFromDom();
                 clearRowSelection();
-                saveCalculatorData({ silent: true, items: bulkItemsSnapshot }).then(function(saveResult) {
+                saveCalculatorData({ silent: true, items: bulkItemsSnapshot, fullSync: true }).then(function(saveResult) {
                     if (saveResult && saveResult.success) {
                         showSnackbar(formatVendorsSelectedLabel(selectedRows.length) + '. Bulk action applied.', 'success');
                     } else if (saveResult && saveResult.aborted) {
@@ -7176,7 +7176,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     return Promise.resolve({ success: false, error: 'Still loading vendor data; save skipped.' });
                 }
                 saveQueue = saveQueue.then(function () {
-                    return performSaveCalculatorData(keepalive, silent, itemsPayload);
+                    return performSaveCalculatorData(keepalive, silent, itemsPayload, !!opts.fullSync);
                 }).catch(function (e) {
                     console.error('Calculator save queue:', e);
                     return { success: false, error: String(e && e.message ? e.message : e) };
@@ -7899,9 +7899,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 return items;
             }
 
-            function performSaveCalculatorData(keepalive, silent, prebuiltItems) {
+            function performSaveCalculatorData(keepalive, silent, prebuiltItems, fullSync) {
                 const items = Array.isArray(prebuiltItems) ? prebuiltItems : collectCostCalculatorItemsFromDom();
                 const payload = { action: 'save_cost_calculator', items: items };
+                if (fullSync) {
+                    payload.full_sync = true;
+                }
 
                 if (!keepalive && calculatorSaveFetchController) {
                     try {

@@ -1459,6 +1459,7 @@ function handleSaveCostCalculator() {
         echo json_encode(['success' => false, 'error' => 'Invalid items data']);
         exit;
     }
+    $fullSync = !empty($_POST['full_sync']) || !empty($_POST['fullSync']);
 
     $pdo = getDBConnection();
     $orgId = (int) $_SESSION['org_id'];
@@ -1497,9 +1498,9 @@ function handleSaveCostCalculator() {
     }
 
     if (OrgRole::isPrivileged($gridRole)) {
-        $result = VendorService::saveAdmin($pdo, $orgId, $activeProjectId, $uid, $gridRole, $items);
+        $result = VendorService::saveAdmin($pdo, $orgId, $activeProjectId, $uid, $gridRole, $items, $fullSync);
     } else {
-        $result = VendorService::saveMember($pdo, $orgId, $activeProjectId, $uid, $items);
+        $result = VendorService::saveMember($pdo, $orgId, $activeProjectId, $uid, $items, $fullSync);
     }
 
     if (($result['success'] ?? false) && $webhookUrl !== '') {
