@@ -55,6 +55,16 @@ function sessionProjectRole(): string
     return RoleContext::sessionProjectRole();
 }
 
+/** Project role for vendor grid load/save; org super admins always get full row access. */
+function effectiveVendorGridRole(): string
+{
+    if (OrgRole::isSuperAdmin(sessionOrgRole())) {
+        return OrgRole::ROLE_SUPER_ADMIN;
+    }
+
+    return sessionProjectRole();
+}
+
 /**
  * Absolute base URL for links into public/ (invite emails, etc.).
  * Uses BASE_URL when set; otherwise derives from the current request (HTTPS, proxy headers, SCRIPT_NAME).
@@ -686,6 +696,7 @@ function importParsedVendorCsvData(array $summaryRows, array $rawRows, ?int $ski
             'manager_user_id' => null,
             'cancellation_deadline' => null,
             'last_payment_date' => $row['last_payment_date'],
+            'account' => $row['account'] ?? '',
         ];
     }
     $res = VendorService::appendImportedRows($pdo, $orgId, $activeProjectId, $uid, $items);
@@ -697,6 +708,7 @@ function importParsedVendorCsvData(array $summaryRows, array $rawRows, ?int $ski
     if (!($rawRes['success'] ?? false)) {
         return $rawRes;
     }
+    backfillCostCalculatorAccountsFromRaw($pdo);
     $res['raw_inserted'] = (int) ($rawRes['inserted'] ?? 0);
     $res['upload_batch_id'] = $batchId;
     if ($skippedRows !== null) {
@@ -1462,7 +1474,8 @@ function handleSaveCostCalculator() {
     $previousStatusById = [];
     $previousStatusByVendor = [];
     $previousPurposeById = [];
-    $beforeItems = VendorService::loadVisibleItems($pdo, $uid, $orgId, $activeProjectId, (string) $role);
+    $gridRole = effectiveVendorGridRole();
+    $beforeItems = VendorService::loadVisibleItems($pdo, $uid, $orgId, $activeProjectId, $gridRole);
     foreach ($beforeItems as $it) {
         if (!is_array($it)) {
             continue;
@@ -1483,8 +1496,8 @@ function handleSaveCostCalculator() {
         }
     }
 
-    if (OrgRole::isPrivileged((string) $role)) {
-        $result = VendorService::saveAdmin($pdo, $orgId, $activeProjectId, $uid, (string) $role, $items);
+    if (OrgRole::isPrivileged($gridRole)) {
+        $result = VendorService::saveAdmin($pdo, $orgId, $activeProjectId, $uid, $gridRole, $items);
     } else {
         $result = VendorService::saveMember($pdo, $orgId, $activeProjectId, $uid, $items);
     }
@@ -1597,12 +1610,13 @@ function handleLoadCostCalculator() {
             echo json_encode(['success' => true, 'items' => []], JSON_UNESCAPED_UNICODE);
             exit;
         }
+        $gridRole = effectiveVendorGridRole();
         $items = VendorService::loadVisibleItems(
             $pdo,
             (int) $_SESSION['user_id'],
             (int) $_SESSION['org_id'],
             $activeProjectId,
-            sessionProjectRole()
+            $gridRole
         );
         $uid = (int) $_SESSION['user_id'];
         $counts = VendorChatService::unreadCountsForUserProject(

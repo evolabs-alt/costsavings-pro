@@ -7172,11 +7172,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const keepalive = !!opts.keepalive;
                 const silent = !!opts.silent || keepalive;
                 const itemsPayload = Array.isArray(opts.items) ? opts.items : null;
-                if (calculatorLoadInProgress && !keepalive) {
+                if (calculatorLoadInProgress || postProjectCreateFlow.postCreateCsvImportInFlight) {
                     return Promise.resolve({ success: false, error: 'Still loading vendor data; save skipped.' });
-                }
-                if (postProjectCreateFlow.postCreateCsvImportInFlight && !keepalive) {
-                    return Promise.resolve({ success: false, error: 'Import in progress; save skipped.' });
                 }
                 saveQueue = saveQueue.then(function () {
                     return performSaveCalculatorData(keepalive, silent, itemsPayload);
@@ -7957,6 +7954,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             }
             
             function flushSaveOnLeave() {
+                if (calculatorLoadInProgress || postProjectCreateFlow.postCreateCsvImportInFlight) {
+                    return;
+                }
                 clearTimeout(saveTimeout);
                 saveCalculatorData({ keepalive: true, silent: true });
             }

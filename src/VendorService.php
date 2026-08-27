@@ -321,6 +321,9 @@ class VendorService
         if (!$v['success']) {
             return $v;
         }
+        if (count($items) === 0) {
+            return ['success' => true, 'cancelKeep' => ''];
+        }
 
         $pdo->beginTransaction();
         try {
@@ -433,7 +436,19 @@ class VendorService
                 }
             }
 
-            if (count($allowedIds) > 0) {
+            $payloadHasKnownId = false;
+            foreach ($items as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+                $rowId = isset($item['id']) ? (int) $item['id'] : 0;
+                if ($rowId > 0 && isset($allowedIds[$rowId])) {
+                    $payloadHasKnownId = true;
+                    break;
+                }
+            }
+
+            if ($payloadHasKnownId && count($allowedIds) > 0) {
                 $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE id = ? AND org_id = ? AND project_id = ?');
                 foreach ($allowedIds as $id => $_unused) {
                     if (!isset($payloadIds[$id])) {
