@@ -276,6 +276,10 @@ class ReminderService
         switch ($freq) {
             case 'weekly':
                 return $base->modify('+7 days');
+            case 'bi_weekly':
+                return $base->modify('+14 days');
+            case 'semi_monthly':
+                return $base->modify('+15 days');
             case 'monthly':
                 return $base->modify('+1 month');
             case 'quarterly':

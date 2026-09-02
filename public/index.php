@@ -3055,8 +3055,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             background: linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(247, 250, 252, 0.96) 100%);
             box-shadow: 0 6px 18px rgba(11, 88, 163, 0.08);
             display: flex;
-            justify-content: center;
-            padding: 4px 10px;
+            justify-content: stretch;
+            padding: 6px 10px;
         }
 
         .app-nav-shell {
@@ -3069,20 +3069,65 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             margin-bottom: 0;
         }
 
-        .app-nav-list {
+        .app-nav-clusters {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            width: 100%;
+            flex-wrap: wrap;
+        }
+
+        .app-nav-cluster {
             list-style: none;
             margin: 0;
             padding: 0;
             display: flex;
             align-items: center;
+            gap: 4px;
+        }
+
+        .app-nav-cluster--org {
+            flex: 0 1 auto;
+            min-width: 0;
+        }
+
+        .app-nav-cluster--account {
+            flex: 0 0 auto;
+            margin-left: auto;
+        }
+
+        .app-nav-project-workspace {
+            flex: 1 1 320px;
+            display: flex;
             justify-content: center;
-            gap: 8px;
-            width: 100%;
-            max-width: 780px;
+            min-width: 0;
+            padding: 3px 6px;
+            border: 1px solid rgba(37, 168, 224, 0.28);
+            border-radius: 10px;
+            background: rgba(234, 245, 253, 0.5);
+        }
+
+        .app-nav-project-workspace .app-nav-cluster {
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 2px;
         }
 
         .app-nav-item {
             position: relative;
+        }
+
+        .app-nav-link--named {
+            max-width: 200px;
+        }
+
+        .app-nav-link-label {
+            display: block;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 100%;
         }
 
         .app-nav-inline-form {
@@ -3711,6 +3756,24 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         /* Responsive Design */
         @media (max-width: 768px) {
+            .app-nav-clusters {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .app-nav-cluster--account {
+                margin-left: 0;
+                justify-content: flex-end;
+            }
+
+            .app-nav-project-workspace {
+                flex: 1 1 auto;
+            }
+
+            .app-nav-link--named {
+                max-width: 160px;
+            }
+
             body {
                 padding: 10px;
             }
@@ -4161,95 +4224,114 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         <?php if ($current_view === 'placeholder'): ?>
             <div class="app-nav-shell">
                 <nav class="app-nav" aria-label="App sections">
-                    <ul class="app-nav-list">
-                        <li class="app-nav-item has-submenu" id="appMembersNavItem">
-                            <button type="button" class="app-nav-link" id="appMembersMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appMembersSubmenu">Members</button>
-                            <ul class="app-submenu" id="appMembersSubmenu" role="menu" aria-label="Members actions">
-                                <?php if ($is_org_admin): ?>
-                                <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersInvite">Invite</button></li>
-                                <?php endif; ?>
-                                <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage</button></li>
-                                <?php if ($is_org_admin): ?>
-                                <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalProjectMembers">Project members</button></li>
-                                <?php endif; ?>
-                            </ul>
-                        </li>
-                        <li class="app-nav-item has-submenu" id="appProjectNavItem">
-                            <button type="button" class="app-nav-link" id="appProjectMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appProjectSubmenu">Project</button>
-                            <ul class="app-submenu" id="appProjectSubmenu" role="menu" aria-label="Project actions">
-                                <?php if ($can_create_projects): ?>
-                                <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appCreateProjectBtn" data-open-modal="appModalProjectWizard">Create New Project</button></li>
-                                <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appDeleteProjectBtn">Delete project…</button></li>
-                                <?php endif; ?>
-                                <li role="none">
-                                    <label class="app-submenu-item" for="projectSwitcherSelect">
-                                        <span class="app-submenu-label">Switch Project</span>
-                                        <select id="projectSwitcherSelect" class="app-submenu-select"></select>
-                                    </label>
+                    <div class="app-nav-clusters">
+                        <ul class="app-nav-cluster app-nav-cluster--org">
+                            <li class="app-nav-item has-submenu" id="appOrgNavItem">
+                                <button type="button" class="app-nav-link app-nav-link--named" id="appOrgMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appOrgSubmenu" aria-label="Organization: <?php echo htmlspecialchars($active_org_name); ?>">
+                                    <span class="app-nav-link-label"><?php echo htmlspecialchars($active_org_name); ?></span>
+                                </button>
+                                <ul class="app-submenu" id="appOrgSubmenu" role="menu" aria-label="Organization actions">
+                                    <li role="none">
+                                        <?php if ($show_org_switcher): ?>
+                                        <label class="app-submenu-item" for="orgSwitcherSelect">
+                                            <span class="app-submenu-label">Switch organization</span>
+                                            <select id="orgSwitcherSelect" class="app-submenu-select">
+                                                <?php foreach ($user_orgs as $uo): ?>
+                                                <option value="<?php echo (int) ($uo['id'] ?? 0); ?>"<?php echo ((int) ($uo['id'] ?? 0) === $active_org_id) ? ' selected' : ''; ?>>
+                                                    <?php echo htmlspecialchars((string) ($uo['name'] ?? 'Organization')); ?>
+                                                </option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </label>
+                                        <?php else: ?>
+                                        <span class="app-submenu-item" style="cursor:default;">
+                                            <span class="app-submenu-label">Organization</span>
+                                            <span style="display:block;font-size:13px;color:#4b5563;margin-top:2px;"><?php echo htmlspecialchars($active_org_name); ?></span>
+                                        </span>
+                                        <?php endif; ?>
+                                    </li>
+                                    <li role="none">
+                                        <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalCreateOrg">Create organization…</button>
+                                    </li>
+                                    <li role="none">
+                                        <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings">Organization settings</button>
+                                    </li>
+                                </ul>
+                            </li>
+                        </ul>
+                        <div class="app-nav-project-workspace" aria-label="Current project workspace">
+                            <ul class="app-nav-cluster app-nav-cluster--project">
+                                <li class="app-nav-item has-submenu" id="appProjectNavItem">
+                                    <button type="button" class="app-nav-link app-nav-link--named" id="appProjectMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appProjectSubmenu" aria-label="Project">
+                                        <span class="app-nav-link-label" id="appProjectMenuLabel">Project</span>
+                                    </button>
+                                    <ul class="app-submenu" id="appProjectSubmenu" role="menu" aria-label="Project actions">
+                                        <?php if ($can_create_projects): ?>
+                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appCreateProjectBtn" data-open-modal="appModalProjectWizard">Create New Project</button></li>
+                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appDeleteProjectBtn">Delete project…</button></li>
+                                        <?php endif; ?>
+                                        <li role="none">
+                                            <label class="app-submenu-item" for="projectSwitcherSelect">
+                                                <span class="app-submenu-label">Switch project</span>
+                                                <select id="projectSwitcherSelect" class="app-submenu-select"></select>
+                                            </label>
+                                        </li>
+                                    </ul>
+                                </li>
+                                <li class="app-nav-item has-submenu" id="appMembersNavItem">
+                                    <button type="button" class="app-nav-link" id="appMembersMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appMembersSubmenu">Members</button>
+                                    <ul class="app-submenu" id="appMembersSubmenu" role="menu" aria-label="Members actions">
+                                        <?php if ($is_org_admin): ?>
+                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersInvite">Invite</button></li>
+                                        <?php endif; ?>
+                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage</button></li>
+                                        <?php if ($is_org_admin): ?>
+                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalProjectMembers">Project members</button></li>
+                                        <?php endif; ?>
+                                    </ul>
+                                </li>
+                                <li class="app-nav-item has-submenu" id="appDataNavItem">
+                                    <button type="button" class="app-nav-link" id="appDataMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appDataSubmenu">Data</button>
+                                    <ul class="app-submenu" id="appDataSubmenu" role="menu" aria-label="Data actions">
+                                        <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=xlsx">Download Excel</a></li>
+                                        <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=pdf">Download PDF</a></li>
+                                        <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=summary_pdf">Executive summary PDF</a></li>
+                                        <li role="none">
+                                            <button type="button" role="menuitem" class="app-submenu-item" id="appImportMappedCsvBtn">Custom CSV import</button>
+                                            <input type="file" id="mappedCsvImportInput" accept=".csv,text/csv" style="display:none;">
+                                        </li>
+                                        <?php if ($can_manage_qbo): ?>
+                                        <li role="none">
+                                            <button type="button" role="menuitem" class="app-submenu-item" id="appSyncQboBtn">Sync with QBO</button>
+                                        </li>
+                                        <?php endif; ?>
+                                    </ul>
+                                </li>
+                                <li class="app-nav-item has-submenu" id="appAiNavItem">
+                                    <button type="button" class="app-nav-link" id="appAiMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appAiSubmenu">AI</button>
+                                    <ul class="app-submenu" id="appAiSubmenu" role="menu" aria-label="AI actions">
+                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appAiAssistantBtn" data-open-modal="appModalAI">Assistant</button></li>
+                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appAutoPopulatePurposeBtn">Auto populate purpose</button></li>
+                                    </ul>
                                 </li>
                             </ul>
-                        </li>
-                        <li class="app-nav-item has-submenu" id="appDataNavItem">
-                            <button type="button" class="app-nav-link" id="appDataMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appDataSubmenu">Data</button>
-                            <ul class="app-submenu" id="appDataSubmenu" role="menu" aria-label="Data actions">
-                                <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=xlsx">Download Excel</a></li>
-                                <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=pdf">Download PDF</a></li>
-                                <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=summary_pdf">Executive summary PDF</a></li>
-                                <li role="none">
-                                    <button type="button" role="menuitem" class="app-submenu-item" id="appImportMappedCsvBtn">Custom CSV import</button>
-                                    <input type="file" id="mappedCsvImportInput" accept=".csv,text/csv" style="display:none;">
-                                </li>
-                                <?php if ($can_manage_qbo): ?>
-                                <li role="none">
-                                    <button type="button" role="menuitem" class="app-submenu-item" id="appSyncQboBtn">Sync with QBO</button>
-                                </li>
-                                <?php endif; ?>
-                            </ul>
-                        </li>
-                        <li class="app-nav-item has-submenu" id="appAiNavItem">
-                            <button type="button" class="app-nav-link" id="appAiMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appAiSubmenu">AI</button>
-                            <ul class="app-submenu" id="appAiSubmenu" role="menu" aria-label="AI actions">
-                                <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appAiAssistantBtn" data-open-modal="appModalAI">Assistant</button></li>
-                                <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appAutoPopulatePurposeBtn">Auto populate purpose</button></li>
-                            </ul>
-                        </li>
-                        <li class="app-nav-item has-submenu" id="appAdminNavItem">
-                            <button type="button" class="app-nav-link" id="appAdminMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appAdminSubmenu"><?php echo htmlspecialchars($_SESSION['username'] ?? $_SESSION['user_email'] ?? 'Account'); ?></button>
-                            <ul class="app-submenu" id="appAdminSubmenu" role="menu" aria-label="Account actions">
-                                <li role="none">
-                                    <?php if ($show_org_switcher): ?>
-                                    <label class="app-submenu-item" for="orgSwitcherSelect">
-                                        <span class="app-submenu-label">Organization</span>
-                                        <select id="orgSwitcherSelect" class="app-submenu-select">
-                                            <?php foreach ($user_orgs as $uo): ?>
-                                            <option value="<?php echo (int) ($uo['id'] ?? 0); ?>"<?php echo ((int) ($uo['id'] ?? 0) === $active_org_id) ? ' selected' : ''; ?>>
-                                                <?php echo htmlspecialchars((string) ($uo['name'] ?? 'Organization')); ?>
-                                            </option>
-                                            <?php endforeach; ?>
-                                        </select>
-                                    </label>
-                                    <?php else: ?>
-                                    <span class="app-submenu-item" style="cursor:default;">
-                                        <span class="app-submenu-label">Organization</span>
-                                        <span style="display:block;font-size:13px;color:#4b5563;margin-top:2px;"><?php echo htmlspecialchars($active_org_name); ?></span>
-                                    </span>
-                                    <?php endif; ?>
-                                </li>
-                                <li role="none">
-                                    <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalCreateOrg">Create organization…</button>
-                                </li>
-                                <li role="none">
-                                    <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings">Settings</button>
-                                </li>
-                                <li role="none">
-                                    <form method="POST" class="app-nav-inline-form">
-                                        <input type="hidden" name="action" value="logout">
-                                        <button type="submit" role="menuitem" class="app-submenu-item">Logout</button>
-                                    </form>
-                                </li>
-                            </ul>
-                        </li>
-                    </ul>
+                        </div>
+                        <ul class="app-nav-cluster app-nav-cluster--account">
+                            <li class="app-nav-item has-submenu" id="appAdminNavItem">
+                                <button type="button" class="app-nav-link app-nav-link--named" id="appAdminMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appAdminSubmenu" aria-label="Account: <?php echo htmlspecialchars($_SESSION['username'] ?? $_SESSION['user_email'] ?? 'Account'); ?>">
+                                    <span class="app-nav-link-label"><?php echo htmlspecialchars($_SESSION['username'] ?? $_SESSION['user_email'] ?? 'Account'); ?></span>
+                                </button>
+                                <ul class="app-submenu" id="appAdminSubmenu" role="menu" aria-label="Account actions">
+                                    <li role="none">
+                                        <form method="POST" class="app-nav-inline-form">
+                                            <input type="hidden" name="action" value="logout">
+                                            <button type="submit" role="menuitem" class="app-submenu-item">Logout</button>
+                                        </form>
+                                    </li>
+                                </ul>
+                            </li>
+                        </ul>
+                    </div>
                 </nav>
             </div>
         <?php endif; ?>
@@ -4680,6 +4762,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
                 projectName = projectName.trim();
                 document.title = projectName !== '' ? (baseTitle + ' - ' + projectName) : baseTitle;
+
+                const labelEl = document.getElementById('appProjectMenuLabel');
+                const btnEl = document.getElementById('appProjectMenuBtn');
+                if (labelEl) {
+                    labelEl.textContent = projectName !== '' ? projectName : 'Project';
+                }
+                if (btnEl) {
+                    btnEl.setAttribute('aria-label', projectName !== '' ? ('Project: ' + projectName) : 'Project');
+                }
             }
 
             var postProjectCreateFlow = {
@@ -6074,7 +6165,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     if (!d.has_credentials) {
                                         showSnackbar('QuickBooks app is not configured on the server (QBO_CLIENT_ID / QBO_CLIENT_SECRET).', 'error');
                                     } else {
-                                        showSnackbar('Connect this company’s QuickBooks in Settings first.', 'error');
+                                        showSnackbar('Connect this company’s QuickBooks in Organization settings first.', 'error');
                                     }
                                     openAppModal('appModalSettings');
                                     var block = document.getElementById('qboSettingsBlock');
@@ -6518,13 +6609,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             const FREQUENCY_FILTER_LABELS = {
                 '': '(Not set)',
                 weekly: 'Weekly',
+                bi_weekly: 'Bi-weekly',
+                semi_monthly: 'Semi-monthly',
                 monthly: 'Monthly',
                 quarterly: 'Quarterly',
                 semi_annual: 'Semi-annual',
                 annually: 'Annually',
                 one_off: 'One-off',
             };
-            const FREQUENCY_FILTER_ORDER = ['', 'weekly', 'monthly', 'quarterly', 'semi_annual', 'annually', 'one_off'];
+            const FREQUENCY_FILTER_ORDER = ['', 'weekly', 'bi_weekly', 'semi_monthly', 'monthly', 'quarterly', 'semi_annual', 'annually', 'one_off'];
 
             const STATUS_COLUMN_FILTER_LABELS = {
                 pending: 'Pending',
@@ -6949,6 +7042,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <select name="frequency[]" class="frequency-select" data-row="${rowCount}" ${memberFreqLocked}>
                             <option value="">Select</option>
                             <option value="weekly">Weekly</option>
+                            <option value="bi_weekly">Bi-weekly</option>
+                            <option value="semi_monthly">Semi-monthly</option>
                             <option value="monthly">Monthly</option>
                             <option value="quarterly">Quarterly</option>
                             <option value="semi_annual">Semi-annual</option>
@@ -7048,6 +7143,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 let multiplier = 0;
                 switch(frequency) {
                     case 'weekly': multiplier = 52; break;
+                    case 'bi_weekly': multiplier = 26; break;
+                    case 'semi_monthly': multiplier = 24; break;
                     case 'monthly': multiplier = 12; break;
                     case 'quarterly': multiplier = 4; break;
                     case 'semi_annual': multiplier = 2; break;
@@ -10053,10 +10150,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
     <div class="app-modal-overlay" id="appModalSettings" role="dialog" aria-modal="true" aria-labelledby="appModalSettingsTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
-                <h2 id="appModalSettingsTitle">Settings</h2>
+                <h2 id="appModalSettingsTitle">Organization settings</h2>
                 <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
             </div>
             <div class="app-modal-body">
+                <p style="margin:0 0 14px;font-size:14px;color:#4b5563;line-height:1.5;">
+                    These settings apply to <strong><?php echo htmlspecialchars($active_org_name); ?></strong>, including QuickBooks connection.
+                    To import vendors into the current project, use <strong>Data → Sync with QBO</strong>.
+                </p>
                 <div class="settings-block">
                     <form method="POST" style="display:grid;gap:10px;">
                         <input type="hidden" name="action" value="save_reminder_settings">
@@ -10130,7 +10231,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <?php if (!empty($qbo_status['connected'])): ?>
                             Connected<?php echo !empty($qbo_status['company_name']) ? ' to ' . htmlspecialchars((string) $qbo_status['company_name']) : ''; ?>. Ask an organization super admin to change the connection.
                         <?php else: ?>
-                            Not connected. An organization super admin can connect QuickBooks in Settings.
+                            Not connected. An organization super admin can connect QuickBooks in Organization settings.
                         <?php endif; ?>
                     </p>
                 </div>
@@ -10193,6 +10294,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <select id="bulkFrequencyValue">
                                 <option value="">Select frequency</option>
                                 <option value="weekly">Weekly</option>
+                                <option value="bi_weekly">Bi-weekly</option>
+                                <option value="semi_monthly">Semi-monthly</option>
                                 <option value="monthly">Monthly</option>
                                 <option value="quarterly">Quarterly</option>
                                 <option value="semi_annual">Semi-annual</option>

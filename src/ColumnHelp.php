@@ -54,7 +54,7 @@ final class ColumnHelp
             ],
             'frequency' => [
                 'title' => 'Frequency',
-                'html' => '<p class="column-help-intro">How often this vendor bills: weekly, monthly, quarterly, semi-annual, annually, or one-off. Administrators edit this field; members can view only. Together with Cost, this drives the annualized spend figure used in savings totals.</p>',
+                'html' => '<p class="column-help-intro">How often this vendor bills: weekly, bi-weekly, semi-monthly, monthly, quarterly, semi-annual, annually, or one-off. Administrators edit this field; members can view only. Together with Cost, this drives the annualized spend figure used in savings totals.</p>',
             ],
             'annual_cost' => [
                 'title' => 'Annual Cost',

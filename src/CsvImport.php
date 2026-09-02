@@ -473,6 +473,9 @@ class CsvImport
         if ($med <= 10) {
             return 'weekly';
         }
+        if ($med <= 16) {
+            return 'bi_weekly';
+        }
         if ($med <= 40) {
             return 'monthly';
         }
@@ -491,6 +494,10 @@ class CsvImport
         switch ($frequency) {
             case 'weekly':
                 return 52;
+            case 'bi_weekly':
+                return 26;
+            case 'semi_monthly':
+                return 24;
             case 'monthly':
                 return 12;
             case 'quarterly':
