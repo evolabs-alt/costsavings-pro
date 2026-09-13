@@ -51,7 +51,7 @@ define(
 );
 define('GMAIL_OAUTH_SETUP_KEY', getenv('GMAIL_OAUTH_SETUP_KEY') ?: '');
 define('SMTP_FROM_EMAIL', getenv('SMTP_FROM_EMAIL') ?: 'contactus@savvycfo.com');
-define('SMTP_FROM_NAME', getenv('SMTP_FROM_NAME') ?: 'Savvy CFO Portal');
+define('SMTP_FROM_NAME', getenv('SMTP_FROM_NAME') ?: 'Savvy Saver');
 
 /**
  * GoHighLevel Conversations API (deadline + monthly renewal reminders).

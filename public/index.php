@@ -288,11 +288,14 @@ if ($is_logged_in && !empty($_SESSION['org_id'])) {
             $notification_webhook_url = trim((string) $or['notification_webhook_url']);
         }
         if (!empty($_SESSION['user_id'])) {
-            $st2 = $pdoView->prepare('SELECT deadline_reminders_enabled FROM users WHERE id = ?');
+            $st2 = $pdoView->prepare('SELECT deadline_reminders_enabled, joined_via_invite FROM users WHERE id = ?');
             $st2->execute([(int) $_SESSION['user_id']]);
             $ur = $st2->fetch(PDO::FETCH_ASSOC);
             if ($ur && isset($ur['deadline_reminders_enabled'])) {
                 $deadline_reminders_user = (bool) $ur['deadline_reminders_enabled'];
+            }
+            if ($ur) {
+                $_SESSION['joined_via_invite'] = !empty($ur['joined_via_invite']) ? 1 : 0;
             }
         }
         $qboSvc = new \CostSavings\QboService($pdoView);
@@ -4250,9 +4253,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                         </span>
                                         <?php endif; ?>
                                     </li>
+                                    <?php if (empty($_SESSION['joined_via_invite'])): ?>
                                     <li role="none">
                                         <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalCreateOrg">Create organization…</button>
                                     </li>
+                                    <?php endif; ?>
                                     <li role="none">
                                         <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings">Organization settings</button>
                                     </li>

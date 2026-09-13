@@ -202,6 +202,8 @@ function postWebhookJson(string $url, array $payload): bool
  * Ensure users.org_id refers to a real organization. If missing or invalid, creates a new
  * dedicated organization for this user (never assigns shared org 1 implicitly — that would
  * let admins see every other tenant's projects scoped to that org).
+ *
+ * Invite-only accounts never get an auto-created personal workspace.
  */
 function ensureUserOrganizationId(PDO $pdo, int $userId): int {
     if ($userId < 1) {
@@ -211,6 +213,10 @@ function ensureUserOrganizationId(PDO $pdo, int $userId): int {
     $orgId = RoleContext::resolveDefaultOrgId($pdo, $userId);
     if ($orgId >= 1) {
         return $orgId;
+    }
+
+    if (userJoinedViaInvite($pdo, $userId)) {
+        return 0;
     }
 
     $st = $pdo->prepare('SELECT email, username, display_name FROM users WHERE id = ? LIMIT 1');
@@ -359,9 +365,15 @@ function establishUserSession(PDO $pdo, array $row): void
     $_SESSION['user_email'] = normalizeUserEmail($row['email']);
     $userId = (int) $row['id'];
     backfillUserOrganizationsFromLegacyUsers($pdo);
+    $_SESSION['joined_via_invite'] = userJoinedViaInvite($pdo, $userId) ? 1 : 0;
     $orgId = ensureUserOrganizationId($pdo, $userId);
     if ($orgId < 1) {
-        $_SESSION['error'] = 'Your account organization could not be set up. Please contact support.';
+        if (!empty($_SESSION['joined_via_invite'])) {
+            $_SESSION['error'] = 'Use your invitation link to join an organization before signing in.';
+        } else {
+            $_SESSION['error'] = 'Your account organization could not be set up. Please contact support.';
+        }
+        unset($_SESSION['user_id'], $_SESSION['username'], $_SESSION['user_email'], $_SESSION['joined_via_invite']);
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     }
@@ -2039,6 +2051,15 @@ function handleOrgCreate(): void
         echo json_encode(['success' => false, 'error' => 'Not logged in']);
         exit;
     }
+    $userId = (int) $_SESSION['user_id'];
+    $pdo = getDBConnection();
+    if (userJoinedViaInvite($pdo, $userId)) {
+        echo json_encode([
+            'success' => false,
+            'error' => 'Invited members can only access the organization they were invited to.',
+        ]);
+        exit;
+    }
     $orgName = trim((string) ($_POST['org_name'] ?? ''));
     if ($orgName === '') {
         echo json_encode(['success' => false, 'error' => 'Organization name is required.']);
@@ -2047,8 +2068,6 @@ function handleOrgCreate(): void
     if (strlen($orgName) > 255) {
         $orgName = substr($orgName, 0, 255);
     }
-    $userId = (int) $_SESSION['user_id'];
-    $pdo = getDBConnection();
     try {
         $ins = $pdo->prepare('INSERT INTO organizations (name, max_users) VALUES (?, 20)');
         $ins->execute([$orgName]);

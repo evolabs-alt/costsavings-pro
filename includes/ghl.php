@@ -76,11 +76,12 @@ function csGhlLastResponse(): ?array
 }
 
 /**
- * Upsert contact with Cost Savings Pro tag. Returns contact id or null.
+ * Upsert contact with Cost Savings Pro tag (plus optional extras). Returns contact id or null.
  *
  * @param array{email:string, first_name?:string, last_name?:string} $contact
+ * @param list<string> $extraTags
  */
-function csUpsertGhlContact(array $contact): ?string
+function csUpsertGhlContact(array $contact, array $extraTags = []): ?string
 {
     $locationId = defined('GHL_LOCATION_ID') ? trim((string) GHL_LOCATION_ID) : '';
     if ($locationId === '') {
@@ -94,12 +95,20 @@ function csUpsertGhlContact(array $contact): ?string
         return null;
     }
 
+    $tags = ['Cost Savings Pro'];
+    foreach ($extraTags as $tag) {
+        $tag = trim((string) $tag);
+        if ($tag !== '' && !in_array($tag, $tags, true)) {
+            $tags[] = $tag;
+        }
+    }
+
     $payload = [
         'email' => $email,
         'locationId' => $locationId,
         'firstName' => (string) ($contact['first_name'] ?? ''),
         'lastName' => (string) ($contact['last_name'] ?? ''),
-        'tags' => ['Cost Savings Pro'],
+        'tags' => $tags,
     ];
 
     $res = csGhlRequest('POST', 'contacts/upsert', $payload);
@@ -119,6 +128,44 @@ function csUpsertGhlContact(array $contact): ?string
     }
 
     return $id;
+}
+
+/**
+ * Tag an invitee so Portfolio can unlock Savvy Saver. Failures are logged only.
+ *
+ * @param array{email:string, first_name?:string, last_name?:string, display_name?:string} $contact
+ */
+function csTagScorecardProMember(array $contact): void
+{
+    $email = trim((string) ($contact['email'] ?? ''));
+    $first = trim((string) ($contact['first_name'] ?? ''));
+    $last = trim((string) ($contact['last_name'] ?? ''));
+    if ($first === '' && $last === '') {
+        $display = trim((string) ($contact['display_name'] ?? ''));
+        if ($display !== '') {
+            $parts = preg_split('/\s+/', $display, 2) ?: [];
+            $first = (string) ($parts[0] ?? '');
+            $last = (string) ($parts[1] ?? '');
+        }
+    }
+
+    try {
+        $id = csUpsertGhlContact([
+            'email' => $email,
+            'first_name' => $first,
+            'last_name' => $last,
+        ], ['scorecard-pro-member']);
+        if ($id === null && function_exists('proLog')) {
+            proLog('ghl_scorecard_pro_member_fail', ['email' => $email]);
+        } elseif ($id !== null && function_exists('proLog')) {
+            proLog('ghl_scorecard_pro_member_ok', ['email' => $email, 'contact_id' => $id]);
+        }
+    } catch (Throwable $e) {
+        error_log('csTagScorecardProMember: ' . $e->getMessage());
+        if (function_exists('proLog')) {
+            proLog('ghl_scorecard_pro_member_fail', ['email' => $email, 'error' => $e->getMessage()]);
+        }
+    }
 }
 
 /**
