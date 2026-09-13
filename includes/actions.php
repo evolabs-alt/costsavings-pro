@@ -96,6 +96,89 @@ function publicAppBaseUrl(): string {
     return $scheme . '://' . $host . $path . '/';
 }
 
+/**
+ * Members portal origin for invite emails (no trailing slash).
+ */
+function membersAppUrl(): string
+{
+    if (defined('MEMBERS_APP_URL')) {
+        $u = trim((string) MEMBERS_APP_URL);
+        if ($u !== '') {
+            return rtrim($u, '/');
+        }
+    }
+    return 'https://members.savvycfo.com';
+}
+
+/**
+ * Consume a pending Saver org invitation for this email (SSO / members-first flow).
+ * Returns true when membership was added or already present for the invited org.
+ */
+function acceptPendingInviteForEmail(PDO $pdo, int $userId, string $email): bool
+{
+    $email = normalizeUserEmail($email);
+    if ($userId < 1 || $email === '') {
+        return false;
+    }
+
+    $st = $pdo->prepare(
+        'SELECT * FROM invitations
+         WHERE email = ? AND consumed_at IS NULL AND expires_at > NOW()
+         ORDER BY id DESC
+         LIMIT 1'
+    );
+    $st->execute([$email]);
+    $inv = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$inv) {
+        return false;
+    }
+
+    $orgId = (int) ($inv['org_id'] ?? 0);
+    if ($orgId < 1) {
+        return false;
+    }
+
+    $already = $pdo->prepare('SELECT 1 FROM user_organizations WHERE user_id = ? AND org_id = ? LIMIT 1');
+    $already->execute([$userId, $orgId]);
+    if ($already->fetchColumn()) {
+        $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
+        markUserJoinedViaInvite($pdo, $userId);
+        return true;
+    }
+
+    if (getOrganizationMemberCount($pdo, $orgId) >= getOrganizationMaxUsers($pdo, $orgId)) {
+        error_log('acceptPendingInviteForEmail: org at capacity org_id=' . $orgId . ' email=' . $email);
+        return false;
+    }
+
+    $desiredRole = strtolower(trim((string) ($inv['invite_role'] ?? 'member')));
+    if ($desiredRole !== OrgRole::ROLE_ADMIN && $desiredRole !== OrgRole::ROLE_MEMBER) {
+        $desiredRole = OrgRole::ROLE_MEMBER;
+    }
+    $inviterId = (int) ($inv['invited_by_user_id'] ?? 0);
+    $inviterRole = OrgRole::ROLE_MEMBER;
+    if ($inviterId > 0) {
+        $inviterRole = RoleContext::orgRole($pdo, $inviterId, $orgId) ?? OrgRole::ROLE_MEMBER;
+    }
+    if ($desiredRole !== OrgRole::ROLE_MEMBER && !OrgRole::canElevateOrgRoles($inviterRole)) {
+        $desiredRole = OrgRole::ROLE_MEMBER;
+    }
+
+    RoleContext::upsertOrgMembership($pdo, $userId, $orgId, $desiredRole);
+    $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
+    markUserJoinedViaInvite($pdo, $userId);
+    RoleContext::persistLastOrgId($pdo, $userId, $orgId);
+    logInviteEvent('sso_auto_accepted', [
+        'invitation_id' => (int) $inv['id'],
+        'org_id' => $orgId,
+        'email' => $email,
+        'user_id' => $userId,
+        'invite_role' => $desiredRole,
+    ]);
+
+    return true;
+}
+
 function logInviteEvent(string $event, array $context = []): void {
     $safe = [];
     foreach ($context as $k => $v) {
@@ -349,6 +432,15 @@ function handleSsoConsume(): void
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     }
+    $userId = (int) $row['id'];
+    $email = normalizeUserEmail((string) ($row['email'] ?? $claims['email'] ?? ''));
+    acceptPendingInviteForEmail($pdo, $userId, $email);
+    $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ? LIMIT 1');
+    $stmt->execute([$userId]);
+    $fresh = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($fresh) {
+        $row = $fresh;
+    }
     establishUserSession($pdo, $row);
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;
@@ -535,9 +627,15 @@ function handleInviteMember() {
     $invId = (int) $pdo->lastInsertId();
     logInviteEvent('invite_saved', ['invitation_id' => $invId, 'org_id' => $orgId, 'email' => $email, 'invite_role' => $inviteRole]);
 
-    $link = publicAppBaseUrl() . 'register.php?token=' . urlencode($plain);
-    $body = '<p>You have been invited to join the Savvy CFO Cost Savings tool.</p>'
-        . '<p><a href="' . htmlspecialchars($link) . '">Complete registration</a></p>'
+    // Tag immediately so Members login unlocks Savvy Saver before they open Saver.
+    if (function_exists('csTagScorecardProMember')) {
+        csTagScorecardProMember(['email' => $email]);
+    }
+
+    $link = membersAppUrl() . '/register?email=' . rawurlencode($email);
+    $body = '<p>You have been invited to Savvy Saver (Cost Savings).</p>'
+        . '<p>Create your Savvy CFO Members account (or sign in), then open <strong>Savvy Saver</strong> from your products list.</p>'
+        . '<p><a href="' . htmlspecialchars($link) . '">Continue on Members</a></p>'
         . '<p style="font-size:13px;color:#555;">If the link above does not work, copy and paste this address into your browser:<br>'
         . htmlspecialchars($link) . '</p>';
     $mailResult = sendInviteEmail($email, 'Your invitation — Savvy Saver', $body);
