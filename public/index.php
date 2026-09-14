@@ -2270,13 +2270,28 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         /* Restore padding on login page only */
         .content-padding.login-page {
-            padding: 40px;
+            padding: 48px 40px 56px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 32rem;
+            margin: 0 auto;
+        }
+
+        .login-page h1 {
+            margin-bottom: 1rem;
         }
 
         .login-page .subtitle {
-            margin-bottom: 1.5rem;
+            margin: 0 0 1.75rem;
             line-height: 1.55;
-            max-width: 36rem;
+            max-width: 28rem;
+            text-align: center;
+        }
+
+        .login-page .members-gate-actions {
+            margin: 0;
         }
 
         a.members-gate-btn {
@@ -2289,7 +2304,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             font-size: 16px;
             font-weight: 600;
             cursor: pointer;
-            margin: 8px 0;
+            margin: 0;
             text-decoration: none;
             transition: all 0.3s ease;
         }
@@ -4372,7 +4387,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             <div class="content-padding login-page">
                 <h1>Savvy Saver</h1>
                 <p class="subtitle">Savvy Saver is opened from the Savvy CFO Members Area. Sign in at Members, then click <strong>Savvy Saver</strong> to continue.</p>
-                <p>
+                <p class="members-gate-actions">
                     <a class="btn members-gate-btn" href="<?php echo htmlspecialchars(membersAppUrl() . '/login', ENT_QUOTES, 'UTF-8'); ?>">Go to Members Area</a>
                 </p>
             <!-- eBook Promotion Section -->
