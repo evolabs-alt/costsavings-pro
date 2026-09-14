@@ -2272,6 +2272,33 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .content-padding.login-page {
             padding: 40px;
         }
+
+        .login-page .subtitle {
+            margin-bottom: 1.5rem;
+            line-height: 1.55;
+            max-width: 36rem;
+        }
+
+        a.members-gate-btn {
+            display: inline-block;
+            padding: 16px 32px;
+            background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
+            color: #fff !important;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin: 8px 0;
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+
+        a.members-gate-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(11, 88, 163, 0.3);
+            color: #fff !important;
+        }
         
         .content-padding.no-top {
             padding-top: 0;
@@ -4344,27 +4371,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             <?php if ($current_view === 'login'): ?>
             <div class="content-padding login-page">
                 <h1>Savvy Saver</h1>
-                <p class="subtitle">Sign in with your username and password.</p>
-            
-                <form method="POST">
-                    <input type="hidden" name="action" value="login">
-                    <div class="form-group">
-                        <label for="username">Username or email</label>
-                        <input type="text" id="username" name="username" required autocomplete="username">
-                    </div>
-                    <div class="form-group">
-                        <label for="password">Password</label>
-                        <input type="password" id="password" name="password" required autocomplete="current-password">
-                    </div>
-                    <div class="form-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" name="agree_terms" id="agree_terms" required>
-                            <span>By using this cost savings tool, I agree to the <a href="https://savvycfo.com/terms-conditions-privacy-policy/" target="_blank" rel="noopener noreferrer">terms of use</a>.</span>
-                        </label>
-                    </div>
-                    <button type="submit">Log in</button>
-                </form>
-            
+                <p class="subtitle">Savvy Saver is opened from the Savvy CFO Members Area. Sign in at Members, then click <strong>Savvy Saver</strong> to continue.</p>
+                <p>
+                    <a class="btn members-gate-btn" href="<?php echo htmlspecialchars(membersAppUrl() . '/login', ENT_QUOTES, 'UTF-8'); ?>">Go to Members Area</a>
+                </p>
             <!-- eBook Promotion Section -->
             </div> <!-- Close content-padding -->
 

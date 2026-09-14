@@ -340,28 +340,8 @@ function ensureUserOrganizationId(PDO $pdo, int $userId): int {
 }
 
 function handleLogin() {
-    $pdo = getDBConnection();
-    $u = trim($_POST['username'] ?? '');
-    $p = (string) ($_POST['password'] ?? '');
-    if ($u === '' || $p === '') {
-        $_SESSION['error'] = 'Enter username and password.';
-        header('Location: ' . $_SERVER['PHP_SELF']);
-        exit;
-    }
-    $stmt = $pdo->prepare('SELECT * FROM users WHERE username = ? OR email = ?');
-    $stmt->execute([$u, strtolower($u)]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$row || empty($row['password_hash']) || !password_verify($p, $row['password_hash'])) {
-        $_SESSION['error'] = 'Invalid credentials.';
-        header('Location: ' . $_SERVER['PHP_SELF']);
-        exit;
-    }
-    if (!empty($row['is_disabled'])) {
-        $_SESSION['error'] = 'Your account has been disabled. Contact your administrator.';
-        header('Location: ' . $_SERVER['PHP_SELF']);
-        exit;
-    }
-    establishUserSession($pdo, $row);
+    // Local password login is disabled — open Savvy Saver from Members.
+    $_SESSION['error'] = 'Sign in through the Savvy CFO Members Area, then open Savvy Saver.';
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;
 }
