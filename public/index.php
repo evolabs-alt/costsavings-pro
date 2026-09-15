@@ -7004,16 +7004,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             throw new Error((d && d.error) || 'Could not create category.');
                         }
                         addProjectCategoryToList({ id: d.id, name: d.name });
-                        if (pendingCategoryCreateRow) {
-                            const sel = pendingCategoryCreateRow.querySelector('.category-select');
+                        var categoryRow = pendingCategoryCreateRow;
+                        if (categoryRow) {
+                            const sel = categoryRow.querySelector('.category-select');
                             if (sel) sel.value = String(d.id);
-                            markRowDirty(pendingCategoryCreateRow);
+                            markRowDirty(categoryRow);
                         }
                         closeAppModal('appModalNewCategory');
                         pendingCategoryCreateRow = null;
                         autoSave();
                         if (!calculatorLoadInProgress) {
-                            applyVendorTablePagination(vendorCurrentPage);
+                            applyVendorTablePagination(vendorCurrentPage, { keepRowVisible: categoryRow });
                         }
                         showSnackbar('Category created.', 'success');
                     })
@@ -7037,7 +7038,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 markRowDirty(row);
                 autoSave();
                 if (!calculatorLoadInProgress) {
-                    applyVendorTablePagination(vendorCurrentPage);
+                    applyVendorTablePagination(vendorCurrentPage, { keepRowVisible: row });
                 }
             }
 
@@ -7556,7 +7557,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 nextBtn.disabled = !hasMultiplePages || vendorCurrentPage >= totalPages;
             }
 
-            function applyVendorTablePagination(page) {
+            function applyVendorTablePagination(page, opts) {
+                opts = opts || {};
+                const keepRowVisible = opts.keepRowVisible || null;
+                const wrap = document.querySelector('.cost-calculator-table-wrapper');
+                const prevWinY = window.scrollY || window.pageYOffset || 0;
+                const prevWrapY = wrap ? wrap.scrollTop : 0;
+                const activeEl = document.activeElement;
+                const activeRow = (activeEl && activeEl.closest)
+                    ? activeEl.closest('#calculatorRows tr')
+                    : null;
+
                 if (typeof page === 'number' && isFinite(page)) {
                     vendorCurrentPage = page;
                 }
@@ -7566,6 +7577,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const allRows = Array.from(document.querySelectorAll('#calculatorRows tr'));
                 const filteredRows = getFilteredVendorRows();
                 const totalPages = Math.max(1, Math.ceil(filteredRows.length / vendorPageSize));
+
+                // Prefer keeping the row the user is editing (or an explicit keepRow) on-screen.
+                // Re-sorting after a dropdown change can move that row off the current page;
+                // hiding a focused <select> makes some Chromium/Edge builds jump scroll to top.
+                const rowToKeep = keepRowVisible || activeRow;
+                if (rowToKeep) {
+                    const keepIdx = filteredRows.indexOf(rowToKeep);
+                    if (keepIdx >= 0) {
+                        vendorCurrentPage = Math.floor(keepIdx / vendorPageSize) + 1;
+                    }
+                }
+
                 vendorCurrentPage = Math.min(totalPages, Math.max(1, vendorCurrentPage));
 
                 const startIdx = (vendorCurrentPage - 1) * vendorPageSize;
@@ -7588,6 +7611,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 updateRowNumbers();
                 renderVendorPagination(filteredRows.length, totalPages);
                 updateSelectAllCheckboxState();
+
+                function restoreScrollPosition() {
+                    window.scrollTo(0, prevWinY);
+                    if (wrap) wrap.scrollTop = prevWrapY;
+                }
+                restoreScrollPosition();
+                requestAnimationFrame(function() {
+                    restoreScrollPosition();
+                    requestAnimationFrame(restoreScrollPosition);
+                });
             }
 
             function goToVendorPage(page) {
@@ -8440,7 +8473,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         markRowDirty(row);
                         autoSave();
                         if (!calculatorLoadInProgress) {
-                            applyVendorTablePagination(vendorCurrentPage);
+                            applyVendorTablePagination(vendorCurrentPage, { keepRowVisible: row });
                         }
                     });
                 }
@@ -8458,7 +8491,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         markRowDirty(row);
                         clearTimeout(saveTimeout);
                         saveCalculatorData({ silent: true });
-                        applyVendorTablePagination(vendorCurrentPage);
+                        applyVendorTablePagination(vendorCurrentPage, { keepRowVisible: row });
                     });
                 }
                 
@@ -8504,7 +8537,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         markRowDirty(row);
                         autoSave();
                         if (!calculatorLoadInProgress) {
-                            applyVendorTablePagination(vendorCurrentPage);
+                            applyVendorTablePagination(vendorCurrentPage, { keepRowVisible: row });
                         }
                     });
                 });
