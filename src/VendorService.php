@@ -287,11 +287,17 @@ class VendorService
     /**
      * Manager on admin save: explicit null / empty / 0 in payload clears assignment.
      * If `manager_user_id` is omitted (legacy clients), default to the acting admin user.
+     * If a non-empty id is not an active org member, keep the existing manager (do not silently clear).
      *
      * @param array<string, mixed> $item
      */
-    private static function resolveManagerUserIdForAdminSave(PDO $pdo, int $orgId, array $item, int $adminUserId): ?int
-    {
+    private static function resolveManagerUserIdForAdminSave(
+        PDO $pdo,
+        int $orgId,
+        array $item,
+        int $adminUserId,
+        ?int $existingManagerId = null
+    ): ?int {
         if (!array_key_exists('manager_user_id', $item)) {
             return $adminUserId > 0 ? $adminUserId : null;
         }
@@ -304,7 +310,7 @@ class VendorService
             return null;
         }
         if (!self::userInOrg($pdo, $mgr, $orgId)) {
-            return null;
+            return $existingManagerId;
         }
 
         return $mgr;
@@ -312,7 +318,7 @@ class VendorService
 
     /**
      * @param array<int, array<string, mixed>> $items
-     * @return array{success:bool, error?:string, cancelKeep?:string}
+     * @return array{success:bool, error?:string, cancelKeep?:string, saved_ids?:array<int, int>}
      */
     public static function saveAdmin(PDO $pdo, int $orgId, int $projectId, int $adminUserId, string $actingRole, array $items, bool $fullSync = false): array
     {
@@ -322,18 +328,18 @@ class VendorService
             return $v;
         }
         if (count($items) === 0 && !$fullSync) {
-            return ['success' => true, 'cancelKeep' => ''];
+            return ['success' => true, 'cancelKeep' => '', 'saved_ids' => []];
         }
 
         $pdo->beginTransaction();
         try {
             if (OrgRole::isSuperAdmin($actingRole)) {
                 $existing = $pdo->prepare(
-                    'SELECT id, vendor_name FROM cost_calculator_items WHERE org_id = ? AND project_id = ?'
+                    'SELECT id, vendor_name, manager_user_id FROM cost_calculator_items WHERE org_id = ? AND project_id = ?'
                 );
             } elseif (OrgRole::isPrivileged($actingRole)) {
                 $existing = $pdo->prepare(
-                    'SELECT id, vendor_name FROM cost_calculator_items WHERE org_id = ? AND project_id = ? AND visibility = \'public\''
+                    'SELECT id, vendor_name, manager_user_id FROM cost_calculator_items WHERE org_id = ? AND project_id = ? AND visibility = \'public\''
                 );
             } else {
                 $pdo->rollBack();
@@ -343,13 +349,17 @@ class VendorService
             $existing->execute([$orgId, $projectId]);
             $allowedIds = [];
             $existingVendorNames = [];
+            $existingManagers = [];
             while ($r = $existing->fetch(PDO::FETCH_ASSOC)) {
                 $id = (int) $r['id'];
                 $allowedIds[$id] = true;
                 $existingVendorNames[$id] = trim((string) ($r['vendor_name'] ?? ''));
+                $existingMgr = isset($r['manager_user_id']) ? (int) $r['manager_user_id'] : 0;
+                $existingManagers[$id] = $existingMgr > 0 ? $existingMgr : null;
             }
 
             $payloadIds = [];
+            $savedIds = [];
 
             $ins = $pdo->prepare(
                 'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, category_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
@@ -365,6 +375,7 @@ class VendorService
 
             foreach ($items as $item) {
                 if (!is_array($item)) {
+                    $savedIds[] = 0;
                     continue;
                 }
                 $status = self::resolveStatusFromItem($item);
@@ -372,14 +383,18 @@ class VendorService
                 $cc .= '-' . $legacy['cancel_keep'];
                 $purpose = $item['purpose_of_subscription'] ?? $item['notes'] ?? '';
                 $vis = ($item['visibility'] ?? 'public') === 'confidential' ? 'confidential' : 'public';
-                $mgr = self::resolveManagerUserIdForAdminSave($pdo, $orgId, $item, $adminUserId);
+                $rowId = isset($item['id']) ? (int) $item['id'] : 0;
+                $existingMgr = ($rowId > 0 && array_key_exists($rowId, $existingManagers))
+                    ? $existingManagers[$rowId]
+                    : null;
+                $mgr = self::resolveManagerUserIdForAdminSave($pdo, $orgId, $item, $adminUserId, $existingMgr);
                 $categoryId = CategoryService::resolveCategoryIdFromItem($pdo, $orgId, $projectId, $item);
                 $deadline = self::normDate($item['cancellation_deadline'] ?? null);
                 $lastPay = self::normDate($item['last_payment_date'] ?? null);
-                $rowId = isset($item['id']) ? (int) $item['id'] : 0;
 
                 if ($rowId > 0) {
                     if (!isset($allowedIds[$rowId])) {
+                        $savedIds[] = 0;
                         continue;
                     }
                     $payloadIds[$rowId] = true;
@@ -409,6 +424,7 @@ class VendorService
                         $orgId,
                         $projectId,
                     ]);
+                    $savedIds[] = $rowId;
                 } else {
                     $ins->execute([
                         $orgId,
@@ -432,24 +448,16 @@ class VendorService
                     $newId = (int) $pdo->lastInsertId();
                     if ($newId > 0) {
                         $payloadIds[$newId] = true;
+                        $savedIds[] = $newId;
+                    } else {
+                        $savedIds[] = 0;
                     }
                 }
             }
 
-            $payloadHasKnownId = false;
-            foreach ($items as $item) {
-                if (!is_array($item)) {
-                    continue;
-                }
-                $rowId = isset($item['id']) ? (int) $item['id'] : 0;
-                if ($rowId > 0 && isset($allowedIds[$rowId])) {
-                    $payloadHasKnownId = true;
-                    break;
-                }
-            }
-
-            $shouldSyncDeletes = $fullSync || $payloadHasKnownId;
-            if ($shouldSyncDeletes && count($allowedIds) > 0) {
+            // Only delete missing rows on explicit full_sync (e.g. bulk delete).
+            // Partial/delta saves must never wipe vendors absent from the payload.
+            if ($fullSync && count($allowedIds) > 0) {
                 $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE id = ? AND org_id = ? AND project_id = ?');
                 foreach ($allowedIds as $id => $_unused) {
                     if (!isset($payloadIds[$id])) {
@@ -460,7 +468,7 @@ class VendorService
 
             $pdo->commit();
 
-            return ['success' => true, 'cancelKeep' => $cc];
+            return ['success' => true, 'cancelKeep' => $cc, 'saved_ids' => $savedIds];
         } catch (PDOException $e) {
             $pdo->rollBack();
             error_log('VendorService::saveAdmin: ' . $e->getMessage());
@@ -471,7 +479,7 @@ class VendorService
 
     /**
      * @param array<int, array<string, mixed>> $items
-     * @return array{success:bool, error?:string, cancelKeep?:string}
+     * @return array{success:bool, error?:string, cancelKeep?:string, saved_ids?:array<int, int>}
      */
     public static function saveMember(PDO $pdo, int $orgId, int $projectId, int $userId, array $items, bool $fullSync = false): array
     {
@@ -481,7 +489,7 @@ class VendorService
             return $v;
         }
         if (count($items) === 0 && !$fullSync) {
-            return ['success' => true, 'cancelKeep' => ''];
+            return ['success' => true, 'cancelKeep' => '', 'saved_ids' => []];
         }
 
         $pdo->beginTransaction();
@@ -503,6 +511,7 @@ class VendorService
             }
 
             $payloadIds = [];
+            $savedIds = [];
             $cc = '';
 
             $upd = $pdo->prepare(
@@ -512,6 +521,7 @@ class VendorService
 
             foreach ($items as $item) {
                 if (!is_array($item)) {
+                    $savedIds[] = 0;
                     continue;
                 }
                 $status = self::resolveStatusFromItem($item);
@@ -526,6 +536,7 @@ class VendorService
 
                 if ($rowId > 0) {
                     if (!isset($allowedIds[$rowId]) || !isset($spendById[$rowId])) {
+                        $savedIds[] = 0;
                         continue;
                     }
                     $spend = $spendById[$rowId];
@@ -550,23 +561,14 @@ class VendorService
                         $projectId,
                         $userId,
                     ]);
+                    $savedIds[] = $rowId;
+                } else {
+                    $savedIds[] = 0;
                 }
             }
 
-            $payloadHasKnownId = false;
-            foreach ($items as $item) {
-                if (!is_array($item)) {
-                    continue;
-                }
-                $rowId = isset($item['id']) ? (int) $item['id'] : 0;
-                if ($rowId > 0 && isset($allowedIds[$rowId])) {
-                    $payloadHasKnownId = true;
-                    break;
-                }
-            }
-
-            $shouldSyncDeletes = $fullSync || $payloadHasKnownId;
-            if ($shouldSyncDeletes) {
+            // Only delete missing rows on explicit full_sync (e.g. bulk delete).
+            if ($fullSync) {
                 foreach (array_keys($allowedIds) as $aid) {
                     if (!isset($payloadIds[$aid])) {
                         $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE id = ? AND org_id = ? AND project_id = ? AND (manager_user_id IS NULL OR manager_user_id = ?)');
@@ -577,7 +579,7 @@ class VendorService
 
             $pdo->commit();
 
-            return ['success' => true, 'cancelKeep' => $cc];
+            return ['success' => true, 'cancelKeep' => $cc, 'saved_ids' => $savedIds];
         } catch (PDOException $e) {
             $pdo->rollBack();
             error_log('VendorService::saveMember: ' . $e->getMessage());
@@ -704,7 +706,9 @@ class VendorService
 
     private static function userInOrg(PDO $pdo, int $userId, int $orgId): bool
     {
-        $st = $pdo->prepare('SELECT 1 FROM users WHERE id = ? AND org_id = ?');
+        $st = $pdo->prepare(
+            'SELECT 1 FROM user_organizations WHERE user_id = ? AND org_id = ? AND is_disabled = 0 LIMIT 1'
+        );
         $st->execute([$userId, $orgId]);
 
         return (bool) $st->fetchColumn();

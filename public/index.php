@@ -6898,20 +6898,39 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     return;
                 }
                 clearTimeout(saveTimeout);
+                const selectedCount = selectedRows.length;
                 if (payload.action === 'delete') {
                     selectedRows.forEach(function(row) { row.remove(); });
-                } else if (payload.action === 'frequency') {
+                    applyVendorTablePagination(vendorCurrentPage);
+                    calculateAnnualSavings();
+                    calculateConfirmedSavings();
+                    clearRowSelection();
+                    const remainingSnapshot = collectCostCalculatorItemsFromDom();
+                    saveCalculatorData({ silent: true, items: remainingSnapshot, fullSync: true }).then(function(saveResult) {
+                        if (saveResult && saveResult.success) {
+                            showSnackbar(formatVendorsSelectedLabel(selectedCount) + '. Bulk action applied.', 'success');
+                        } else if (saveResult && saveResult.aborted) {
+                            showSnackbar('Save was interrupted by a newer change. Check vendor data and save again if needed.', 'error');
+                        } else {
+                            showSnackbar((saveResult && saveResult.error) || 'Could not save changes. Wait for the table to finish loading, then try again.', 'error');
+                        }
+                    });
+                    return;
+                }
+                if (payload.action === 'frequency') {
                     selectedRows.forEach(function(row) {
                         const frequencySelect = row.querySelector('.frequency-select');
                         if (frequencySelect) {
                             frequencySelect.value = payload.value;
                             calculateAnnualCost({ target: frequencySelect });
                         }
+                        markRowDirty(row);
                     });
                 } else if (payload.action === 'visibility') {
                     selectedRows.forEach(function(row) {
                         const visSel = row.querySelector('.visibility-select');
                         if (visSel && !visSel.disabled) visSel.value = payload.value;
+                        markRowDirty(row);
                     });
                 } else if (payload.action === 'manager') {
                     selectedRows.forEach(function(row) {
@@ -6920,6 +6939,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             mgrSel.value = payload.value;
                             syncMemberStatusEditability(row);
                         }
+                        markRowDirty(row);
                     });
                 } else if (payload.action === 'category') {
                     selectedRows.forEach(function(row) {
@@ -6928,6 +6948,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             catSel.value = payload.value;
                             catSel.setAttribute('data-prev-category', payload.value || '');
                         }
+                        markRowDirty(row);
                     });
                 } else if (payload.action === 'status') {
                     selectedRows.forEach(function(row) {
@@ -6942,16 +6963,22 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 dlIn.value = getEndOfCurrentMonthIsoDate();
                             }
                         }
+                        markRowDirty(row);
                     });
                 }
                 applyVendorTablePagination(vendorCurrentPage);
                 calculateAnnualSavings();
                 calculateConfirmedSavings();
-                const bulkItemsSnapshot = collectCostCalculatorItemsFromDom();
+                const dirtyPayload = collectDirtyCostCalculatorItemsFromDom();
                 clearRowSelection();
-                saveCalculatorData({ silent: true, items: bulkItemsSnapshot, fullSync: true }).then(function(saveResult) {
+                saveCalculatorData({
+                    silent: true,
+                    items: dirtyPayload.items,
+                    dirtyRows: dirtyPayload.dirtyRows,
+                    dirtyGens: dirtyPayload.dirtyGens
+                }).then(function(saveResult) {
                     if (saveResult && saveResult.success) {
-                        showSnackbar(formatVendorsSelectedLabel(selectedRows.length) + '. Bulk action applied.', 'success');
+                        showSnackbar(formatVendorsSelectedLabel(selectedCount) + '. Bulk action applied.', 'success');
                     } else if (saveResult && saveResult.aborted) {
                         showSnackbar('Save was interrupted by a newer change. Check vendor data and save again if needed.', 'error');
                     } else {
@@ -7061,15 +7088,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             throw new Error((d && d.error) || 'Could not create category.');
                         }
                         addProjectCategoryToList({ id: d.id, name: d.name });
-                        if (pendingCategoryCreateRow) {
-                            const sel = pendingCategoryCreateRow.querySelector('.category-select');
+                        var categoryRow = pendingCategoryCreateRow;
+                        if (categoryRow) {
+                            const sel = categoryRow.querySelector('.category-select');
                             if (sel) sel.value = String(d.id);
+                            markRowDirty(categoryRow);
                         }
                         closeAppModal('appModalNewCategory');
                         pendingCategoryCreateRow = null;
                         autoSave();
                         if (!calculatorLoadInProgress) {
-                            applyVendorTablePagination(vendorCurrentPage);
+                            applyVendorTablePagination(vendorCurrentPage, { keepRowVisible: categoryRow });
                         }
                         showSnackbar('Category created.', 'success');
                     })
@@ -7090,9 +7119,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     return;
                 }
                 sel.setAttribute('data-prev-category', sel.value || '');
+                markRowDirty(row);
                 autoSave();
                 if (!calculatorLoadInProgress) {
-                    applyVendorTablePagination(vendorCurrentPage);
+                    applyVendorTablePagination(vendorCurrentPage, { keepRowVisible: row });
                 }
             }
 
@@ -7354,9 +7384,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             let saveTimeout;
             /** True while repopulating rows from the server — avoids save races (partial DELETE/INSERT) from synthetic events. */
             let calculatorLoadInProgress = false;
-            /** Incremented on each load start; stale fetch responses are ignored. */
+            /** Incremented on each load start; stale fetch responses and queued saves are ignored. */
             let calculatorLoadGeneration = 0;
-            /** Serialize saves: server replaces all rows per request; overlapping saves must not complete out of order. */
+            /** Serialize saves: overlapping saves must not complete out of order. */
             let saveQueue = Promise.resolve();
             /** Abort stale in-flight save HTTP requests so an older payload cannot commit after a newer save was sent (bulk vs autosave races). */
             let calculatorSaveFetchController = null;
@@ -7369,12 +7399,25 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     delete textarea.dataset.aiPurposeBadge;
                 }
             }
+            function markRowDirty(row) {
+                if (!row || calculatorLoadInProgress) return;
+                const next = (parseInt(row.getAttribute('data-dirty-gen') || '0', 10) || 0) + 1;
+                row.setAttribute('data-dirty', '1');
+                row.setAttribute('data-dirty-gen', String(next));
+            }
+            function clearRowDirtyIfUnchanged(row, expectedGen) {
+                if (!row) return;
+                if (expectedGen != null && String(row.getAttribute('data-dirty-gen') || '') !== String(expectedGen)) {
+                    return;
+                }
+                row.removeAttribute('data-dirty');
+            }
             function autoSave() {
                 console.log('autoSave called');
                 clearTimeout(saveTimeout);
                 saveTimeout = setTimeout(function() {
                     console.log('Auto-saving after timeout');
-                    saveCalculatorData();
+                    saveCalculatorData({ silent: true });
                 }, 1000); // Save 1 second after last change
             }
             
@@ -7382,12 +7425,35 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const opts = (options && typeof options === 'object') ? options : {};
                 const keepalive = !!opts.keepalive;
                 const silent = !!opts.silent || keepalive;
-                const itemsPayload = Array.isArray(opts.items) ? opts.items : null;
+                const fullSync = !!opts.fullSync;
+                let itemsPayload = Array.isArray(opts.items) ? opts.items : null;
+                let dirtyRows = Array.isArray(opts.dirtyRows) ? opts.dirtyRows : null;
+                let dirtyGens = Array.isArray(opts.dirtyGens) ? opts.dirtyGens : null;
                 if (calculatorLoadInProgress || postProjectCreateFlow.postCreateCsvImportInFlight) {
                     return Promise.resolve({ success: false, error: 'Still loading vendor data; save skipped.' });
                 }
+                if (itemsPayload === null) {
+                    if (fullSync) {
+                        itemsPayload = collectCostCalculatorItemsFromDom();
+                    } else {
+                        const dirty = collectDirtyCostCalculatorItemsFromDom();
+                        itemsPayload = dirty.items;
+                        dirtyRows = dirty.dirtyRows;
+                        dirtyGens = dirty.dirtyGens;
+                    }
+                }
+                if ((!itemsPayload || itemsPayload.length === 0) && !fullSync) {
+                    return Promise.resolve({ success: true, skipped: true });
+                }
+                const loadGenerationAtEnqueue = calculatorLoadGeneration;
                 saveQueue = saveQueue.then(function () {
-                    return performSaveCalculatorData(keepalive, silent, itemsPayload, !!opts.fullSync);
+                    if (calculatorLoadInProgress || postProjectCreateFlow.postCreateCsvImportInFlight) {
+                        return { success: false, error: 'Still loading vendor data; save skipped.' };
+                    }
+                    if (loadGenerationAtEnqueue !== calculatorLoadGeneration) {
+                        return { success: false, error: 'Save discarded after reload' };
+                    }
+                    return performSaveCalculatorData(keepalive, silent, itemsPayload, fullSync, dirtyRows, dirtyGens, loadGenerationAtEnqueue);
                 }).catch(function (e) {
                     console.error('Calculator save queue:', e);
                     return { success: false, error: String(e && e.message ? e.message : e) };
@@ -7575,7 +7641,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 nextBtn.disabled = !hasMultiplePages || vendorCurrentPage >= totalPages;
             }
 
-            function applyVendorTablePagination(page) {
+            function applyVendorTablePagination(page, opts) {
+                opts = opts || {};
+                const keepRowVisible = opts.keepRowVisible || null;
+                const wrap = document.querySelector('.cost-calculator-table-wrapper');
+                const prevWinY = window.scrollY || window.pageYOffset || 0;
+                const prevWrapY = wrap ? wrap.scrollTop : 0;
+                const activeEl = document.activeElement;
+                const activeRow = (activeEl && activeEl.closest)
+                    ? activeEl.closest('#calculatorRows tr')
+                    : null;
+
                 if (typeof page === 'number' && isFinite(page)) {
                     vendorCurrentPage = page;
                 }
@@ -7585,6 +7661,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const allRows = Array.from(document.querySelectorAll('#calculatorRows tr'));
                 const filteredRows = getFilteredVendorRows();
                 const totalPages = Math.max(1, Math.ceil(filteredRows.length / vendorPageSize));
+
+                // Prefer keeping the row the user is editing (or an explicit keepRow) on-screen.
+                // Re-sorting after a dropdown change can move that row off the current page;
+                // hiding a focused <select> makes some Chromium/Edge builds jump scroll to top.
+                const rowToKeep = keepRowVisible || activeRow;
+                if (rowToKeep) {
+                    const keepIdx = filteredRows.indexOf(rowToKeep);
+                    if (keepIdx >= 0) {
+                        vendorCurrentPage = Math.floor(keepIdx / vendorPageSize) + 1;
+                    }
+                }
+
                 vendorCurrentPage = Math.min(totalPages, Math.max(1, vendorCurrentPage));
 
                 const startIdx = (vendorCurrentPage - 1) * vendorPageSize;
@@ -7607,6 +7695,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 updateRowNumbers();
                 renderVendorPagination(filteredRows.length, totalPages);
                 updateSelectAllCheckboxState();
+
+                function restoreScrollPosition() {
+                    window.scrollTo(0, prevWinY);
+                    if (wrap) wrap.scrollTop = prevWrapY;
+                }
+                restoreScrollPosition();
+                requestAnimationFrame(function() {
+                    restoreScrollPosition();
+                    requestAnimationFrame(restoreScrollPosition);
+                });
             }
 
             function goToVendorPage(page) {
@@ -8047,71 +8145,116 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 return year + '-' + month + '-' + day;
             }
             
+            function collectItemFromCalculatorRow(row) {
+                if (!row) return null;
+                const vendorInput = row.querySelector('input[name="vendor[]"]');
+                const costInput = row.querySelector('.cost-input');
+                const frequencySelect = row.querySelector('.frequency-select');
+                const notesTextarea = row.querySelector('textarea.purpose-textarea') || row.querySelector('textarea[name="notes[]"]');
+                const annualCostDisplay = row.querySelector('.annual-cost-display');
+                const rowIdEl = row.querySelector('.row-db-id');
+                const mgrSel = row.querySelector('.manager-select');
+                const catSel = row.querySelector('.category-select');
+                const visSel = row.querySelector('.visibility-select');
+                const deadlineIn = row.querySelector('.cancel-deadline-input');
+                const lastPayIn = row.querySelector('.last-payment-input');
+
+                const vendorName = vendorInput ? vendorInput.value.trim() : '';
+                const costPerPeriod = costInput ? parseFloat(costInput.value.replace(/[^0-9.-]/g, '')) || 0 : 0;
+                const frequency = frequencySelect ? frequencySelect.value : '';
+                const status = getRowStatus(row);
+                const cancelKeep = statusToLegacyCancelKeep(status);
+                const cancelledStatusInt = statusToLegacyCancelledStatus(status);
+                const notes = notesTextarea ? notesTextarea.value.trim() : '';
+                const annualCost = annualCostDisplay ? parseFloat(annualCostDisplay.textContent.replace(/[^0-9.-]/g, '')) || 0 : 0;
+                const idVal = rowIdEl && rowIdEl.value ? parseInt(rowIdEl.value, 10) : null;
+                const managerRaw = mgrSel ? String(mgrSel.value || '').trim() : '';
+                const managerParsed = managerRaw !== '' ? parseInt(managerRaw, 10) : NaN;
+                const managerOk = managerRaw !== '' && !isNaN(managerParsed) && managerParsed > 0;
+                const categoryRaw = catSel ? String(catSel.value || '').trim() : '';
+                const categoryParsed = categoryRaw !== '' && categoryRaw !== '__new__' ? parseInt(categoryRaw, 10) : NaN;
+                const categoryOk = categoryRaw !== '' && categoryRaw !== '__new__' && !isNaN(categoryParsed) && categoryParsed > 0;
+                const visibility = visSel ? visSel.value : 'public';
+                const cancelDl = deadlineIn && deadlineIn.value ? deadlineIn.value : '';
+                const lastPay = lastPayIn && lastPayIn.value ? lastPayIn.value : '';
+
+                if (idVal && !vendorName && costPerPeriod <= 0 && !notes && status === 'pending') {
+                    return null;
+                }
+                if (!(vendorName || costPerPeriod > 0 || status !== 'pending' || notes || idVal)) {
+                    return null;
+                }
+                const o = {
+                    vendor_name: vendorName,
+                    cost_per_period: costPerPeriod,
+                    frequency: frequency,
+                    annual_cost: annualCost,
+                    status: status,
+                    cancel_keep: cancelKeep,
+                    cancelKeep: cancelKeep,
+                    cancelled_status: cancelledStatusInt,
+                    notes: notes,
+                    purpose_of_subscription: notes,
+                    visibility: visibility,
+                    cancellation_deadline: cancelDl,
+                    last_payment_date: lastPay,
+                    manager_user_id: managerOk ? managerParsed : null,
+                    category_id: categoryOk ? categoryParsed : null
+                };
+                if (idVal) { o.id = idVal; }
+                return o;
+            }
+
             function collectCostCalculatorItemsFromDom() {
                 const rows = document.querySelectorAll('#calculatorRows tr');
                 const items = [];
                 rows.forEach(function(row) {
-                    const vendorInput = row.querySelector('input[name="vendor[]"]');
-                    const costInput = row.querySelector('.cost-input');
-                    const frequencySelect = row.querySelector('.frequency-select');
-                    const notesTextarea = row.querySelector('textarea.purpose-textarea') || row.querySelector('textarea[name="notes[]"]');
-                    const annualCostDisplay = row.querySelector('.annual-cost-display');
-                    const rowIdEl = row.querySelector('.row-db-id');
-                    const mgrSel = row.querySelector('.manager-select');
-                    const catSel = row.querySelector('.category-select');
-                    const visSel = row.querySelector('.visibility-select');
-                    const deadlineIn = row.querySelector('.cancel-deadline-input');
-                    const lastPayIn = row.querySelector('.last-payment-input');
-
-                    const vendorName = vendorInput ? vendorInput.value.trim() : '';
-                    const costPerPeriod = costInput ? parseFloat(costInput.value.replace(/[^0-9.-]/g, '')) || 0 : 0;
-                    const frequency = frequencySelect ? frequencySelect.value : '';
-                    const status = getRowStatus(row);
-                    const cancelKeep = statusToLegacyCancelKeep(status);
-                    const cancelledStatusInt = statusToLegacyCancelledStatus(status);
-                    const notes = notesTextarea ? notesTextarea.value.trim() : '';
-                    const annualCost = annualCostDisplay ? parseFloat(annualCostDisplay.textContent.replace(/[^0-9.-]/g, '')) || 0 : 0;
-                    const idVal = rowIdEl && rowIdEl.value ? parseInt(rowIdEl.value, 10) : null;
-                    const managerRaw = mgrSel ? String(mgrSel.value || '').trim() : '';
-                    const managerParsed = managerRaw !== '' ? parseInt(managerRaw, 10) : NaN;
-                    const managerOk = managerRaw !== '' && !isNaN(managerParsed) && managerParsed > 0;
-                    const categoryRaw = catSel ? String(catSel.value || '').trim() : '';
-                    const categoryParsed = categoryRaw !== '' && categoryRaw !== '__new__' ? parseInt(categoryRaw, 10) : NaN;
-                    const categoryOk = categoryRaw !== '' && categoryRaw !== '__new__' && !isNaN(categoryParsed) && categoryParsed > 0;
-                    const visibility = visSel ? visSel.value : 'public';
-                    const cancelDl = deadlineIn && deadlineIn.value ? deadlineIn.value : '';
-                    const lastPay = lastPayIn && lastPayIn.value ? lastPayIn.value : '';
-
-                    if (idVal && !vendorName && costPerPeriod <= 0 && !notes && status === 'pending') {
-                        return;
-                    }
-                    if (vendorName || costPerPeriod > 0 || status !== 'pending' || notes || idVal) {
-                        const o = {
-                            vendor_name: vendorName,
-                            cost_per_period: costPerPeriod,
-                            frequency: frequency,
-                            annual_cost: annualCost,
-                            status: status,
-                            cancel_keep: cancelKeep,
-                            cancelKeep: cancelKeep,
-                            cancelled_status: cancelledStatusInt,
-                            notes: notes,
-                            purpose_of_subscription: notes,
-                            visibility: visibility,
-                            cancellation_deadline: cancelDl,
-                            last_payment_date: lastPay,
-                            manager_user_id: managerOk ? managerParsed : null,
-                            category_id: categoryOk ? categoryParsed : null
-                        };
-                        if (idVal) { o.id = idVal; }
-                        items.push(o);
-                    }
+                    const item = collectItemFromCalculatorRow(row);
+                    if (item) items.push(item);
                 });
                 return items;
             }
 
-            function performSaveCalculatorData(keepalive, silent, prebuiltItems, fullSync) {
-                const items = Array.isArray(prebuiltItems) ? prebuiltItems : collectCostCalculatorItemsFromDom();
+            /** Only rows marked dirty since last successful save — used for delta autosave. */
+            function collectDirtyCostCalculatorItemsFromDom() {
+                const rows = document.querySelectorAll('#calculatorRows tr[data-dirty="1"]');
+                const items = [];
+                const dirtyRows = [];
+                const dirtyGens = [];
+                rows.forEach(function(row) {
+                    const item = collectItemFromCalculatorRow(row);
+                    if (!item) return;
+                    items.push(item);
+                    dirtyRows.push(row);
+                    dirtyGens.push(row.getAttribute('data-dirty-gen') || '0');
+                });
+                return { items: items, dirtyRows: dirtyRows, dirtyGens: dirtyGens };
+            }
+
+            function applySavedIdsToDirtyRows(dirtyRows, savedIds) {
+                if (!Array.isArray(dirtyRows) || !Array.isArray(savedIds)) return;
+                dirtyRows.forEach(function(row, idx) {
+                    const newId = savedIds[idx] ? parseInt(savedIds[idx], 10) : 0;
+                    if (!row || !newId || newId <= 0) return;
+                    const idEl = row.querySelector('.row-db-id');
+                    if (idEl) idEl.value = String(newId);
+                    updateVendorDrilldownState(row);
+                });
+            }
+
+            function performSaveCalculatorData(keepalive, silent, prebuiltItems, fullSync, dirtyRows, dirtyGens, loadGenerationAtStart) {
+                if (calculatorLoadInProgress || postProjectCreateFlow.postCreateCsvImportInFlight) {
+                    return Promise.resolve({ success: false, error: 'Still loading vendor data; save skipped.' });
+                }
+                if (loadGenerationAtStart != null && loadGenerationAtStart !== calculatorLoadGeneration) {
+                    return Promise.resolve({ success: false, error: 'Save discarded after reload' });
+                }
+                const items = Array.isArray(prebuiltItems) ? prebuiltItems : (
+                    fullSync ? collectCostCalculatorItemsFromDom() : collectDirtyCostCalculatorItemsFromDom().items
+                );
+                if ((!items || items.length === 0) && !fullSync) {
+                    return Promise.resolve({ success: true, skipped: true });
+                }
                 const payload = { action: 'save_cost_calculator', items: items };
                 if (fullSync) {
                     payload.full_sync = true;
@@ -8145,9 +8288,22 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     return response.json();
                 })
                 .then(data => {
+                    if (loadGenerationAtStart != null && loadGenerationAtStart !== calculatorLoadGeneration) {
+                        return { success: false, error: 'Save discarded after reload' };
+                    }
                     if (data && data.success) {
                         console.log('Data saved successfully');
-                        return { success: true };
+                        if (fullSync) {
+                            document.querySelectorAll('#calculatorRows tr[data-dirty="1"]').forEach(function(row) {
+                                row.removeAttribute('data-dirty');
+                            });
+                        } else if (Array.isArray(dirtyRows)) {
+                            applySavedIdsToDirtyRows(dirtyRows, data.saved_ids || []);
+                            dirtyRows.forEach(function(row, idx) {
+                                clearRowDirtyIfUnchanged(row, dirtyGens ? dirtyGens[idx] : null);
+                            });
+                        }
+                        return { success: true, saved_ids: data.saved_ids || [] };
                     }
                     console.error('Error saving data:', data && data.error);
                     if (!silent) {
@@ -8167,12 +8323,27 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 });
             }
             
-            function flushSaveOnLeave() {
+            function flushDirtyRowsSave(options) {
+                const opts = (options && typeof options === 'object') ? options : {};
                 if (calculatorLoadInProgress || postProjectCreateFlow.postCreateCsvImportInFlight) {
-                    return;
+                    return Promise.resolve({ success: true, skipped: true });
                 }
                 clearTimeout(saveTimeout);
-                saveCalculatorData({ keepalive: true, silent: true });
+                const dirty = collectDirtyCostCalculatorItemsFromDom();
+                if (!dirty.items.length) {
+                    return Promise.resolve({ success: true, skipped: true });
+                }
+                return saveCalculatorData({
+                    silent: true,
+                    keepalive: !!opts.keepalive,
+                    items: dirty.items,
+                    dirtyRows: dirty.dirtyRows,
+                    dirtyGens: dirty.dirtyGens
+                });
+            }
+
+            function flushSaveOnLeave() {
+                flushDirtyRowsSave({ keepalive: true });
             }
             
             function reloadCalculatorAfterImport(flowActive) {
@@ -8198,6 +8369,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 calculatorLoadGeneration += 1;
                 var loadGeneration = calculatorLoadGeneration;
                 calculatorLoadInProgress = true;
+                if (calculatorSaveFetchController) {
+                    try {
+                        calculatorSaveFetchController.abort();
+                    } catch (abortErr) {}
+                    calculatorSaveFetchController = null;
+                }
 
                 const formData = new FormData();
                 formData.append('action', 'load_cost_calculator');
@@ -8365,17 +8542,22 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 if (costInput) {
                     costInput.addEventListener('input', function(e) {
                         calculateAnnualCost(e);
+                        markRowDirty(row);
                         autoSave();
                     });
-                    costInput.addEventListener('blur', autoSave);
+                    costInput.addEventListener('blur', function() {
+                        markRowDirty(row);
+                        autoSave();
+                    });
                 }
 
                 if (frequencySelect) {
                     frequencySelect.addEventListener('change', function(e) {
                         calculateAnnualCost(e);
+                        markRowDirty(row);
                         autoSave();
                         if (!calculatorLoadInProgress) {
-                            applyVendorTablePagination(vendorCurrentPage);
+                            applyVendorTablePagination(vendorCurrentPage, { keepRowVisible: row });
                         }
                     });
                 }
@@ -8390,9 +8572,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         }
                         calculateAnnualSavings();
                         calculateConfirmedSavings();
+                        markRowDirty(row);
                         clearTimeout(saveTimeout);
-                        saveCalculatorData();
-                        applyVendorTablePagination(vendorCurrentPage);
+                        saveCalculatorData({ silent: true });
+                        applyVendorTablePagination(vendorCurrentPage, { keepRowVisible: row });
                     });
                 }
                 
@@ -8401,6 +8584,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     vendorInput.addEventListener('input', syncVendor);
                     vendorInput.addEventListener('blur', function() {
                         syncVendor();
+                        markRowDirty(row);
                         autoSave();
                     });
                 }
@@ -8424,13 +8608,20 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             delete this.dataset.aiPurposeBadge;
                         }
                     });
-                    notesTextarea.addEventListener('blur', autoSave);
+                    notesTextarea.addEventListener('blur', function() {
+                        markRowDirty(row);
+                        autoSave();
+                    });
                 }
                 [mgrSel, visSel].forEach(function(el) {
                     if (el) el.addEventListener('change', function() {
+                        if (el === mgrSel) {
+                            syncMemberStatusEditability(row);
+                        }
+                        markRowDirty(row);
                         autoSave();
                         if (!calculatorLoadInProgress) {
-                            applyVendorTablePagination(vendorCurrentPage);
+                            applyVendorTablePagination(vendorCurrentPage, { keepRowVisible: row });
                         }
                     });
                 });
@@ -8440,7 +8631,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     });
                 }
                 [dlIn, lpIn].forEach(function(el) {
-                    if (el) el.addEventListener('change', autoSave);
+                    if (el) el.addEventListener('change', function() {
+                        markRowDirty(row);
+                        autoSave();
+                    });
                 });
             }
 
@@ -9620,6 +9814,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         } else {
                             delete notesTextarea.dataset.aiPurposeBadge;
                         }
+                        markRowDirty(row);
                     });
                 }
                 function filterResolvedRowsById(resultRows, allowedIds) {
@@ -9834,6 +10029,29 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 });
             });
             window.addEventListener('pagehide', flushSaveOnLeave);
+            (function bindLogoutFlush() {
+                document.querySelectorAll('form.app-nav-inline-form').forEach(function(form) {
+                    form.addEventListener('submit', function(e) {
+                        var actionInput = form.querySelector('input[name="action"]');
+                        if (!actionInput || actionInput.value !== 'logout') return;
+                        if (form.getAttribute('data-logout-flushing') === '1') return;
+                        e.preventDefault();
+                        form.setAttribute('data-logout-flushing', '1');
+                        var submitBtn = form.querySelector('button[type="submit"]');
+                        if (submitBtn) submitBtn.disabled = true;
+                        flushDirtyRowsSave({ keepalive: false })
+                            .then(function() {
+                                return typeof window.waitForCalculatorSaveIdle === 'function'
+                                    ? window.waitForCalculatorSaveIdle()
+                                    : Promise.resolve();
+                            })
+                            .catch(function() { /* still logout */ })
+                            .then(function() {
+                                form.submit();
+                            });
+                    });
+                });
+            })();
             </script>
 
         <?php endif; ?>
