@@ -79,6 +79,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accept_invite'])) {
                     }
                     RoleContext::upsertOrgMembership($pdo, $existingUserId, $orgId, $desiredRole);
                     $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
+                    markUserJoinedViaInvite($pdo, $existingUserId);
+                    csTagScorecardProMember(['email' => $email]);
                     $_SESSION['message'] = 'You have been added to the organization. Please log in.';
                     header('Location: index.php');
                     exit;
@@ -149,6 +151,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
                         RoleContext::upsertOrgMembership($pdo, $existingUserId, $orgId, $desiredRole);
                         $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
                         error_log('[invite-register] existing_user_added org_id=' . $orgId . ' email=' . $email);
+                        markUserJoinedViaInvite($pdo, $existingUserId);
+                        csTagScorecardProMember(['email' => $email]);
                         $_SESSION['message'] = 'You have been added to the organization. Please log in.';
                         header('Location: index.php');
                         exit;
@@ -183,6 +187,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
                     error_log('[invite-register] user_created org_id=' . $orgId . ' email=' . $email . ' username=' . $username);
                     $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
                     error_log('[invite-register] invite_consumed invitation_id=' . (int) $inv['id']);
+                    markUserJoinedViaInvite($pdo, $newUserId);
+                    csTagScorecardProMember([
+                        'email' => $email,
+                        'display_name' => $displayName,
+                    ]);
                     $_SESSION['message'] = 'Registration complete. You can log in.';
                     header('Location: index.php');
                     exit;

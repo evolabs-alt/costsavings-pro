@@ -288,6 +288,20 @@ function migrateSchema(PDO $pdo) {
             if (!$cols) {
                 $pdo->exec('ALTER TABLE `users` ADD COLUMN `deadline_reminders_enabled` TINYINT(1) NOT NULL DEFAULT 1 AFTER `role_set_at`');
             }
+            $cols = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'joined_via_invite'")->fetch();
+            if (!$cols) {
+                $pdo->exec('ALTER TABLE `users` ADD COLUMN `joined_via_invite` TINYINT(1) NOT NULL DEFAULT 0 AFTER `is_disabled`');
+            }
+        }
+
+        // Always ensure invite flag exists even when users table was created via older CREATE TABLE paths.
+        $joinedViaInviteCol = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'joined_via_invite'")->fetch();
+        if (!$joinedViaInviteCol) {
+            try {
+                $pdo->exec('ALTER TABLE `users` ADD COLUMN `joined_via_invite` TINYINT(1) NOT NULL DEFAULT 0 AFTER `is_disabled`');
+            } catch (PDOException $e) {
+                error_log('migrateSchema users joined_via_invite: ' . $e->getMessage());
+            }
         }
 
         migrateUserRolesToThreeTierEnum($pdo);
@@ -989,6 +1003,40 @@ function getOrganizationMaxUsers(PDO $pdo, int $orgId): int
     $m = (int) ($row['max_users'] ?? 20);
 
     return $m > 0 ? $m : 20;
+}
+
+/**
+ * Whether this account joined via an organization invitation (cannot create orgs).
+ */
+function userJoinedViaInvite(PDO $pdo, int $userId): bool
+{
+    if ($userId < 1) {
+        return false;
+    }
+    try {
+        $st = $pdo->prepare('SELECT joined_via_invite FROM users WHERE id = ? LIMIT 1');
+        $st->execute([$userId]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        return !empty($row['joined_via_invite']);
+    } catch (PDOException $e) {
+        error_log('userJoinedViaInvite: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Mark a user as invite-only (blocks org create / auto-workspace).
+ */
+function markUserJoinedViaInvite(PDO $pdo, int $userId): void
+{
+    if ($userId < 1) {
+        return;
+    }
+    try {
+        $pdo->prepare('UPDATE users SET joined_via_invite = 1 WHERE id = ?')->execute([$userId]);
+    } catch (PDOException $e) {
+        error_log('markUserJoinedViaInvite: ' . $e->getMessage());
+    }
 }
 
 /**

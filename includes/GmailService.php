@@ -129,14 +129,24 @@ class GmailService
         }
     }
 
+    private function encodeHeader(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return $value;
+        }
+
+        return '=?UTF-8?B?' . base64_encode($value) . '?=';
+    }
+
     private function buildRawMessage(string $from, string $to, string $subject, string $htmlBody): string
     {
-        $fromName = defined('SMTP_FROM_NAME') ? (string) SMTP_FROM_NAME : 'Savvy CFO Portal';
+        $fromName = 'Savvy Saver';
         $boundary = uniqid('boundary_');
 
-        $raw = "From: {$fromName} <{$from}>\r\n";
+        $raw = 'From: ' . $this->encodeHeader($fromName) . " <{$from}>\r\n";
         $raw .= "To: {$to}\r\n";
-        $raw .= "Subject: {$subject}\r\n";
+        $raw .= 'Subject: ' . $this->encodeHeader($subject) . "\r\n";
         $raw .= "MIME-Version: 1.0\r\n";
         $raw .= "Content-Type: multipart/alternative; boundary=\"{$boundary}\"\r\n\r\n";
         $raw .= "--{$boundary}\r\n";

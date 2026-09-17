@@ -96,6 +96,89 @@ function publicAppBaseUrl(): string {
     return $scheme . '://' . $host . $path . '/';
 }
 
+/**
+ * Members portal origin for invite emails (no trailing slash).
+ */
+function membersAppUrl(): string
+{
+    if (defined('MEMBERS_APP_URL')) {
+        $u = trim((string) MEMBERS_APP_URL);
+        if ($u !== '') {
+            return rtrim($u, '/');
+        }
+    }
+    return 'https://members.savvycfo.com';
+}
+
+/**
+ * Consume a pending Saver org invitation for this email (SSO / members-first flow).
+ * Returns true when membership was added or already present for the invited org.
+ */
+function acceptPendingInviteForEmail(PDO $pdo, int $userId, string $email): bool
+{
+    $email = normalizeUserEmail($email);
+    if ($userId < 1 || $email === '') {
+        return false;
+    }
+
+    $st = $pdo->prepare(
+        'SELECT * FROM invitations
+         WHERE email = ? AND consumed_at IS NULL AND expires_at > NOW()
+         ORDER BY id DESC
+         LIMIT 1'
+    );
+    $st->execute([$email]);
+    $inv = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$inv) {
+        return false;
+    }
+
+    $orgId = (int) ($inv['org_id'] ?? 0);
+    if ($orgId < 1) {
+        return false;
+    }
+
+    $already = $pdo->prepare('SELECT 1 FROM user_organizations WHERE user_id = ? AND org_id = ? LIMIT 1');
+    $already->execute([$userId, $orgId]);
+    if ($already->fetchColumn()) {
+        $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
+        markUserJoinedViaInvite($pdo, $userId);
+        return true;
+    }
+
+    if (getOrganizationMemberCount($pdo, $orgId) >= getOrganizationMaxUsers($pdo, $orgId)) {
+        error_log('acceptPendingInviteForEmail: org at capacity org_id=' . $orgId . ' email=' . $email);
+        return false;
+    }
+
+    $desiredRole = strtolower(trim((string) ($inv['invite_role'] ?? 'member')));
+    if ($desiredRole !== OrgRole::ROLE_ADMIN && $desiredRole !== OrgRole::ROLE_MEMBER) {
+        $desiredRole = OrgRole::ROLE_MEMBER;
+    }
+    $inviterId = (int) ($inv['invited_by_user_id'] ?? 0);
+    $inviterRole = OrgRole::ROLE_MEMBER;
+    if ($inviterId > 0) {
+        $inviterRole = RoleContext::orgRole($pdo, $inviterId, $orgId) ?? OrgRole::ROLE_MEMBER;
+    }
+    if ($desiredRole !== OrgRole::ROLE_MEMBER && !OrgRole::canElevateOrgRoles($inviterRole)) {
+        $desiredRole = OrgRole::ROLE_MEMBER;
+    }
+
+    RoleContext::upsertOrgMembership($pdo, $userId, $orgId, $desiredRole);
+    $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
+    markUserJoinedViaInvite($pdo, $userId);
+    RoleContext::persistLastOrgId($pdo, $userId, $orgId);
+    logInviteEvent('sso_auto_accepted', [
+        'invitation_id' => (int) $inv['id'],
+        'org_id' => $orgId,
+        'email' => $email,
+        'user_id' => $userId,
+        'invite_role' => $desiredRole,
+    ]);
+
+    return true;
+}
+
 function logInviteEvent(string $event, array $context = []): void {
     $safe = [];
     foreach ($context as $k => $v) {
@@ -202,6 +285,8 @@ function postWebhookJson(string $url, array $payload): bool
  * Ensure users.org_id refers to a real organization. If missing or invalid, creates a new
  * dedicated organization for this user (never assigns shared org 1 implicitly — that would
  * let admins see every other tenant's projects scoped to that org).
+ *
+ * Invite-only accounts never get an auto-created personal workspace.
  */
 function ensureUserOrganizationId(PDO $pdo, int $userId): int {
     if ($userId < 1) {
@@ -211,6 +296,10 @@ function ensureUserOrganizationId(PDO $pdo, int $userId): int {
     $orgId = RoleContext::resolveDefaultOrgId($pdo, $userId);
     if ($orgId >= 1) {
         return $orgId;
+    }
+
+    if (userJoinedViaInvite($pdo, $userId)) {
+        return 0;
     }
 
     $st = $pdo->prepare('SELECT email, username, display_name FROM users WHERE id = ? LIMIT 1');
@@ -251,28 +340,8 @@ function ensureUserOrganizationId(PDO $pdo, int $userId): int {
 }
 
 function handleLogin() {
-    $pdo = getDBConnection();
-    $u = trim($_POST['username'] ?? '');
-    $p = (string) ($_POST['password'] ?? '');
-    if ($u === '' || $p === '') {
-        $_SESSION['error'] = 'Enter username and password.';
-        header('Location: ' . $_SERVER['PHP_SELF']);
-        exit;
-    }
-    $stmt = $pdo->prepare('SELECT * FROM users WHERE username = ? OR email = ?');
-    $stmt->execute([$u, strtolower($u)]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$row || empty($row['password_hash']) || !password_verify($p, $row['password_hash'])) {
-        $_SESSION['error'] = 'Invalid credentials.';
-        header('Location: ' . $_SERVER['PHP_SELF']);
-        exit;
-    }
-    if (!empty($row['is_disabled'])) {
-        $_SESSION['error'] = 'Your account has been disabled. Contact your administrator.';
-        header('Location: ' . $_SERVER['PHP_SELF']);
-        exit;
-    }
-    establishUserSession($pdo, $row);
+    // Local password login is disabled — open Savvy Saver from Members.
+    $_SESSION['error'] = 'Sign in through the Savvy CFO Members Area, then open Savvy Saver.';
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;
 }
@@ -343,6 +412,15 @@ function handleSsoConsume(): void
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     }
+    $userId = (int) $row['id'];
+    $email = normalizeUserEmail((string) ($row['email'] ?? $claims['email'] ?? ''));
+    acceptPendingInviteForEmail($pdo, $userId, $email);
+    $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ? LIMIT 1');
+    $stmt->execute([$userId]);
+    $fresh = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($fresh) {
+        $row = $fresh;
+    }
     establishUserSession($pdo, $row);
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;
@@ -359,9 +437,15 @@ function establishUserSession(PDO $pdo, array $row): void
     $_SESSION['user_email'] = normalizeUserEmail($row['email']);
     $userId = (int) $row['id'];
     backfillUserOrganizationsFromLegacyUsers($pdo);
+    $_SESSION['joined_via_invite'] = userJoinedViaInvite($pdo, $userId) ? 1 : 0;
     $orgId = ensureUserOrganizationId($pdo, $userId);
     if ($orgId < 1) {
-        $_SESSION['error'] = 'Your account organization could not be set up. Please contact support.';
+        if (!empty($_SESSION['joined_via_invite'])) {
+            $_SESSION['error'] = 'Use your invitation link to join an organization before signing in.';
+        } else {
+            $_SESSION['error'] = 'Your account organization could not be set up. Please contact support.';
+        }
+        unset($_SESSION['user_id'], $_SESSION['username'], $_SESSION['user_email'], $_SESSION['joined_via_invite']);
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     }
@@ -523,9 +607,15 @@ function handleInviteMember() {
     $invId = (int) $pdo->lastInsertId();
     logInviteEvent('invite_saved', ['invitation_id' => $invId, 'org_id' => $orgId, 'email' => $email, 'invite_role' => $inviteRole]);
 
-    $link = publicAppBaseUrl() . 'register.php?token=' . urlencode($plain);
-    $body = '<p>You have been invited to join the Savvy CFO Cost Savings tool.</p>'
-        . '<p><a href="' . htmlspecialchars($link) . '">Complete registration</a></p>'
+    // Tag immediately so Members login unlocks Savvy Saver before they open Saver.
+    if (function_exists('csTagScorecardProMember')) {
+        csTagScorecardProMember(['email' => $email]);
+    }
+
+    $link = membersAppUrl() . '/register?email=' . rawurlencode($email);
+    $body = '<p>You have been invited to Savvy Saver (Cost Savings).</p>'
+        . '<p>Create your Savvy CFO Members account (or sign in), then open <strong>Savvy Saver</strong> from your products list.</p>'
+        . '<p><a href="' . htmlspecialchars($link) . '">Continue on Members</a></p>'
         . '<p style="font-size:13px;color:#555;">If the link above does not work, copy and paste this address into your browser:<br>'
         . htmlspecialchars($link) . '</p>';
     $mailResult = sendInviteEmail($email, 'Your invitation — Savvy Saver', $body);
@@ -1360,7 +1450,13 @@ function handlePreviewQboSync(): void
             ]);
             exit;
         }
-        $accounts = QboService::listAccountsFromRows($rows);
+        $accountTypeMap = [];
+        try {
+            $accountTypeMap = $svc->fetchAccountTypeMap((int) $_SESSION['org_id']);
+        } catch (Throwable $e) {
+            error_log('handlePreviewQboSync account types: ' . $e->getMessage());
+        }
+        $accounts = QboService::listAccountsFromRows($rows, $accountTypeMap);
         $cacheKey = QboService::writeSyncCache(
             (int) $_SESSION['org_id'],
             (int) $_SESSION['user_id'],
@@ -2039,6 +2135,15 @@ function handleOrgCreate(): void
         echo json_encode(['success' => false, 'error' => 'Not logged in']);
         exit;
     }
+    $userId = (int) $_SESSION['user_id'];
+    $pdo = getDBConnection();
+    if (userJoinedViaInvite($pdo, $userId)) {
+        echo json_encode([
+            'success' => false,
+            'error' => 'Invited members can only access the organization they were invited to.',
+        ]);
+        exit;
+    }
     $orgName = trim((string) ($_POST['org_name'] ?? ''));
     if ($orgName === '') {
         echo json_encode(['success' => false, 'error' => 'Organization name is required.']);
@@ -2047,8 +2152,6 @@ function handleOrgCreate(): void
     if (strlen($orgName) > 255) {
         $orgName = substr($orgName, 0, 255);
     }
-    $userId = (int) $_SESSION['user_id'];
-    $pdo = getDBConnection();
     try {
         $ins = $pdo->prepare('INSERT INTO organizations (name, max_users) VALUES (?, 20)');
         $ins->execute([$orgName]);

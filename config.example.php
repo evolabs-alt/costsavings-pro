@@ -10,6 +10,11 @@ if (!defined('BASE_URL')) {
     define('BASE_URL', 'http://localhost/public/');
 }
 
+/** Members portal (invite emails). No trailing slash. */
+if (!defined('MEMBERS_APP_URL')) {
+    define('MEMBERS_APP_URL', getenv('MEMBERS_APP_URL') ?: 'https://members.savvycfo.com');
+}
+
 /**
  * QuickBooks Online — single Intuit developer app credentials (all clients use this app).
  * Client OAuth tokens / realmId are stored per organization after Connect.
@@ -51,7 +56,7 @@ define(
 );
 define('GMAIL_OAUTH_SETUP_KEY', getenv('GMAIL_OAUTH_SETUP_KEY') ?: '');
 define('SMTP_FROM_EMAIL', getenv('SMTP_FROM_EMAIL') ?: 'contactus@savvycfo.com');
-define('SMTP_FROM_NAME', getenv('SMTP_FROM_NAME') ?: 'Savvy CFO Portal');
+define('SMTP_FROM_NAME', getenv('SMTP_FROM_NAME') ?: 'Savvy Saver');
 
 /**
  * GoHighLevel Conversations API (deadline + monthly renewal reminders).

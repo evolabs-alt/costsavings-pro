@@ -288,11 +288,14 @@ if ($is_logged_in && !empty($_SESSION['org_id'])) {
             $notification_webhook_url = trim((string) $or['notification_webhook_url']);
         }
         if (!empty($_SESSION['user_id'])) {
-            $st2 = $pdoView->prepare('SELECT deadline_reminders_enabled FROM users WHERE id = ?');
+            $st2 = $pdoView->prepare('SELECT deadline_reminders_enabled, joined_via_invite FROM users WHERE id = ?');
             $st2->execute([(int) $_SESSION['user_id']]);
             $ur = $st2->fetch(PDO::FETCH_ASSOC);
             if ($ur && isset($ur['deadline_reminders_enabled'])) {
                 $deadline_reminders_user = (bool) $ur['deadline_reminders_enabled'];
+            }
+            if ($ur) {
+                $_SESSION['joined_via_invite'] = !empty($ur['joined_via_invite']) ? 1 : 0;
             }
         }
         $qboSvc = new \CostSavings\QboService($pdoView);
@@ -2267,7 +2270,49 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         
         /* Restore padding on login page only */
         .content-padding.login-page {
-            padding: 40px;
+            padding: 48px 40px 56px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 32rem;
+            margin: 0 auto;
+        }
+
+        .login-page h1 {
+            margin-bottom: 1rem;
+        }
+
+        .login-page .subtitle {
+            margin: 0 0 1.75rem;
+            line-height: 1.55;
+            max-width: 28rem;
+            text-align: center;
+        }
+
+        .login-page .members-gate-actions {
+            margin: 0;
+        }
+
+        a.members-gate-btn {
+            display: inline-block;
+            padding: 16px 32px;
+            background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
+            color: #fff !important;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin: 0;
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+
+        a.members-gate-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(11, 88, 163, 0.3);
+            color: #fff !important;
         }
         
         .content-padding.no-top {
@@ -3436,6 +3481,47 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             white-space: nowrap;
         }
 
+        .csv-account-type-heading {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            background: var(--color-surface);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--color-primary);
+            padding: 10px 4px 4px;
+            margin-top: 4px;
+            border-top: 1px solid var(--color-border);
+        }
+
+        .csv-account-type-heading:first-child {
+            border-top: none;
+            margin-top: 0;
+            padding-top: 4px;
+        }
+
+        .csv-account-row-main {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 10px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .csv-account-name {
+            min-width: 0;
+        }
+
+        .csv-account-type {
+            flex-shrink: 0;
+            color: var(--color-text-secondary);
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
         .csv-mapping-form {
             display: flex;
             flex-direction: column;
@@ -4250,9 +4336,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                         </span>
                                         <?php endif; ?>
                                     </li>
+                                    <?php if (empty($_SESSION['joined_via_invite'])): ?>
                                     <li role="none">
                                         <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalCreateOrg">Create organization…</button>
                                     </li>
+                                    <?php endif; ?>
                                     <li role="none">
                                         <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings">Organization settings</button>
                                     </li>
@@ -4339,27 +4427,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             <?php if ($current_view === 'login'): ?>
             <div class="content-padding login-page">
                 <h1>Savvy Saver</h1>
-                <p class="subtitle">Sign in with your username and password.</p>
-            
-                <form method="POST">
-                    <input type="hidden" name="action" value="login">
-                    <div class="form-group">
-                        <label for="username">Username or email</label>
-                        <input type="text" id="username" name="username" required autocomplete="username">
-                    </div>
-                    <div class="form-group">
-                        <label for="password">Password</label>
-                        <input type="password" id="password" name="password" required autocomplete="current-password">
-                    </div>
-                    <div class="form-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" name="agree_terms" id="agree_terms" required>
-                            <span>By using this cost savings tool, I agree to the <a href="https://savvycfo.com/terms-conditions-privacy-policy/" target="_blank" rel="noopener noreferrer">terms of use</a>.</span>
-                        </label>
-                    </div>
-                    <button type="submit">Log in</button>
-                </form>
-            
+                <p class="subtitle">Savvy Saver is opened from the Savvy CFO Members Area. Sign in at Members, then click <strong>Savvy Saver</strong> to continue.</p>
+                <p class="members-gate-actions">
+                    <a class="btn members-gate-btn" href="<?php echo htmlspecialchars(membersAppUrl() . '/login', ENT_QUOTES, 'UTF-8'); ?>">Go to Members Area</a>
+                </p>
             <!-- eBook Promotion Section -->
             </div> <!-- Close content-padding -->
 
@@ -5465,7 +5536,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             var suppressCsvMappingModalCleanup = false;
             var CSV_ACCOUNT_INTRO_QB = 'Choose which GL accounts to include. Vendor rows are grouped by payee (Name) from the selected accounts only.';
             var CSV_ACCOUNT_INTRO_MAPPED = 'Choose which account values to include from your mapped column.';
-            var CSV_ACCOUNT_INTRO_QBO = 'Choose which GL accounts to include from QuickBooks Online. Vendor rows are grouped by payee from the selected accounts only.';
+            var CSV_ACCOUNT_INTRO_QBO = 'Choose which GL accounts to include from QuickBooks Online. Accounts are grouped by QuickBooks type. Vendor rows are grouped by payee from the selected accounts only.';
             function setCsvAccountModalIntro(mode) {
                 var intro = document.getElementById('appModalCsvAccountsIntro');
                 if (!intro) return;
@@ -5498,20 +5569,63 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 }
                 if (importBtn) importBtn.disabled = checked === 0;
             }
+            var QBO_ACCOUNT_TYPE_ORDER = [
+                'Expense', 'Cost of Goods Sold', 'Other Expense',
+                'Income', 'Other Income',
+                'Bank', 'Credit Card',
+                'Accounts Payable', 'Accounts Receivable',
+                'Other Current Asset', 'Fixed Asset', 'Other Asset',
+                'Other Current Liability', 'Long Term Liability', 'Equity'
+            ];
+            function qboAccountTypeSortIndex(type) {
+                var t = String(type || '');
+                var idx = QBO_ACCOUNT_TYPE_ORDER.indexOf(t);
+                if (idx >= 0) return idx;
+                return t ? QBO_ACCOUNT_TYPE_ORDER.length : QBO_ACCOUNT_TYPE_ORDER.length + 1;
+            }
             function renderCsvAccountList(accounts, autoSelectAll) {
                 var list = document.getElementById('csvAccountList');
                 if (!list) return;
                 list.innerHTML = '';
-                (accounts || []).forEach(function(acct, idx) {
+                var items = (accounts || []).slice();
+                var hasTypes = items.some(function(acct) {
+                    return !!(acct && acct.account_type);
+                });
+                if (hasTypes) {
+                    items.sort(function(a, b) {
+                        var ta = String((a && a.account_type) || '');
+                        var tb = String((b && b.account_type) || '');
+                        var oa = qboAccountTypeSortIndex(ta);
+                        var ob = qboAccountTypeSortIndex(tb);
+                        if (oa !== ob) return oa - ob;
+                        if (ta !== tb) return ta.localeCompare(tb);
+                        return String((a && a.name) || '').localeCompare(String((b && b.name) || ''), undefined, { numeric: true, sensitivity: 'base' });
+                    });
+                }
+                var lastType = null;
+                items.forEach(function(acct, idx) {
                     var name = (acct && acct.name) ? String(acct.name) : '';
                     var count = parseInt((acct && acct.transaction_count) || 0, 10) || 0;
+                    var type = (acct && acct.account_type) ? String(acct.account_type) : '';
+                    if (hasTypes && type !== lastType) {
+                        lastType = type;
+                        var heading = document.createElement('div');
+                        heading.className = 'csv-account-type-heading';
+                        heading.textContent = type || 'Unknown type';
+                        list.appendChild(heading);
+                    }
                     var row = document.createElement('div');
                     row.className = 'csv-account-row';
                     var id = 'csvAcct_' + idx;
+                    var typeHtml = type
+                        ? '<span class="csv-account-type">' + aiEscapeHtml(type) + '</span>'
+                        : '';
                     row.innerHTML =
                         '<input type="checkbox" id="' + id + '" value="" data-txn-count="0">' +
-                        '<label for="' + id + '">' + aiEscapeHtml(name) +
-                        ' <span class="csv-account-count">(' + count + ')</span></label>';
+                        '<label for="' + id + '" class="csv-account-row-main">' +
+                        '<span class="csv-account-name">' + aiEscapeHtml(name) +
+                        ' <span class="csv-account-count">(' + count + ')</span></span>' +
+                        typeHtml + '</label>';
                     var cb = row.querySelector('input');
                     cb.value = name;
                     cb.setAttribute('data-txn-count', String(count));

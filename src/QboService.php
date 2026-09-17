@@ -582,6 +582,49 @@ class QboService
     }
 
     /**
+     * Chart of Accounts lookup: lowercase name / number variants → QBO AccountType.
+     *
+     * @return array<string, string>
+     */
+    public function fetchAccountTypeMap(int $orgId): array
+    {
+        $conn = $this->getConnection($orgId);
+        if (empty($conn['realm_id'])) {
+            return [];
+        }
+        $tokens = $this->ensureAccessToken($orgId);
+        $apiBase = $conn['environment'] === self::ENV_SANDBOX
+            ? 'https://sandbox-quickbooks.api.intuit.com'
+            : 'https://quickbooks.api.intuit.com';
+        $realm = rawurlencode((string) $conn['realm_id']);
+        $authHeaders = [
+            'Authorization: Bearer ' . $tokens['access_token'],
+            'Accept: application/json',
+        ];
+
+        $map = [];
+        $start = 1;
+        $pageSize = 1000;
+        $safety = 0;
+        do {
+            $sql = 'select Name, FullyQualifiedName, AccountType, AcctNum from Account where Active in (true, false) startposition '
+                . $start . ' maxresults ' . $pageSize;
+            $url = $apiBase . '/v3/company/' . $realm . '/query?query=' . rawurlencode($sql)
+                . '&minorversion=65';
+            $data = $this->httpJson('GET', $url, $authHeaders);
+            $accounts = $this->queryResponseEntities($data, 'Account');
+            foreach ($accounts as $acct) {
+                $this->indexAccountType($map, $acct);
+            }
+            $count = count($accounts);
+            $start += $pageSize;
+            $safety++;
+        } while ($count === $pageSize && $safety < 10);
+
+        return $map;
+    }
+
+    /**
      * @param array<string, mixed> $report
      */
     private function reportHasNoData(array $report): bool
@@ -609,10 +652,81 @@ class QboService
     }
 
     /**
-     * @param array<int, array{vendor_name:string,transaction_date:string,amount:float,transaction_type:string,account:string,memo:string}> $rows
-     * @return array<int, array{name:string, transaction_count:int}>
+     * @param array<string, mixed> $data
+     * @return array<int, array<string, mixed>>
      */
-    public static function listAccountsFromRows(array $rows): array
+    private function queryResponseEntities(array $data, string $entity): array
+    {
+        $block = $data['QueryResponse'][$entity] ?? null;
+        if (!is_array($block)) {
+            return [];
+        }
+        if (isset($block['Name']) || isset($block['Id']) || isset($block['AccountType'])) {
+            return [$block];
+        }
+        $out = [];
+        foreach ($block as $item) {
+            if (is_array($item)) {
+                $out[] = $item;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, string> $map
+     * @param array<string, mixed> $acct
+     */
+    private function indexAccountType(array &$map, array $acct): void
+    {
+        $type = trim((string) ($acct['AccountType'] ?? ''));
+        if ($type === '') {
+            return;
+        }
+        $name = trim((string) ($acct['Name'] ?? ''));
+        $fqn = trim((string) ($acct['FullyQualifiedName'] ?? ''));
+        $num = trim((string) ($acct['AcctNum'] ?? ''));
+        foreach (self::accountTypeLookupKeys($name, $fqn, $num) as $key) {
+            if (!isset($map[$key])) {
+                $map[$key] = $type;
+            }
+        }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function accountTypeLookupKeys(string $name, string $fqn, string $acctNum): array
+    {
+        $keys = [];
+        $add = static function (string $s) use (&$keys): void {
+            $k = strtolower(trim($s));
+            if ($k !== '') {
+                $keys[$k] = true;
+            }
+        };
+        $add($name);
+        $add($fqn);
+        if ($acctNum !== '') {
+            $add($acctNum . ' ' . $name);
+            $add($acctNum . '-' . $name);
+            $add($acctNum . ' - ' . $name);
+            if ($fqn !== '' && $fqn !== $name) {
+                $add($acctNum . ' ' . $fqn);
+                $add($acctNum . '-' . $fqn);
+            }
+        }
+
+        return array_keys($keys);
+    }
+
+    /**
+     * @param array<int, array{vendor_name:string,transaction_date:string,amount:float,transaction_type:string,account:string,memo:string}> $rows
+     * @param array<string, string> $accountTypeMap lowercase name variants → AccountType
+     * @return array<int, array{name:string, transaction_count:int, account_type:string}>
+     */
+    public static function listAccountsFromRows(array $rows, array $accountTypeMap = []): array
     {
         $counts = [];
         foreach ($rows as $row) {
@@ -628,10 +742,54 @@ class QboService
         ksort($counts, SORT_NATURAL | SORT_FLAG_CASE);
         $out = [];
         foreach ($counts as $name => $count) {
-            $out[] = ['name' => $name, 'transaction_count' => $count];
+            $out[] = [
+                'name' => $name,
+                'transaction_count' => $count,
+                'account_type' => self::resolveAccountType($name, $accountTypeMap),
+            ];
         }
 
         return $out;
+    }
+
+    /**
+     * @param array<string, string> $typeMap
+     */
+    public static function resolveAccountType(string $accountName, array $typeMap): string
+    {
+        if ($typeMap === []) {
+            return '';
+        }
+        $raw = trim($accountName);
+        if ($raw === '' || $raw === '(No account)') {
+            return '';
+        }
+
+        $candidates = [$raw];
+        $stripped = preg_replace('/^\d+[A-Za-z]?(?:\s*[-.:]\s*|\s+)/', '', $raw, 1);
+        if (is_string($stripped) && $stripped !== '' && $stripped !== $raw) {
+            $candidates[] = $stripped;
+        }
+        if (str_contains($raw, ':')) {
+            $parts = explode(':', $raw);
+            $last = trim((string) end($parts));
+            if ($last !== '' && $last !== $raw) {
+                $candidates[] = $last;
+                $lastStripped = preg_replace('/^\d+[A-Za-z]?(?:\s*[-.:]\s*|\s+)/', '', $last, 1);
+                if (is_string($lastStripped) && $lastStripped !== '' && $lastStripped !== $last) {
+                    $candidates[] = $lastStripped;
+                }
+            }
+        }
+
+        foreach ($candidates as $candidate) {
+            $key = strtolower($candidate);
+            if (isset($typeMap[$key]) && $typeMap[$key] !== '') {
+                return $typeMap[$key];
+            }
+        }
+
+        return '';
     }
 
     /**
