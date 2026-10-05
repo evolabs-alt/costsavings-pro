@@ -144,6 +144,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'import_qbo_sync':
                 handleImportQboSync();
                 break;
+            case 'qbo_weekly_import_consent_status':
+                handleQboWeeklyImportConsentStatus();
+                break;
+            case 'save_qbo_weekly_import_consent':
+                handleSaveQboWeeklyImportConsent();
+                break;
             case 'project_list':
                 handleProjectList();
                 break;
@@ -3444,6 +3450,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             border: 1px solid var(--color-border);
         }
 
+        .privacy-notice {
+            margin: 0 0 12px;
+            padding: 10px 12px;
+            font-size: 13px;
+            line-height: 1.45;
+            color: #92400e;
+            background: #fffbeb;
+            border: 1px solid #fcd34d;
+            border-left: 3px solid var(--color-warning);
+            border-radius: 6px;
+        }
+
         .app-modal-body .data-actions {
             display: flex;
             flex-wrap: wrap;
@@ -4913,7 +4931,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 var endEl = document.getElementById('qboSyncEndDate');
                 if (startEl) startEl.value = range.start;
                 if (endEl) endEl.value = range.end;
-                openAppModal('appModalQboDateRange');
+                prepareQboWeeklyImportConsent().finally(function() {
+                    openAppModal('appModalQboDateRange');
+                });
             }
 
             function reopenPostCreateUploadModal() {
@@ -5533,6 +5553,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             var suppressCsvHeaderRowChange = false;
             var csvAccountPickerMode = 'qb';
             var pendingQboCacheKey = '';
+            var qboWeeklyConsentCheckedOnOpen = false;
+            var qboWeeklyConsentDirtyAgree = false;
             var suppressCsvMappingModalCleanup = false;
             var CSV_ACCOUNT_INTRO_QB = 'Choose which GL accounts to include. Vendor rows are grouped by payee (Name) from the selected accounts only.';
             var CSV_ACCOUNT_INTRO_MAPPED = 'Choose which account values to include from your mapped column.';
@@ -6262,7 +6284,65 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 return fetch(window.location.href, { method: 'POST', body: fd })
                     .then(function(r) { return r.json(); });
             }
+            function prepareQboWeeklyImportConsent() {
+                var cb = document.getElementById('qboWeeklyImportConsent');
+                qboWeeklyConsentCheckedOnOpen = false;
+                qboWeeklyConsentDirtyAgree = false;
+                if (cb) {
+                    cb.checked = false;
+                }
+                var fd = new FormData();
+                fd.append('action', 'qbo_weekly_import_consent_status');
+                return fetch(window.location.href, { method: 'POST', body: fd })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        var agreed = !!(d && d.success && d.agreed);
+                        if (cb) {
+                            cb.checked = agreed;
+                        }
+                        qboWeeklyConsentCheckedOnOpen = agreed;
+                        qboWeeklyConsentDirtyAgree = false;
+                    })
+                    .catch(function() {
+                        if (cb) {
+                            cb.checked = false;
+                        }
+                        qboWeeklyConsentCheckedOnOpen = false;
+                        qboWeeklyConsentDirtyAgree = false;
+                    });
+            }
+            function maybeSaveQboWeeklyImportConsent() {
+                var cb = document.getElementById('qboWeeklyImportConsent');
+                var checked = !!(cb && cb.checked);
+                var shouldSave = checked && (!qboWeeklyConsentCheckedOnOpen || qboWeeklyConsentDirtyAgree);
+                if (!shouldSave) {
+                    return Promise.resolve();
+                }
+                var fd = new FormData();
+                fd.append('action', 'save_qbo_weekly_import_consent');
+                fd.append('agreed', '1');
+                return fetch(window.location.href, { method: 'POST', body: fd })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (d && d.success) {
+                            qboWeeklyConsentCheckedOnOpen = true;
+                            qboWeeklyConsentDirtyAgree = false;
+                            return;
+                        }
+                        showSnackbar((d && d.error) || 'Could not save weekly import consent', 'error');
+                    })
+                    .catch(function() {
+                        showSnackbar('Could not save weekly import consent', 'error');
+                    });
+            }
             function initQboSyncUi() {
+                var consentCb = document.getElementById('qboWeeklyImportConsent');
+                if (consentCb && !consentCb.dataset.qboBound) {
+                    consentCb.dataset.qboBound = '1';
+                    consentCb.addEventListener('change', function() {
+                        qboWeeklyConsentDirtyAgree = !!consentCb.checked;
+                    });
+                }
                 var syncBtn = document.getElementById('appSyncQboBtn');
                 if (syncBtn && !syncBtn.dataset.qboBound) {
                     syncBtn.dataset.qboBound = '1';
@@ -6293,7 +6373,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 var endEl = document.getElementById('qboSyncEndDate');
                                 if (startEl) startEl.value = range.start;
                                 if (endEl) endEl.value = range.end;
-                                openAppModal('appModalQboDateRange');
+                                return prepareQboWeeklyImportConsent().then(function() {
+                                    openAppModal('appModalQboDateRange');
+                                });
                             })
                             .catch(function() {
                                 showSnackbar('Could not check QuickBooks status', 'error');
@@ -6320,16 +6402,19 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             return;
                         }
                         setButtonLoading(pullBtn, true, 'Pulling…');
-                        var fd = new FormData();
-                        fd.append('action', 'preview_qbo_sync');
-                        fd.append('start_date', startDate);
-                        fd.append('end_date', endDate);
-                        fetch(window.location.href, { method: 'POST', body: fd })
-                            .then(function(r) { return r.json(); })
+                        maybeSaveQboWeeklyImportConsent()
+                            .then(function() {
+                                var fd = new FormData();
+                                fd.append('action', 'preview_qbo_sync');
+                                fd.append('start_date', startDate);
+                                fd.append('end_date', endDate);
+                                return fetch(window.location.href, { method: 'POST', body: fd })
+                                    .then(function(r) { return r.json(); });
+                            })
                             .then(function(d) {
-                                if (!d.success) {
-                                    showSnackbar(d.error || 'Could not pull from QuickBooks', 'error');
-                                    if (d.needs_setup) {
+                                if (!d || !d.success) {
+                                    showSnackbar((d && d.error) || 'Could not pull from QuickBooks', 'error');
+                                    if (d && d.needs_setup) {
                                         closeAppModal(document.getElementById('appModalQboDateRange'));
                                         openAppModal('appModalSettings');
                                     }
@@ -8346,6 +8431,49 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 flushDirtyRowsSave({ keepalive: true });
             }
             
+            function showFrequencyReviewNotice() {
+                var overlay = document.getElementById('appModalFrequencyReview');
+                if (!overlay) {
+                    return Promise.resolve();
+                }
+                return new Promise(function(resolve) {
+                    var settled = false;
+                    var observer = null;
+                    var pollTimer = null;
+                    function finish() {
+                        if (settled) return;
+                        settled = true;
+                        if (observer) {
+                            observer.disconnect();
+                            observer = null;
+                        }
+                        if (pollTimer) {
+                            clearInterval(pollTimer);
+                            pollTimer = null;
+                        }
+                        resolve();
+                    }
+                    function watchClosed() {
+                        if (!overlay.classList.contains('is-open')) {
+                            finish();
+                        }
+                    }
+                    if (typeof MutationObserver === 'function') {
+                        observer = new MutationObserver(watchClosed);
+                        observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+                    } else {
+                        pollTimer = setInterval(watchClosed, 100);
+                    }
+                    var okBtn = document.getElementById('frequencyReviewOkBtn');
+                    if (okBtn) {
+                        okBtn.addEventListener('click', function() {
+                            closeAppModal(overlay);
+                        }, { once: true });
+                    }
+                    openAppModal(overlay);
+                });
+            }
+
             function reloadCalculatorAfterImport(flowActive) {
                 clearTimeout(saveTimeout);
                 var waitIdle = typeof window.waitForCalculatorSaveIdle === 'function'
@@ -8357,6 +8485,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     return typeof window.waitForCalculatorSaveIdle === 'function'
                         ? window.waitForCalculatorSaveIdle()
                         : Promise.resolve();
+                }).then(function() {
+                    return showFrequencyReviewNotice();
                 }).then(function() {
                     if (flowActive) {
                         advancePostProjectCreateFlow();
@@ -10071,6 +10201,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         </div>
     </div>
 
+    <?php
+    $expense_visibility_notice = 'Please note that upon linking QBO to Savvy Saver, expenses will be visible to users. Review and remove any sensitive records before inviting members to the project.';
+    ?>
     <div class="app-modal-overlay" id="appModalMembersInvite" role="dialog" aria-modal="true" aria-labelledby="appModalMembersInviteTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
@@ -10081,6 +10214,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <p style="margin:0 0 10px;color:#4b5563;font-size:14px;">
                     Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> members
                 </p>
+                <p class="privacy-notice"><?php echo htmlspecialchars($expense_visibility_notice); ?></p>
                 <div class="invite-block">
                     <form method="POST" style="display:flex;flex-direction:column;gap:10px;max-width:420px;">
                         <input type="hidden" name="action" value="invite_member">
@@ -10297,6 +10431,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     Link this organization to QuickBooks Online, then sync transactions into this project.
                     You must be an organization super admin to connect.
                 </p>
+                <p class="privacy-notice"><?php echo htmlspecialchars($expense_visibility_notice); ?></p>
                 <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
                     <button type="button" class="btn-secondary" id="postCreateUploadSkipBtn">Skip for now</button>
                     <button type="button" id="postCreateQboConnectBtn" style="<?php echo !empty($qbo_status['connected']) ? 'display:none;' : ''; ?>">Connect to QuickBooks</button>
@@ -10385,6 +10520,21 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         </div>
     </div>
 
+    <div class="app-modal-overlay" id="appModalFrequencyReview" role="dialog" aria-modal="true" aria-labelledby="appModalFrequencyReviewTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1" style="max-width:420px;">
+            <div class="app-modal-header">
+                <h2 id="appModalFrequencyReviewTitle">Review frequencies</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <p style="margin:0;font-size:14px;color:#374151;line-height:1.5;">Please review all the frequencies to ensure that they are accurate.</p>
+                <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+                    <button type="button" id="frequencyReviewOkBtn">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="app-modal-overlay" id="appModalCsvAccounts" role="dialog" aria-modal="true" aria-labelledby="appModalCsvAccountsTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
@@ -10399,6 +10549,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <span id="csvAccountSelectionStatus" style="font-size:13px;color:#4b5563;"></span>
                 </div>
                 <div class="csv-account-list" id="csvAccountList" role="group" aria-label="GL accounts"></div>
+                <p style="margin:0 0 12px;font-size:13px;color:#4b5563;line-height:1.5;">Savvy Saver will only send emails for vendors from the accounts you select.</p>
                 <div style="display:flex;gap:8px;justify-content:flex-end;">
                     <button type="button" class="btn-secondary app-modal-close" id="csvAccountCancelBtn">Cancel</button>
                     <button type="button" id="csvAccountImportBtn" disabled>Import selected</button>
@@ -10521,6 +10672,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         Connect this organization’s QuickBooks company. Only organization super admins can link or sync QBO.
                         App credentials are configured by Savvy on the server (same developer app for all customers).
                     </p>
+                    <p class="privacy-notice"><?php echo htmlspecialchars($expense_visibility_notice); ?></p>
                     <p style="margin:0 0 8px;font-size:13px;">
                         Status:
                         <?php if (!empty($qbo_status['connected'])): ?>
@@ -10580,6 +10732,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             </div>
             <div class="app-modal-body">
                 <p style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;">Select the date range of transactions to pull from QuickBooks Online (max 24 months).</p>
+                <p class="privacy-notice"><?php echo htmlspecialchars($expense_visibility_notice); ?></p>
+                <label class="checkbox-label" style="margin:12px 0 16px;">
+                    <input type="checkbox" id="qboWeeklyImportConsent">
+                    <span>I agree for Savvy Saver to make automated weekly transactions imports for purposes of notifying me of new vendors. This will not affect the project content and setup.</span>
+                </label>
                 <div style="display:grid;gap:12px;max-width:360px;">
                     <label style="display:grid;gap:6px;font-size:14px;">
                         <span>Start date</span>

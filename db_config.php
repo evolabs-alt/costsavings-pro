@@ -417,6 +417,21 @@ function migrateProjectSchema(PDO $pdo): void
         if (!$pmRoleCol) {
             $pdo->exec("ALTER TABLE `project_members` ADD COLUMN `role` ENUM('super_admin','admin','member') NOT NULL DEFAULT 'member' AFTER `user_id`");
         }
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `project_qbo_weekly_import_consents` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `org_id` INT UNSIGNED NOT NULL,
+            `project_id` INT UNSIGNED NOT NULL,
+            `project_name` VARCHAR(255) NOT NULL,
+            `agreed_by_user_id` INT UNSIGNED NOT NULL,
+            `agreed_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY `idx_qbo_weekly_consent_project` (`project_id`),
+            KEY `idx_qbo_weekly_consent_org` (`org_id`),
+            KEY `idx_qbo_weekly_consent_agreed_at` (`agreed_at`),
+            CONSTRAINT `fk_qbo_weekly_consent_org` FOREIGN KEY (`org_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_qbo_weekly_consent_project` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_qbo_weekly_consent_user` FOREIGN KEY (`agreed_by_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     } catch (PDOException $e) {
         error_log('migrateProjectSchema: ' . $e->getMessage());
     }

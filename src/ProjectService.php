@@ -402,6 +402,56 @@ class ProjectService
         return self::filterOrgUsers($pdo, $orgId, $memberIds);
     }
 
+    public static function hasQboWeeklyImportConsent(PDO $pdo, int $orgId, int $projectId): bool
+    {
+        if ($orgId <= 0 || $projectId <= 0) {
+            return false;
+        }
+        $st = $pdo->prepare(
+            'SELECT 1
+             FROM project_qbo_weekly_import_consents
+             WHERE org_id = ? AND project_id = ?
+             LIMIT 1'
+        );
+        $st->execute([$orgId, $projectId]);
+
+        return (bool) $st->fetchColumn();
+    }
+
+    /**
+     * Append an audit row for weekly QBO import consent on the given project.
+     *
+     * @return array{success:bool,error?:string}
+     */
+    public static function recordQboWeeklyImportConsent(
+        PDO $pdo,
+        int $orgId,
+        int $projectId,
+        int $agreedByUserId
+    ): array {
+        if ($orgId <= 0 || $projectId <= 0 || $agreedByUserId <= 0) {
+            return ['success' => false, 'error' => 'Invalid consent parameters.'];
+        }
+        $st = $pdo->prepare('SELECT name FROM projects WHERE id = ? AND org_id = ? LIMIT 1');
+        $st->execute([$projectId, $orgId]);
+        $projectName = $st->fetchColumn();
+        if ($projectName === false || $projectName === null || trim((string) $projectName) === '') {
+            return ['success' => false, 'error' => 'Project not found.'];
+        }
+        try {
+            $ins = $pdo->prepare(
+                'INSERT INTO project_qbo_weekly_import_consents
+                    (org_id, project_id, project_name, agreed_by_user_id, agreed_at)
+                 VALUES (?, ?, ?, ?, NOW())'
+            );
+            $ins->execute([$orgId, $projectId, (string) $projectName, $agreedByUserId]);
+            return ['success' => true];
+        } catch (PDOException $e) {
+            error_log('ProjectService::recordQboWeeklyImportConsent: ' . $e->getMessage());
+            return ['success' => false, 'error' => 'Could not save consent.'];
+        }
+    }
+
     /**
      * @param array<int,int> $memberIds
      * @return array<int,int>

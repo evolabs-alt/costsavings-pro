@@ -1537,6 +1537,78 @@ function handleImportQboSync(): void
     exit;
 }
 
+function handleQboWeeklyImportConsentStatus(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id']) || empty($_SESSION['org_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Not authenticated']);
+        exit;
+    }
+    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only a super admin can manage QuickBooks consent.']);
+        exit;
+    }
+    try {
+        $pdo = getDBConnection();
+        $activeProjectId = requireActiveProjectId($pdo);
+        if ($activeProjectId === null) {
+            echo json_encode(['success' => false, 'error' => 'No active project selected']);
+            exit;
+        }
+        $agreed = ProjectService::hasQboWeeklyImportConsent(
+            $pdo,
+            (int) $_SESSION['org_id'],
+            $activeProjectId
+        );
+        echo json_encode(['success' => true, 'agreed' => $agreed]);
+    } catch (Throwable $e) {
+        error_log('handleQboWeeklyImportConsentStatus: ' . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => 'Could not load consent status']);
+    }
+    exit;
+}
+
+function handleSaveQboWeeklyImportConsent(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id']) || empty($_SESSION['org_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Not authenticated']);
+        exit;
+    }
+    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only a super admin can save QuickBooks consent.']);
+        exit;
+    }
+    $agreed = isset($_POST['agreed']) && (string) $_POST['agreed'] === '1';
+    if (!$agreed) {
+        echo json_encode(['success' => true, 'saved' => false]);
+        exit;
+    }
+    try {
+        $pdo = getDBConnection();
+        $activeProjectId = requireActiveProjectId($pdo);
+        if ($activeProjectId === null) {
+            echo json_encode(['success' => false, 'error' => 'No active project selected']);
+            exit;
+        }
+        $result = ProjectService::recordQboWeeklyImportConsent(
+            $pdo,
+            (int) $_SESSION['org_id'],
+            $activeProjectId,
+            (int) $_SESSION['user_id']
+        );
+        if (empty($result['success'])) {
+            echo json_encode(['success' => false, 'error' => $result['error'] ?? 'Could not save consent']);
+            exit;
+        }
+        echo json_encode(['success' => true, 'saved' => true]);
+    } catch (Throwable $e) {
+        error_log('handleSaveQboWeeklyImportConsent: ' . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => 'Could not save consent']);
+    }
+    exit;
+}
+
 function handleSaveCostCalculator() {
     header('Content-Type: application/json');
 
