@@ -1994,6 +1994,64 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .checkbox-label a:hover {
             color: var(--color-primary-hover);
         }
+
+        #appModalQboConnectConsent .app-modal {
+            max-width: 680px;
+        }
+
+        #appModalQboConnectConsent .qbo-consent-form {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        #appModalQboConnectConsent .qbo-consent-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+            padding: 12px 18px 16px;
+            border-top: 1px solid var(--color-border);
+            flex-shrink: 0;
+        }
+
+        #appModalQboConnectConsent .qbo-consent-actions button {
+            margin: 0;
+        }
+
+        .qbo-connect-features {
+            margin: 0 0 14px;
+            padding: 10px 12px;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #374151;
+            background: #f6fbff;
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+        }
+
+        .qbo-connect-features p {
+            margin: 0 0 8px;
+        }
+
+        .qbo-connect-features ul {
+            margin: 0;
+            padding-left: 1.2em;
+        }
+
+        #qboConnectConsentSubmit:disabled,
+        #qboConnectConsentSubmit:disabled:hover {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        #qboConnectConsentSubmit:disabled::before {
+            display: none;
+        }
         
         input[type="email"], input[type="text"], input[type="password"], select { 
             width: 100%; 
@@ -5250,6 +5308,64 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 });
             }
 
+            function openQboConnectConsent(opts) {
+                opts = opts || {};
+                var box = document.getElementById('qboConnectConsentCheckbox');
+                var submit = document.getElementById('qboConnectConsentSubmit');
+                var resume = document.getElementById('qboConnectResumeWizard');
+                var projectId = document.getElementById('qboConnectProjectId');
+                var projectName = document.getElementById('qboConnectProjectName');
+                if (!box || !submit) return;
+                if (resume) resume.value = opts.resumeWizard ? '1' : '';
+                if (projectId) projectId.value = opts.projectId ? String(opts.projectId) : '';
+                if (projectName) projectName.value = opts.projectName || '';
+                box.checked = false;
+                submit.disabled = true;
+                submit.textContent = opts.reconnect ? 'Reconnect QuickBooks' : 'Connect to QuickBooks';
+                openAppModal('appModalQboConnectConsent');
+                var body = document.querySelector('#appModalQboConnectConsent .app-modal-body');
+                if (body) body.scrollTop = 0;
+            }
+
+            function initQboConnectConsent() {
+                var box = document.getElementById('qboConnectConsentCheckbox');
+                var submit = document.getElementById('qboConnectConsentSubmit');
+                var form = document.getElementById('qboConnectConsentForm');
+                var settingsBtn = document.getElementById('qboSettingsConnectBtn');
+                if (box && submit) {
+                    box.addEventListener('change', function() {
+                        submit.disabled = !box.checked;
+                    });
+                }
+                if (form) {
+                    form.addEventListener('submit', function(e) {
+                        if (!box || !box.checked) {
+                            e.preventDefault();
+                            return;
+                        }
+                        var resume = document.getElementById('qboConnectResumeWizard');
+                        if (resume && resume.value === '1' && postProjectCreateFlow.active) {
+                            savePostCreateFlowToSessionStorage();
+                        }
+                    });
+                }
+                if (settingsBtn) {
+                    settingsBtn.addEventListener('click', function() {
+                        openQboConnectConsent({
+                            reconnect: settingsBtn.getAttribute('data-reconnect') === '1'
+                        });
+                    });
+                }
+                document.querySelectorAll('#qboConnectConsentForm a[href="#qboSaverFeatures"]').forEach(function(link) {
+                    link.addEventListener('click', function(e) {
+                        var target = document.getElementById('qboSaverFeatures');
+                        if (!target) return;
+                        e.preventDefault();
+                        target.scrollIntoView({ block: 'nearest' });
+                    });
+                });
+            }
+
             function initPostProjectCreateFlow() {
                 var skipBtn = document.getElementById('postCreateUploadSkipBtn');
                 var connectBtn = document.getElementById('postCreateQboConnectBtn');
@@ -5257,14 +5373,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 if (connectBtn) {
                     connectBtn.addEventListener('click', function() {
                         if (!postProjectCreateFlow.active) return;
-                        savePostCreateFlowToSessionStorage();
-                        var qs = new URLSearchParams({
-                            page: 'qbo-connect',
-                            resume_wizard: '1',
-                            project_id: String(postProjectCreateFlow.projectId || 0),
-                            project_name: postProjectCreateFlow.projectName || ''
+                        openQboConnectConsent({
+                            resumeWizard: true,
+                            projectId: postProjectCreateFlow.projectId || 0,
+                            projectName: postProjectCreateFlow.projectName || ''
                         });
-                        window.location.href = '?' + qs.toString();
                     });
                 }
                 if (syncBtn) {
@@ -6591,6 +6704,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     if (e.key !== 'Escape') return;
                     if (postProjectCreateFlow.postCreateCsvImportInFlight) {
                         showSnackbar('Import in progress…', 'info');
+                        return;
+                    }
+                    var qboConsentOverlay = document.getElementById('appModalQboConnectConsent');
+                    if (qboConsentOverlay && qboConsentOverlay.classList.contains('is-open')) {
+                        closeAppModal(qboConsentOverlay);
                         return;
                     }
                     document.querySelectorAll('.app-modal-overlay.is-open').forEach(function(ov) {
@@ -8901,6 +9019,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     });
                 }
                 initPostProjectCreateFlow();
+                initQboConnectConsent();
                 resumePostCreateQboSyncFromOAuth();
                 initNavSubmenus();
                 initPurposeColumnToggle();
@@ -10696,9 +10815,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <input type="text" readonly value="<?php echo htmlspecialchars((string) ($qbo_status['redirect_uri'] ?? '')); ?>" style="min-width:320px;background:#f9fafb;" onclick="this.select();">
                     </label>
                     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-                        <a class="btn-secondary" style="display:inline-block;padding:8px 12px;text-decoration:none;" href="?page=qbo-connect">
+                        <button type="button" class="btn-secondary" id="qboSettingsConnectBtn" data-reconnect="<?php echo !empty($qbo_status['connected']) ? '1' : '0'; ?>" style="display:inline-block;padding:8px 12px;margin:0;">
                             <?php echo !empty($qbo_status['connected']) ? 'Reconnect QuickBooks' : 'Connect to QuickBooks'; ?>
-                        </a>
+                        </button>
                         <?php if (!empty($qbo_status['connected'])): ?>
                         <form method="POST" style="margin:0;" onsubmit="return confirm('Disconnect QuickBooks for this organization?');">
                             <input type="hidden" name="action" value="qbo_disconnect">
@@ -10721,6 +10840,39 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 </div>
                 <?php endif; ?>
             </div>
+        </div>
+    </div>
+
+    <?php $qbo_legal_url = 'https://savvycfo.com/terms-conditions-privacy-policy/'; ?>
+    <div class="app-modal-overlay" id="appModalQboConnectConsent" role="dialog" aria-modal="true" aria-labelledby="appModalQboConnectConsentTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalQboConnectConsentTitle">Connect QuickBooks</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <form id="qboConnectConsentForm" class="qbo-consent-form" method="post" action="?page=qbo-connect">
+                <input type="hidden" name="resume_wizard" id="qboConnectResumeWizard" value="">
+                <input type="hidden" name="project_id" id="qboConnectProjectId" value="">
+                <input type="hidden" name="project_name" id="qboConnectProjectName" value="">
+                <div class="app-modal-body">
+                    <div class="qbo-connect-features" id="qboSaverFeatures">
+                        <p>Savvy Saver uses the connected QuickBooks Online company to:</p>
+                        <ul>
+                            <li>Import vendors and historical transactions into a project</li>
+                            <li>Track those vendors and estimate savings</li>
+                            <li>Retrieve new or updated records while the connection stays active, including weekly imports that can notify you of new vendors</li>
+                        </ul>
+                    </div>
+                    <label class="checkbox-label" style="margin:0;">
+                        <input type="checkbox" name="qbo_connect_consent" id="qboConnectConsentCheckbox" value="1" required>
+                        <span>I confirm that I am authorized to connect this QuickBooks Online company. I authorize Savvy CFO to import and store historical accounting and transaction data and automatically retrieve new or updated records while the connection remains active, to provide the Savvy Saver features described <a href="#qboSaverFeatures">here</a>. I understand that I can disconnect future access and that previously imported data is handled under the <a href="<?php echo htmlspecialchars($qbo_legal_url); ?>" target="_blank" rel="noopener noreferrer">Privacy Policy</a>. I agree to the <a href="<?php echo htmlspecialchars($qbo_legal_url); ?>" target="_blank" rel="noopener noreferrer">Terms of Use</a> and acknowledge the <a href="<?php echo htmlspecialchars($qbo_legal_url); ?>" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</span>
+                    </label>
+                </div>
+                <div class="qbo-consent-actions">
+                    <button type="button" class="btn-secondary app-modal-close">Cancel</button>
+                    <button type="submit" id="qboConnectConsentSubmit" disabled>Connect to QuickBooks</button>
+                </div>
+            </form>
         </div>
     </div>
 

@@ -25,13 +25,20 @@ function csQboRequireAdminSession(): void
 function csQboConnect(): void
 {
     csQboRequireAdminSession();
+    $consented = ($_SERVER['REQUEST_METHOD'] === 'POST')
+        && (string) ($_POST['qbo_connect_consent'] ?? '') === '1';
+    if (!$consented) {
+        $_SESSION['error'] = 'Check the authorization box before connecting QuickBooks.';
+        header('Location: ' . (function_exists('publicAppBaseUrl') ? publicAppBaseUrl() : '/') . 'index.php');
+        exit;
+    }
     try {
         $pdo = getDBConnection();
         $svc = new QboService($pdo);
         $resume = [
-            'resume_wizard' => isset($_GET['resume_wizard']) && (string) $_GET['resume_wizard'] === '1',
-            'project_id' => isset($_GET['project_id']) ? (int) $_GET['project_id'] : 0,
-            'project_name' => isset($_GET['project_name']) ? trim((string) $_GET['project_name']) : '',
+            'resume_wizard' => isset($_POST['resume_wizard']) && (string) $_POST['resume_wizard'] === '1',
+            'project_id' => isset($_POST['project_id']) ? (int) $_POST['project_id'] : 0,
+            'project_name' => isset($_POST['project_name']) ? trim((string) $_POST['project_name']) : '',
         ];
         $started = $svc->beginOAuth(
             (int) $_SESSION['org_id'],
