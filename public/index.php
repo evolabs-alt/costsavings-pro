@@ -231,11 +231,12 @@ $org_role = ($is_logged_in && function_exists('sessionOrgRole'))
 $project_role = ($is_logged_in && function_exists('sessionProjectRole'))
     ? sessionProjectRole()
     : (string) ($_SESSION['project_role'] ?? $_SESSION['role'] ?? 'member');
-$is_org_admin = ($is_logged_in && \CostSavings\OrgRole::isPrivileged($org_role));
-$is_admin = ($is_logged_in && \CostSavings\OrgRole::isPrivileged($project_role));
+// Any org member may invite/manage members and org settings (former admin powers).
+$is_org_admin = $is_logged_in;
+// Any project member may edit vendor spend/manager/visibility (former admin + member union).
+$is_admin = $is_logged_in;
 $can_create_projects = ($is_logged_in && \CostSavings\OrgRole::isSuperAdmin($org_role));
 $can_manage_qbo = ($is_logged_in && \CostSavings\OrgRole::isSuperAdmin($org_role));
-$invite_can_choose_org_role = $can_create_projects;
 $user_orgs = ($is_logged_in && !empty($_SESSION['user_orgs']) && is_array($_SESSION['user_orgs']))
     ? $_SESSION['user_orgs']
     : [];
@@ -2021,24 +2022,87 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             margin: 0;
         }
 
-        .qbo-connect-features {
-            margin: 0 0 14px;
-            padding: 10px 12px;
+        #appModalQboSaverFeatures .app-modal {
+            max-width: 560px;
+        }
+
+        #appModalQboSaverFeatures .app-modal-body {
+            background:
+                radial-gradient(ellipse 120% 80% at 0% 0%, rgba(37, 168, 224, 0.08), transparent 55%),
+                radial-gradient(ellipse 90% 70% at 100% 100%, rgba(11, 88, 163, 0.06), transparent 50%),
+                #fff;
+        }
+
+        .qbo-features-intro {
+            margin: 0 0 16px;
             font-size: 14px;
-            line-height: 1.5;
-            color: #374151;
-            background: #f6fbff;
-            border: 1px solid var(--color-border);
-            border-radius: 8px;
+            line-height: 1.55;
+            color: #4b5563;
         }
 
-        .qbo-connect-features p {
-            margin: 0 0 8px;
-        }
-
-        .qbo-connect-features ul {
+        .qbo-features-list {
+            list-style: none;
             margin: 0;
-            padding-left: 1.2em;
+            padding: 0;
+            display: grid;
+            gap: 12px;
+        }
+
+        .qbo-features-list li {
+            display: grid;
+            grid-template-columns: 28px 1fr;
+            gap: 12px;
+            align-items: start;
+            margin: 0;
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 1px solid #e5eef7;
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: 0 1px 0 rgba(11, 88, 163, 0.04);
+        }
+
+        .qbo-features-list .qbo-feature-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+            color: #fff;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .qbo-features-list .qbo-feature-copy {
+            min-width: 0;
+        }
+
+        .qbo-features-list strong {
+            display: block;
+            margin: 0 0 4px;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--color-primary-hover);
+            letter-spacing: 0.01em;
+        }
+
+        .qbo-features-list p {
+            margin: 0;
+            font-size: 13px;
+            line-height: 1.5;
+            color: #4b5563;
+        }
+
+        #appModalQboSaverFeatures .qbo-features-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 18px;
+        }
+
+        #appModalQboSaverFeatures .qbo-features-actions button {
+            margin: 0;
         }
 
         #qboConnectConsentSubmit:disabled,
@@ -4838,7 +4902,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         '<td>' + escapeHtml(m.email || '') + '</td>' +
                         '<td><select class="project-member-role-select">' +
                         '<option value="member"' + (role === 'member' ? ' selected' : '') + '>Member</option>' +
-                        '<option value="admin"' + (role === 'admin' ? ' selected' : '') + '>Administrator</option>' +
                         '<option value="super_admin"' + (role === 'super_admin' ? ' selected' : '') + '>Super admin</option>' +
                         '</select></td>';
                     tbody.appendChild(tr);
@@ -5356,12 +5419,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         });
                     });
                 }
-                document.querySelectorAll('#qboConnectConsentForm a[href="#qboSaverFeatures"]').forEach(function(link) {
+                document.querySelectorAll('#qboConnectConsentForm a[href="#qboSaverFeatures"], #qboConnectConsentForm a[data-open-qbo-features]').forEach(function(link) {
                     link.addEventListener('click', function(e) {
-                        var target = document.getElementById('qboSaverFeatures');
-                        if (!target) return;
                         e.preventDefault();
-                        target.scrollIntoView({ block: 'nearest' });
+                        e.stopPropagation();
+                        openAppModal('appModalQboSaverFeatures');
                     });
                 });
             }
@@ -6704,6 +6766,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     if (e.key !== 'Escape') return;
                     if (postProjectCreateFlow.postCreateCsvImportInFlight) {
                         showSnackbar('Import in progress…', 'info');
+                        return;
+                    }
+                    var qboFeaturesOverlay = document.getElementById('appModalQboSaverFeatures');
+                    if (qboFeaturesOverlay && qboFeaturesOverlay.classList.contains('is-open')) {
+                        closeAppModal(qboFeaturesOverlay);
                         return;
                     }
                     var qboConsentOverlay = document.getElementById('appModalQboConnectConsent');
@@ -9012,12 +9079,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             document.addEventListener('DOMContentLoaded', function() {
                 initAppModals();
                 initColumnHeaderHelp();
-                var orgRoleInfoBtn = document.getElementById('orgRoleInfoBtn');
-                if (orgRoleInfoBtn) {
-                    orgRoleInfoBtn.addEventListener('click', function() {
-                        openAppModal('appModalOrgRolesInfo');
-                    });
-                }
                 initPostProjectCreateFlow();
                 initQboConnectConsent();
                 resumePostCreateQboSyncFromOAuth();
@@ -10341,18 +10402,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <span>Email</span>
                             <input type="email" name="email" required placeholder="user@company.com" style="min-width:200px;">
                         </label>
-                        <?php if (!empty($invite_can_choose_org_role)): ?>
-                        <label style="display:grid;gap:6px;font-size:14px;">
-                            <span style="display:flex;align-items:center;gap:6px;">
-                                Organization role
-                                <button type="button" class="org-role-info-btn" id="orgRoleInfoBtn" aria-label="About organization roles" title="About organization roles">&#9432;</button>
-                            </span>
-                            <select name="invite_role" style="max-width:280px;">
-                                <option value="member">Member</option>
-                                <option value="admin">Administrator (cannot create projects)</option>
-                            </select>
-                        </label>
-                        <?php endif; ?>
                         <div>
                             <button type="submit">Send invite</button>
                         </div>
@@ -10372,7 +10421,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             <div class="app-modal-body">
                 <p style="margin:0 0 12px;color:#4b5563;font-size:14px;line-height:1.5;">
                     Assign organization members to the active project with an explicit project role.
-                    Organization roles control invites and settings; project roles control vendor access within this project.
+                    Project super admins see all vendors (including confidential); members see public rows plus confidential rows they manage.
                 </p>
                 <label style="display:grid;gap:6px;font-size:14px;max-width:360px;margin-bottom:12px;">
                     <span>Project</span>
@@ -10396,28 +10445,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <div style="margin-top:14px;">
                     <button type="button" id="projectMembersSaveBtn">Save project members</button>
                 </div>
-            </div>
-        </div>
-    </div>
-    <?php endif; ?>
-
-    <?php if (!empty($invite_can_choose_org_role)): ?>
-    <div class="app-modal-overlay" id="appModalOrgRolesInfo" role="dialog" aria-modal="true" aria-labelledby="appModalOrgRolesInfoTitle" aria-hidden="true">
-        <div class="app-modal" tabindex="-1" style="max-width:480px;">
-            <div class="app-modal-header">
-                <h2 id="appModalOrgRolesInfoTitle">Organization roles</h2>
-                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
-            </div>
-            <div class="app-modal-body">
-                <?php foreach (\CostSavings\OrgRole::roleDescriptionsForInvite() as $roleDesc): ?>
-                <div style="margin-bottom:14px;">
-                    <strong style="display:block;font-size:14px;margin-bottom:4px;"><?php echo htmlspecialchars($roleDesc['title']); ?></strong>
-                    <p style="margin:0;font-size:14px;color:#374151;line-height:1.5;"><?php echo htmlspecialchars($roleDesc['description']); ?></p>
-                    <?php if (!empty($roleDesc['note'])): ?>
-                    <p style="margin:6px 0 0;font-size:13px;color:#6b7280;"><?php echo htmlspecialchars($roleDesc['note']); ?></p>
-                    <?php endif; ?>
-                </div>
-                <?php endforeach; ?>
             </div>
         </div>
     </div>
@@ -10855,17 +10882,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 <input type="hidden" name="project_id" id="qboConnectProjectId" value="">
                 <input type="hidden" name="project_name" id="qboConnectProjectName" value="">
                 <div class="app-modal-body">
-                    <div class="qbo-connect-features" id="qboSaverFeatures">
-                        <p>Savvy Saver uses the connected QuickBooks Online company to:</p>
-                        <ul>
-                            <li>Import vendors and historical transactions into a project</li>
-                            <li>Track those vendors and estimate savings</li>
-                            <li>Retrieve new or updated records while the connection stays active, including weekly imports that can notify you of new vendors</li>
-                        </ul>
-                    </div>
                     <label class="checkbox-label" style="margin:0;">
                         <input type="checkbox" name="qbo_connect_consent" id="qboConnectConsentCheckbox" value="1" required>
-                        <span>I confirm that I am authorized to connect this QuickBooks Online company. I authorize Savvy CFO to import and store historical accounting and transaction data and automatically retrieve new or updated records while the connection remains active, to provide the Savvy Saver features described <a href="#qboSaverFeatures">here</a>. I understand that I can disconnect future access and that previously imported data is handled under the <a href="<?php echo htmlspecialchars($qbo_legal_url); ?>" target="_blank" rel="noopener noreferrer">Privacy Policy</a>. I agree to the <a href="<?php echo htmlspecialchars($qbo_legal_url); ?>" target="_blank" rel="noopener noreferrer">Terms of Use</a> and acknowledge the <a href="<?php echo htmlspecialchars($qbo_legal_url); ?>" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</span>
+                        <span>I confirm that I am authorized to connect this QuickBooks Online company. I authorize Savvy CFO to import and store historical accounting and transaction data and automatically retrieve new or updated records while the connection remains active, to provide the Savvy Saver features described <a href="#qboSaverFeatures" data-open-qbo-features="1">here</a>. I understand that I can disconnect future access and that previously imported data is handled under the <a href="<?php echo htmlspecialchars($qbo_legal_url); ?>" target="_blank" rel="noopener noreferrer">Privacy Policy</a>. I agree to the <a href="<?php echo htmlspecialchars($qbo_legal_url); ?>" target="_blank" rel="noopener noreferrer">Terms of Use</a> and acknowledge the <a href="<?php echo htmlspecialchars($qbo_legal_url); ?>" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</span>
                     </label>
                 </div>
                 <div class="qbo-consent-actions">
@@ -10873,6 +10892,58 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <button type="submit" id="qboConnectConsentSubmit" disabled>Connect to QuickBooks</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay" id="appModalQboSaverFeatures" role="dialog" aria-modal="true" aria-labelledby="appModalQboSaverFeaturesTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalQboSaverFeaturesTitle">How Savvy Saver uses QuickBooks Online</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <p class="qbo-features-intro">Connecting your QuickBooks Online company lets Savvy Saver use your accounting data for the features below. You choose what to sync, and you can disconnect at any time.</p>
+                <ol class="qbo-features-list">
+                    <li>
+                        <span class="qbo-feature-num" aria-hidden="true">1</span>
+                        <div class="qbo-feature-copy">
+                            <strong>Import historical vendors and transactions</strong>
+                            <p>Bring vendors and transactions from your QuickBooks Online company into a Savvy Saver project for the date range and accounts you choose.</p>
+                        </div>
+                    </li>
+                    <li>
+                        <span class="qbo-feature-num" aria-hidden="true">2</span>
+                        <div class="qbo-feature-copy">
+                            <strong>Build and manage your vendor cost list</strong>
+                            <p>Review spend, assign owners, set purposes and categories, and track cancellation or renewal decisions with your team.</p>
+                        </div>
+                    </li>
+                    <li>
+                        <span class="qbo-feature-num" aria-hidden="true">3</span>
+                        <div class="qbo-feature-copy">
+                            <strong>Estimate and track savings</strong>
+                            <p>Capture savings from vendor changes and export reports such as Excel, PDF, and an executive summary.</p>
+                        </div>
+                    </li>
+                    <li>
+                        <span class="qbo-feature-num" aria-hidden="true">4</span>
+                        <div class="qbo-feature-copy">
+                            <strong>Keep data current while connected</strong>
+                            <p>Retrieve new or updated accounting and transaction records while the connection remains active, including optional weekly imports that can notify you of new vendors.</p>
+                        </div>
+                    </li>
+                    <li>
+                        <span class="qbo-feature-num" aria-hidden="true">5</span>
+                        <div class="qbo-feature-copy">
+                            <strong>Disconnect anytime</strong>
+                            <p>Stop future access from Organization settings. Previously imported data is handled under the Privacy Policy.</p>
+                        </div>
+                    </li>
+                </ol>
+                <div class="qbo-features-actions">
+                    <button type="button" class="app-modal-close">Got it</button>
+                </div>
+            </div>
         </div>
     </div>
 

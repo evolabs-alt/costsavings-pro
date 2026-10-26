@@ -4,11 +4,11 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
 
 ## Features
 
-- **Username + password login** — Sessions store `user_id`, `org_id`, and app role (`admin` / `member`). Invitation email via Gmail API OAuth ([includes/mail.php](includes/mail.php) → `sendInviteEmail`).
-- **Organizations (up to 10 users)** — Admin invites members by email; registration completes at [public/register.php](public/register.php).
-- **Vendor grid** — Manager assignment, public/confidential visibility, purpose of subscription, cancellation deadline, last payment date; auto-save to `cost_calculator_items` (PDO / [src/VendorService.php](src/VendorService.php)).
+- **Username + password login** — Sessions store `user_id`, `org_id`, and roles (`super_admin` / `member` at org and project scope). Invitation email via Gmail API OAuth ([includes/mail.php](includes/mail.php) → `sendInviteEmail`).
+- **Organizations** — Members invite teammates by email; registration completes at [public/register.php](public/register.php). Super admins create/delete projects and manage QuickBooks.
+- **Vendor grid** — Manager assignment, public/confidential visibility, purpose of subscription, cancellation deadline, last payment date; auto-save to `cost_calculator_items` (PDO / [src/VendorService.php](src/VendorService.php)). Members edit public rows and confidential rows they manage; project super admins see all rows.
 - **CSV import** — QuickBooks “Transaction Detail by Account” exports (primary): upload shows a checklist of GL account sections; only payees (Name column) under selected accounts are imported, with account stored on raw transactions ([src/CsvImport.php](src/CsvImport.php)). Legacy “Transaction List by Vendor” CSVs still import in one step without the account picker. Custom column-mapped CSV is also supported.
-- **QuickBooks Online sync** — Admin configures OAuth Client ID/Secret in Settings, connects the company, then uses Data → **Sync with QBO** to pull a date range via the General Ledger / Transaction List reports (GL account picker, same flow as CSV) ([src/QboService.php](src/QboService.php)).
+- **QuickBooks Online sync** — Super admin connects the company in Settings, then uses Data → **Sync with QBO** to pull a date range via the General Ledger / Transaction List reports (GL account picker, same flow as CSV) ([src/QboService.php](src/QboService.php)).
 - **Exports** — Excel (PhpSpreadsheet) and PDF (Dompdf) for vendor list and executive summary ([src/ExportService.php](src/ExportService.php)).
 - **Email reminders** — Cron script [public/cron_reminders.php](public/cron_reminders.php) sends cancellation deadlines (T−7, T, T+7) and monthly renewal summaries through **GoHighLevel Conversations API** (LeadConnector).
 - **Ask AI** — Perplexity Chat Completions when `PERPLEXITY_API_KEY` is set; otherwise OpenAI (`OPENAI_API_KEY`). 50 requests per user per month ([src/AiService.php](src/AiService.php)); see `config.example.php` for `AI_MODEL`, `AI_MAX_TOKENS`, and `AI_TEMPERATURE`.
@@ -56,7 +56,7 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
      - `QBO_REDIRECT_URI` — optional; default `{BASE_URL}index.php?page=qbo-callback`
      - `QBO_TOKEN_ENCRYPTION_KEY` — random secret for encrypting refresh tokens at rest
    - Register the redirect URI on the Intuit app.
-   - Admin → Settings → **Connect to QuickBooks** (each customer company authorizes once). App Client ID/Secret are not entered in the UI.
+   - Super admin → Settings → **Connect to QuickBooks** (each customer company authorizes once). App Client ID/Secret are not entered in the UI.
    - Per org: company `realmId` + encrypted refresh token. No Intuit user IDs. Access tokens: process memory only.
    - Data → **Sync with QBO** → date range → select accounts → import.
 7. **GoHighLevel (reminders):**

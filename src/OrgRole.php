@@ -7,14 +7,12 @@ namespace CostSavings;
 final class OrgRole
 {
     public const ROLE_SUPER_ADMIN = 'super_admin';
-    public const ROLE_ADMIN = 'admin';
     public const ROLE_MEMBER = 'member';
 
+    /** @deprecated Use isSuperAdmin(); kept as alias after admin role collapse. */
     public static function isPrivileged(string $role): bool
     {
-        $r = strtolower(trim($role));
-
-        return $r === self::ROLE_SUPER_ADMIN || $r === self::ROLE_ADMIN;
+        return self::isSuperAdmin($role);
     }
 
     public static function isSuperAdmin(string $role): bool
@@ -22,7 +20,7 @@ final class OrgRole
         return strtolower(trim($role)) === self::ROLE_SUPER_ADMIN;
     }
 
-    /** Only super admins may grant org admin / super-admin roles via invite or promotion. */
+    /** Only super admins may grant super_admin via project assignment. */
     public static function canElevateOrgRoles(string $role): bool
     {
         return strtolower(trim($role)) === self::ROLE_SUPER_ADMIN;
@@ -33,8 +31,6 @@ final class OrgRole
         switch (strtolower(trim($role))) {
             case self::ROLE_SUPER_ADMIN:
                 return 'Super admin';
-            case self::ROLE_ADMIN:
-                return 'Admin';
             case self::ROLE_MEMBER:
             default:
                 return 'Member';
@@ -42,7 +38,7 @@ final class OrgRole
     }
 
     /**
-     * Role titles and descriptions for the invite UI help modal.
+     * Role titles and descriptions for help UI.
      *
      * @return array<int, array{title:string, description:string, note?:string}>
      */
@@ -51,16 +47,12 @@ final class OrgRole
         return [
             [
                 'title' => 'Super admin',
-                'description' => 'Organization: invite members, org settings, create/delete projects. Project: full vendor access including confidential rows and copy operations.',
-                'note' => 'Org super admin can create projects; project super admin controls vendor data within a project.',
-            ],
-            [
-                'title' => 'Administrator',
-                'description' => 'Organization: invite members (as Member), manage members, org settings. Project: public vendor rows only within assigned projects.',
+                'description' => 'Organization: invite members, org settings, create/delete projects, QuickBooks. Project: full vendor access including confidential rows and copy operations.',
+                'note' => 'Org super admin can create projects; project super admin controls all vendor data within a project.',
             ],
             [
                 'title' => 'Member',
-                'description' => 'Organization: basic membership. Project: public rows plus confidential rows they manage in assigned projects.',
+                'description' => 'Organization: invite and manage members, org settings, assign project members. Project: add/edit vendors (spend, manager, visibility), public rows plus confidential rows they manage.',
             ],
         ];
     }

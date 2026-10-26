@@ -183,15 +183,8 @@ class VendorService
                 WHERE cci.org_id = :oid AND cci.project_id = :pid ORDER BY cci.id ASC';
             $stmt = $pdo->prepare($sql);
             $stmt->execute([':oid' => $orgId, ':pid' => $projectId]);
-        } elseif (OrgRole::isPrivileged($role)) {
-            // Level-2 admin: public rows only (no confidential vendors).
-            $sql = 'SELECT cci.*, pc.name AS category_name
-                FROM cost_calculator_items cci
-                LEFT JOIN project_categories pc ON pc.id = cci.category_id AND pc.project_id = cci.project_id
-                WHERE cci.org_id = :oid AND cci.project_id = :pid AND cci.visibility = \'public\' ORDER BY cci.id ASC';
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([':oid' => $orgId, ':pid' => $projectId]);
         } else {
+            // Member: public rows plus confidential rows they manage.
             $sql = 'SELECT cci.*, pc.name AS category_name
                 FROM cost_calculator_items cci
                 LEFT JOIN project_categories pc ON pc.id = cci.category_id AND pc.project_id = cci.project_id
@@ -333,19 +326,14 @@ class VendorService
 
         $pdo->beginTransaction();
         try {
-            if (OrgRole::isSuperAdmin($actingRole)) {
-                $existing = $pdo->prepare(
-                    'SELECT id, vendor_name, manager_user_id FROM cost_calculator_items WHERE org_id = ? AND project_id = ?'
-                );
-            } elseif (OrgRole::isPrivileged($actingRole)) {
-                $existing = $pdo->prepare(
-                    'SELECT id, vendor_name, manager_user_id FROM cost_calculator_items WHERE org_id = ? AND project_id = ? AND visibility = \'public\''
-                );
-            } else {
+            if (!OrgRole::isSuperAdmin($actingRole)) {
                 $pdo->rollBack();
 
                 return ['success' => false, 'error' => 'Save failed'];
             }
+            $existing = $pdo->prepare(
+                'SELECT id, vendor_name, manager_user_id FROM cost_calculator_items WHERE org_id = ? AND project_id = ?'
+            );
             $existing->execute([$orgId, $projectId]);
             $allowedIds = [];
             $existingVendorNames = [];
@@ -478,6 +466,9 @@ class VendorService
     }
 
     /**
+     * Member save: union of former admin + member powers — create rows; edit spend/manager/visibility
+     * on public rows and confidential rows they manage.
+     *
      * @param array<int, array<string, mixed>> $items
      * @return array{success:bool, error?:string, cancelKeep?:string, saved_ids?:array<int, int>}
      */
@@ -497,26 +488,34 @@ class VendorService
             $email = self::getUserEmail($pdo, $userId);
 
             $existing = $pdo->prepare(
-                'SELECT id, vendor_name, cost_per_period, frequency, annual_cost
+                'SELECT id, vendor_name, manager_user_id
                  FROM cost_calculator_items
-                 WHERE org_id = ? AND project_id = ? AND (manager_user_id IS NULL OR manager_user_id = ?)'
+                 WHERE org_id = ? AND project_id = ?
+                   AND (visibility = \'public\' OR (visibility = \'confidential\' AND manager_user_id = ?))'
             );
             $existing->execute([$orgId, $projectId, $userId]);
             $allowedIds = [];
-            $spendById = [];
+            $existingVendorNames = [];
+            $existingManagers = [];
             while ($r = $existing->fetch(PDO::FETCH_ASSOC)) {
                 $id = (int) $r['id'];
                 $allowedIds[$id] = true;
-                $spendById[$id] = $r;
+                $existingVendorNames[$id] = trim((string) ($r['vendor_name'] ?? ''));
+                $existingMgr = isset($r['manager_user_id']) ? (int) $r['manager_user_id'] : 0;
+                $existingManagers[$id] = $existingMgr > 0 ? $existingMgr : null;
             }
 
             $payloadIds = [];
             $savedIds = [];
             $cc = '';
 
+            $ins = $pdo->prepare(
+                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, category_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+            );
             $upd = $pdo->prepare(
-                'UPDATE cost_calculator_items SET vendor_name=?, cost_per_period=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?, category_id=?, user_email=?, user_id=?
-                 WHERE id=? AND org_id=? AND project_id=? AND (manager_user_id IS NULL OR manager_user_id=?)'
+                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, category_id=?, vendor_name=?, cost_per_period=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?
+                 WHERE id=? AND org_id=? AND project_id=?'
             );
 
             foreach ($items as $item) {
@@ -529,23 +528,36 @@ class VendorService
                 $cc .= '-' . $legacy['cancel_keep'];
                 $purpose = $item['purpose_of_subscription'] ?? $item['notes'] ?? '';
                 $vis = ($item['visibility'] ?? 'public') === 'confidential' ? 'confidential' : 'public';
+                $rowId = isset($item['id']) ? (int) $item['id'] : 0;
+                $existingMgr = ($rowId > 0 && array_key_exists($rowId, $existingManagers))
+                    ? $existingManagers[$rowId]
+                    : null;
+                $mgr = self::resolveManagerUserIdForAdminSave($pdo, $orgId, $item, $userId, $existingMgr);
                 $categoryId = CategoryService::resolveCategoryIdFromItem($pdo, $orgId, $projectId, $item);
                 $deadline = self::normDate($item['cancellation_deadline'] ?? null);
                 $lastPay = self::normDate($item['last_payment_date'] ?? null);
-                $rowId = isset($item['id']) ? (int) $item['id'] : 0;
 
                 if ($rowId > 0) {
-                    if (!isset($allowedIds[$rowId]) || !isset($spendById[$rowId])) {
+                    if (!isset($allowedIds[$rowId])) {
                         $savedIds[] = 0;
                         continue;
                     }
-                    $spend = $spendById[$rowId];
                     $payloadIds[$rowId] = true;
+                    $vendorName = trim((string) ($item['vendor_name'] ?? ''));
+                    if ($vendorName === ''
+                        && isset($existingVendorNames[$rowId])
+                        && $existingVendorNames[$rowId] !== '') {
+                        $vendorName = $existingVendorNames[$rowId];
+                    }
                     $upd->execute([
-                        (string) ($spend['vendor_name'] ?? ''),
-                        (float) ($spend['cost_per_period'] ?? 0),
-                        (string) ($spend['frequency'] ?? ''),
-                        (float) ($spend['annual_cost'] ?? 0),
+                        $userId,
+                        $email,
+                        $mgr,
+                        $categoryId,
+                        $vendorName,
+                        (float) ($item['cost_per_period'] ?? 0),
+                        $item['frequency'] ?? '',
+                        (float) ($item['annual_cost'] ?? 0),
                         $status,
                         self::cancelKeepToDb($legacy['cancel_keep']),
                         $legacy['cancelled_status'],
@@ -553,26 +565,47 @@ class VendorService
                         $purpose,
                         $deadline,
                         $lastPay,
-                        $categoryId,
-                        $email,
-                        $userId,
                         $rowId,
                         $orgId,
                         $projectId,
-                        $userId,
                     ]);
                     $savedIds[] = $rowId;
                 } else {
-                    $savedIds[] = 0;
+                    $ins->execute([
+                        $orgId,
+                        $projectId,
+                        $userId,
+                        $email,
+                        $mgr,
+                        $categoryId,
+                        $item['vendor_name'] ?? '',
+                        (float) ($item['cost_per_period'] ?? 0),
+                        $item['frequency'] ?? '',
+                        (float) ($item['annual_cost'] ?? 0),
+                        $status,
+                        self::cancelKeepToDb($legacy['cancel_keep']),
+                        $legacy['cancelled_status'],
+                        $vis,
+                        $purpose,
+                        $deadline,
+                        $lastPay,
+                    ]);
+                    $newId = (int) $pdo->lastInsertId();
+                    if ($newId > 0) {
+                        $payloadIds[$newId] = true;
+                        $savedIds[] = $newId;
+                    } else {
+                        $savedIds[] = 0;
+                    }
                 }
             }
 
             // Only delete missing rows on explicit full_sync (e.g. bulk delete).
-            if ($fullSync) {
-                foreach (array_keys($allowedIds) as $aid) {
-                    if (!isset($payloadIds[$aid])) {
-                        $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE id = ? AND org_id = ? AND project_id = ? AND (manager_user_id IS NULL OR manager_user_id = ?)');
-                        $del->execute([$aid, $orgId, $projectId, $userId]);
+            if ($fullSync && count($allowedIds) > 0) {
+                $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE id = ? AND org_id = ? AND project_id = ?');
+                foreach ($allowedIds as $id => $_unused) {
+                    if (!isset($payloadIds[$id])) {
+                        $del->execute([(int) $id, $orgId, $projectId]);
                     }
                 }
             }
@@ -746,50 +779,16 @@ class VendorService
             return ['updated' => $updated, 'applied' => $applied, 'applied_ids' => $appliedIds];
         }
 
-        if (OrgRole::isPrivileged($role)) {
-            $stmt = $pdo->prepare(
-                'UPDATE cost_calculator_items
-                 SET purpose_of_subscription = ?
-                 WHERE id = ? AND org_id = ? AND project_id = ? AND visibility = \'public\''
-            );
-            foreach ($updates as $u) {
-                $rowId = (int) ($u['id'] ?? 0);
-                if ($rowId <= 0) {
-                    continue;
-                }
-                $stmt->execute([(string) ($u['purpose'] ?? ''), $rowId, $orgId, $projectId]);
-                $updated += $stmt->rowCount();
-                ++$applied;
-                $appliedIds[] = $rowId;
-            }
-
-            return ['updated' => $updated, 'applied' => $applied, 'applied_ids' => $appliedIds];
-        }
-
-        $allowed = [];
-        $allowedStmt = $pdo->prepare(
-            'SELECT id FROM cost_calculator_items
-             WHERE id = ? AND org_id = ? AND project_id = ? AND manager_user_id = ?'
-        );
-        foreach ($updates as $u) {
-            $rowId = (int) ($u['id'] ?? 0);
-            if ($rowId <= 0 || isset($allowed[$rowId])) {
-                continue;
-            }
-            $allowedStmt->execute([$rowId, $orgId, $projectId, $userId]);
-            if ($allowedStmt->fetchColumn()) {
-                $allowed[$rowId] = true;
-            }
-        }
-
+        // Member: public rows or confidential rows they manage.
         $stmt = $pdo->prepare(
             'UPDATE cost_calculator_items
              SET purpose_of_subscription = ?
-             WHERE id = ? AND org_id = ? AND project_id = ? AND manager_user_id = ?'
+             WHERE id = ? AND org_id = ? AND project_id = ?
+               AND (visibility = \'public\' OR (visibility = \'confidential\' AND manager_user_id = ?))'
         );
         foreach ($updates as $u) {
             $rowId = (int) ($u['id'] ?? 0);
-            if ($rowId <= 0 || !isset($allowed[$rowId])) {
+            if ($rowId <= 0) {
                 continue;
             }
             $stmt->execute([(string) ($u['purpose'] ?? ''), $rowId, $orgId, $projectId, $userId]);
@@ -873,23 +872,7 @@ class VendorService
         if ($vendorNorm === '') {
             return [];
         }
-        if (OrgRole::isSuperAdmin($role)) {
-            // unrestricted for org/project
-        } elseif (OrgRole::isPrivileged($role)) {
-            $check = $pdo->prepare(
-                'SELECT 1
-                 FROM cost_calculator_items
-                 WHERE org_id = :oid
-                   AND project_id = :pid
-                   AND LOWER(TRIM(vendor_name)) = :v
-                   AND visibility = \'public\'
-                 LIMIT 1'
-            );
-            $check->execute([':oid' => $orgId, ':pid' => $projectId, ':v' => $vendorNorm]);
-            if (!$check->fetchColumn()) {
-                return [];
-            }
-        } else {
+        if (!OrgRole::isSuperAdmin($role)) {
             $check = $pdo->prepare(
                 'SELECT 1
                  FROM cost_calculator_items

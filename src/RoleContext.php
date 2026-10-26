@@ -177,7 +177,7 @@ final class RoleContext
         int $isDisabled = 0
     ): void {
         $role = strtolower(trim($role));
-        if (!in_array($role, [OrgRole::ROLE_SUPER_ADMIN, OrgRole::ROLE_ADMIN, OrgRole::ROLE_MEMBER], true)) {
+        if (!in_array($role, [OrgRole::ROLE_SUPER_ADMIN, OrgRole::ROLE_MEMBER], true)) {
             $role = OrgRole::ROLE_MEMBER;
         }
         $st = $pdo->prepare(

@@ -151,18 +151,8 @@ function acceptPendingInviteForEmail(PDO $pdo, int $userId, string $email): bool
         return false;
     }
 
-    $desiredRole = strtolower(trim((string) ($inv['invite_role'] ?? 'member')));
-    if ($desiredRole !== OrgRole::ROLE_ADMIN && $desiredRole !== OrgRole::ROLE_MEMBER) {
-        $desiredRole = OrgRole::ROLE_MEMBER;
-    }
-    $inviterId = (int) ($inv['invited_by_user_id'] ?? 0);
-    $inviterRole = OrgRole::ROLE_MEMBER;
-    if ($inviterId > 0) {
-        $inviterRole = RoleContext::orgRole($pdo, $inviterId, $orgId) ?? OrgRole::ROLE_MEMBER;
-    }
-    if ($desiredRole !== OrgRole::ROLE_MEMBER && !OrgRole::canElevateOrgRoles($inviterRole)) {
-        $desiredRole = OrgRole::ROLE_MEMBER;
-    }
+    // Invites always grant member; legacy invite_role=admin remaps to member.
+    $desiredRole = OrgRole::ROLE_MEMBER;
 
     RoleContext::upsertOrgMembership($pdo, $userId, $orgId, $desiredRole);
     $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
@@ -535,8 +525,8 @@ function handleInviteMember() {
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     };
-    if (empty($_SESSION['user_id']) || !OrgRole::isPrivileged(sessionOrgRole())) {
-        $_SESSION['error'] = 'Only admins can invite members.';
+    if (empty($_SESSION['user_id']) || (int) ($_SESSION['org_id'] ?? 0) < 1) {
+        $_SESSION['error'] = 'You must be signed in to invite members.';
         $redir();
     }
     $email = normalizeUserEmail($_POST['email'] ?? '');
@@ -548,12 +538,6 @@ function handleInviteMember() {
     $orgId = (int) $_SESSION['org_id'];
 
     $inviteRole = OrgRole::ROLE_MEMBER;
-    if (OrgRole::isSuperAdmin(sessionOrgRole())) {
-        $rawRole = strtolower(trim((string) ($_POST['invite_role'] ?? '')));
-        if ($rawRole === OrgRole::ROLE_ADMIN) {
-            $inviteRole = OrgRole::ROLE_ADMIN;
-        }
-    }
 
     logInviteEvent('request_received', [
         'admin_user_id' => (int) $_SESSION['user_id'],
@@ -1280,8 +1264,8 @@ function handleToggleMemberDisabled(): void
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     };
-    if (empty($_SESSION['user_id']) || !OrgRole::isPrivileged(sessionOrgRole())) {
-        $_SESSION['error'] = 'Only admins can manage member status.';
+    if (empty($_SESSION['user_id']) || (int) ($_SESSION['org_id'] ?? 0) < 1) {
+        $_SESSION['error'] = 'You must be signed in to manage member status.';
         $redir();
     }
     $memberId = (int) ($_POST['member_id'] ?? 0);
@@ -1312,8 +1296,8 @@ function handleToggleMemberDisabled(): void
 }
 
 function handleSaveOrgReminders() {
-    if (empty($_SESSION['user_id']) || !OrgRole::isPrivileged(sessionOrgRole())) {
-        $_SESSION['error'] = 'Only admins can change organization settings.';
+    if (empty($_SESSION['user_id']) || (int) ($_SESSION['org_id'] ?? 0) < 1) {
+        $_SESSION['error'] = 'You must be signed in to change organization settings.';
 
         return;
     }
@@ -1344,9 +1328,10 @@ function handleSaveReminderSettings() {
         return;
     }
     $pdo = getDBConnection();
-    $isAdmin = OrgRole::isPrivileged(sessionOrgRole());
+    $orgId = (int) ($_SESSION['org_id'] ?? 0);
+    $canEditOrgSettings = $orgId > 0;
 
-    if ($isAdmin) {
+    if ($canEditOrgSettings) {
         $orgOn = isset($_POST['deadline_reminders_enabled']) && $_POST['deadline_reminders_enabled'] === '1';
         $webhookUrl = normalizeWebhookUrl($_POST['notification_webhook_url'] ?? '');
         if ($webhookUrl !== '' && !filter_var($webhookUrl, FILTER_VALIDATE_URL)) {
@@ -1355,14 +1340,14 @@ function handleSaveReminderSettings() {
             exit;
         }
         $stOrg = $pdo->prepare('UPDATE organizations SET deadline_reminders_enabled = ?, notification_webhook_url = ? WHERE id = ?');
-        $stOrg->execute([$orgOn ? 1 : 0, ($webhookUrl !== '' ? $webhookUrl : null), (int) $_SESSION['org_id']]);
+        $stOrg->execute([$orgOn ? 1 : 0, ($webhookUrl !== '' ? $webhookUrl : null), $orgId]);
     }
 
     $userOn = isset($_POST['user_deadline_reminders']) && $_POST['user_deadline_reminders'] === '1';
     $stUser = $pdo->prepare('UPDATE users SET deadline_reminders_enabled = ? WHERE id = ?');
     $stUser->execute([$userOn ? 1 : 0, (int) $_SESSION['user_id']]);
 
-    $_SESSION['message'] = $isAdmin ? 'Settings saved.' : 'Reminder preference saved.';
+    $_SESSION['message'] = $canEditOrgSettings ? 'Settings saved.' : 'Reminder preference saved.';
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;
 }
@@ -1665,7 +1650,7 @@ function handleSaveCostCalculator() {
         }
     }
 
-    if (OrgRole::isPrivileged($gridRole)) {
+    if (OrgRole::isSuperAdmin($gridRole)) {
         $result = VendorService::saveAdmin($pdo, $orgId, $activeProjectId, $uid, $gridRole, $items, $fullSync);
     } else {
         $result = VendorService::saveMember($pdo, $orgId, $activeProjectId, $uid, $items, $fullSync);
@@ -2256,8 +2241,8 @@ function handleLoadProjectMembers(): void
         echo json_encode(['success' => false, 'members' => []]);
         exit;
     }
-    if (!OrgRole::isPrivileged(sessionOrgRole())) {
-        echo json_encode(['success' => false, 'error' => 'Only admins can view project members.']);
+    if ((int) ($_SESSION['org_id'] ?? 0) < 1) {
+        echo json_encode(['success' => false, 'error' => 'No active organization.']);
         exit;
     }
     $projectId = (int) ($_POST['project_id'] ?? $_GET['project_id'] ?? 0);
@@ -2296,8 +2281,8 @@ function handleSaveProjectMembers(): void
         echo json_encode(['success' => false, 'error' => 'Not logged in']);
         exit;
     }
-    if (!OrgRole::isPrivileged(sessionOrgRole())) {
-        echo json_encode(['success' => false, 'error' => 'Only admins can manage project members.']);
+    if ((int) ($_SESSION['org_id'] ?? 0) < 1) {
+        echo json_encode(['success' => false, 'error' => 'No active organization.']);
         exit;
     }
     $projectId = (int) ($_POST['project_id'] ?? 0);

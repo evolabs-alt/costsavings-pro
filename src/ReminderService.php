@@ -166,11 +166,6 @@ class ReminderService
                 if (OrgRole::isSuperAdmin($role)) {
                     $q = $pdo->prepare('SELECT * FROM cost_calculator_items WHERE org_id = ? AND project_id = ?');
                     $q->execute([$orgId, $projectId]);
-                } elseif (OrgRole::isPrivileged($role)) {
-                    $q = $pdo->prepare(
-                        'SELECT * FROM cost_calculator_items WHERE org_id = ? AND project_id = ? AND visibility = \'public\''
-                    );
-                    $q->execute([$orgId, $projectId]);
                 } else {
                     $q = $pdo->prepare(
                         'SELECT * FROM cost_calculator_items WHERE org_id = ? AND project_id = ? AND (

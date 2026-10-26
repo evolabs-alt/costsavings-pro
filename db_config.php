@@ -138,8 +138,9 @@ function ensureAiUsageTable(PDO $pdo): void {
 }
 
 /**
- * Migrate legacy users.role ENUM('admin','member') to super_admin / admin / member.
+ * Migrate legacy users.role ENUM('admin','member') toward super_admin / member.
  * Idempotent: safe across repeated migrateSchema runs.
+ * Historic three-tier DBs are finalized by migrateRolesAdminIntoMember().
  *
  * @param PDO $pdo
  */
@@ -151,13 +152,18 @@ function migrateUserRolesToThreeTierEnum(PDO $pdo): void
             return;
         }
         $typeDisp = strtolower(trim((string) $col['Type']));
-        $hasSuper = strpos($typeDisp, 'super_admin') !== false;
-        // Finished migration when canonical triple is present **in order** starting with super_admin.
+        // Already two-tier (super_admin, member) — done.
+        if (preg_match('/enum\s*\(\s*\'super_admin\'\s*,\s*\'member\'\s*\)/', $typeDisp)) {
+            return;
+        }
+        // Still on three-tier — leave for migrateRolesAdminIntoMember.
         if (preg_match('/enum\s*\(\s*\'super_admin\'\s*,\s*\'admin\'\s*,\s*\'member\'\s*\)/', $typeDisp)) {
             return;
         }
 
-        // Legacy ENUM('admin','member') — widen, remap rows, finalize.
+        $hasSuper = strpos($typeDisp, 'super_admin') !== false;
+
+        // Legacy ENUM('admin','member') — widen, remap historical admins to super_admin, leave three-tier for collapse step.
         if (!$hasSuper) {
             $pdo->exec(
                 'ALTER TABLE `users` MODIFY COLUMN `role` ENUM(\'admin\',\'member\',\'super_admin\') NOT NULL DEFAULT \'member\''
@@ -170,13 +176,67 @@ function migrateUserRolesToThreeTierEnum(PDO $pdo): void
             return;
         }
 
-        // Intermediate ENUM('admin','member','super_admin'): finish remap + final column definition.
+        // Intermediate ENUM('admin','member','super_admin'): finish remap + three-tier column (collapse runs next).
         $pdo->exec("UPDATE `users` SET `role` = 'super_admin' WHERE `role` = 'admin'");
         $pdo->exec(
             'ALTER TABLE `users` MODIFY COLUMN `role` ENUM(\'super_admin\',\'admin\',\'member\') NOT NULL DEFAULT \'member\''
         );
     } catch (PDOException $e) {
         error_log('migrateUserRolesToThreeTierEnum: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Collapse admin into member: remap rows and shrink role ENUMs to super_admin | member.
+ * Idempotent: safe across repeated migrateSchema runs.
+ *
+ * @param PDO $pdo
+ */
+function migrateRolesAdminIntoMember(PDO $pdo): void
+{
+    try {
+        $tables = [
+            'user_organizations' => 'role',
+            'project_members' => 'role',
+            'users' => 'role',
+            'invitations' => 'invite_role',
+        ];
+        foreach ($tables as $table => $column) {
+            $col = $pdo->query("SHOW COLUMNS FROM `{$table}` LIKE '{$column}'")->fetch(PDO::FETCH_ASSOC);
+            if (!$col || empty($col['Type'])) {
+                continue;
+            }
+            $typeDisp = strtolower(trim((string) $col['Type']));
+            $hasAdmin = strpos($typeDisp, "'admin'") !== false;
+            if (!$hasAdmin) {
+                // Already collapsed or never had admin — ensure final two-tier shape where applicable.
+                if ($column === 'invite_role') {
+                    if (!preg_match('/enum\s*\(\s*\'member\'\s*\)/', $typeDisp)) {
+                        $pdo->exec(
+                            "ALTER TABLE `{$table}` MODIFY COLUMN `{$column}` ENUM('member') NOT NULL DEFAULT 'member'"
+                        );
+                    }
+                } elseif (!preg_match('/enum\s*\(\s*\'super_admin\'\s*,\s*\'member\'\s*\)/', $typeDisp)) {
+                    $pdo->exec(
+                        "ALTER TABLE `{$table}` MODIFY COLUMN `{$column}` ENUM('super_admin','member') NOT NULL DEFAULT 'member'"
+                    );
+                }
+                continue;
+            }
+
+            $pdo->exec("UPDATE `{$table}` SET `{$column}` = 'member' WHERE `{$column}` = 'admin'");
+            if ($column === 'invite_role') {
+                $pdo->exec(
+                    "ALTER TABLE `{$table}` MODIFY COLUMN `{$column}` ENUM('member') NOT NULL DEFAULT 'member'"
+                );
+            } else {
+                $pdo->exec(
+                    "ALTER TABLE `{$table}` MODIFY COLUMN `{$column}` ENUM('super_admin','member') NOT NULL DEFAULT 'member'"
+                );
+            }
+        }
+    } catch (PDOException $e) {
+        error_log('migrateRolesAdminIntoMember: ' . $e->getMessage());
     }
 }
 
@@ -229,7 +289,7 @@ function migrateSchema(PDO $pdo) {
                 `username` VARCHAR(64) NULL,
                 `email` VARCHAR(255) NOT NULL,
                 `password_hash` VARCHAR(255) NULL,
-                `role` ENUM('super_admin','admin','member') NOT NULL DEFAULT 'member',
+                `role` ENUM('super_admin','member') NOT NULL DEFAULT 'member',
                 `is_disabled` TINYINT(1) NOT NULL DEFAULT 0,
                 `display_name` VARCHAR(255) NULL,
                 `first_name` VARCHAR(255) NULL,
@@ -268,7 +328,7 @@ function migrateSchema(PDO $pdo) {
             }
             $cols = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'role'")->fetch();
             if (!$cols) {
-                $pdo->exec("ALTER TABLE `users` ADD COLUMN `role` ENUM('super_admin','admin','member') NOT NULL DEFAULT 'member' AFTER `password_hash`");
+                $pdo->exec("ALTER TABLE `users` ADD COLUMN `role` ENUM('super_admin','member') NOT NULL DEFAULT 'member' AFTER `password_hash`");
             }
             $cols = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'is_disabled'")->fetch();
             if (!$cols) {
@@ -315,7 +375,7 @@ function migrateSchema(PDO $pdo) {
             `token_hash` CHAR(64) NOT NULL,
             `invited_by_user_id` INT UNSIGNED NOT NULL,
             `expires_at` DATETIME NOT NULL,
-            `invite_role` ENUM('admin','member') NOT NULL DEFAULT 'member',
+            `invite_role` ENUM('member') NOT NULL DEFAULT 'member',
             `consumed_at` DATETIME NULL,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             KEY `idx_inv_token` (`token_hash`),
@@ -326,7 +386,7 @@ function migrateSchema(PDO $pdo) {
 
         $invRoleCol = $pdo->query("SHOW COLUMNS FROM `invitations` LIKE 'invite_role'")->fetch();
         if (!$invRoleCol) {
-            $pdo->exec("ALTER TABLE `invitations` ADD COLUMN `invite_role` ENUM('admin','member') NOT NULL DEFAULT 'member' AFTER `expires_at`");
+            $pdo->exec("ALTER TABLE `invitations` ADD COLUMN `invite_role` ENUM('member') NOT NULL DEFAULT 'member' AFTER `expires_at`");
         }
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS `reminder_sent` (
@@ -369,6 +429,7 @@ function migrateSchema(PDO $pdo) {
 
         migrateProjectSchema($pdo);
         migrateUserOrganizationsSchema($pdo);
+        migrateRolesAdminIntoMember($pdo);
         migrateCostCalculatorSchema($pdo);
         seedInitialAdminIfNeeded($pdo);
         $migrated = true;
@@ -403,7 +464,7 @@ function migrateProjectSchema(PDO $pdo): void
             `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             `project_id` INT UNSIGNED NOT NULL,
             `user_id` INT UNSIGNED NOT NULL,
-            `role` ENUM('super_admin','admin','member') NOT NULL DEFAULT 'member',
+            `role` ENUM('super_admin','member') NOT NULL DEFAULT 'member',
             `assigned_by` INT UNSIGNED NOT NULL,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY `uk_project_members` (`project_id`, `user_id`),
@@ -415,7 +476,7 @@ function migrateProjectSchema(PDO $pdo): void
 
         $pmRoleCol = $pdo->query("SHOW COLUMNS FROM `project_members` LIKE 'role'")->fetch();
         if (!$pmRoleCol) {
-            $pdo->exec("ALTER TABLE `project_members` ADD COLUMN `role` ENUM('super_admin','admin','member') NOT NULL DEFAULT 'member' AFTER `user_id`");
+            $pdo->exec("ALTER TABLE `project_members` ADD COLUMN `role` ENUM('super_admin','member') NOT NULL DEFAULT 'member' AFTER `user_id`");
         }
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS `project_qbo_weekly_import_consents` (
@@ -448,7 +509,7 @@ function migrateUserOrganizationsSchema(PDO $pdo): void
         $pdo->exec("CREATE TABLE IF NOT EXISTS `user_organizations` (
             `user_id` INT UNSIGNED NOT NULL,
             `org_id` INT UNSIGNED NOT NULL,
-            `role` ENUM('super_admin','admin','member') NOT NULL DEFAULT 'member',
+            `role` ENUM('super_admin','member') NOT NULL DEFAULT 'member',
             `is_disabled` TINYINT(1) NOT NULL DEFAULT 0,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (`user_id`, `org_id`),
@@ -537,7 +598,7 @@ function backfillMissingProjectMembersForOrgUsers(PDO $pdo): void
                 continue;
             }
             $role = (string) ($row['role'] ?? 'member');
-            if (!in_array($role, ['super_admin', 'admin', 'member'], true)) {
+            if (!in_array($role, ['super_admin', 'member'], true)) {
                 $role = 'member';
             }
             $ins->execute([$projectId, $userId, $role, $userId]);

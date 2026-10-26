@@ -73,10 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accept_invite'])) {
                 } elseif (getOrganizationMemberCount($pdo, $orgId) >= getOrganizationMaxUsers($pdo, $orgId)) {
                     $error = 'This organization already has the maximum number of users.';
                 } else {
-                    $desiredRole = strtolower(trim((string) ($inv['invite_role'] ?? 'member')));
-                    if ($desiredRole !== OrgRole::ROLE_ADMIN && $desiredRole !== OrgRole::ROLE_MEMBER) {
-                        $desiredRole = OrgRole::ROLE_MEMBER;
-                    }
+                    $desiredRole = OrgRole::ROLE_MEMBER;
                     RoleContext::upsertOrgMembership($pdo, $existingUserId, $orgId, $desiredRole);
                     $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
                     markUserJoinedViaInvite($pdo, $existingUserId);
@@ -136,18 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
                         error_log('[invite-register] blocked_existing_member org_id=' . $orgId . ' email=' . $email);
                         $error = 'You are already a member of this organization. Please log in.';
                     } else {
-                        $inviterId = (int) ($inv['invited_by_user_id'] ?? 0);
-                        $desiredRole = strtolower(trim((string) ($inv['invite_role'] ?? 'member')));
-                        if ($desiredRole !== OrgRole::ROLE_ADMIN && $desiredRole !== OrgRole::ROLE_MEMBER) {
-                            $desiredRole = OrgRole::ROLE_MEMBER;
-                        }
-                        $inviterRole = OrgRole::ROLE_MEMBER;
-                        if ($inviterId > 0) {
-                            $inviterRole = RoleContext::orgRole($pdo, $inviterId, $orgId) ?? OrgRole::ROLE_MEMBER;
-                        }
-                        if ($desiredRole !== OrgRole::ROLE_MEMBER && !OrgRole::canElevateOrgRoles($inviterRole)) {
-                            $desiredRole = OrgRole::ROLE_MEMBER;
-                        }
+                        $desiredRole = OrgRole::ROLE_MEMBER;
                         RoleContext::upsertOrgMembership($pdo, $existingUserId, $orgId, $desiredRole);
                         $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
                         error_log('[invite-register] existing_user_added org_id=' . $orgId . ' email=' . $email);
@@ -164,18 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
                     error_log('[invite-register] blocked_duplicate_username org_id=' . $orgId . ' email=' . $email . ' username=' . $username);
                     $error = 'Username is already taken.';
                 } else {
-                    $inviterId = (int) ($inv['invited_by_user_id'] ?? 0);
-                    $desiredRole = strtolower(trim((string) ($inv['invite_role'] ?? 'member')));
-                    if ($desiredRole !== OrgRole::ROLE_ADMIN && $desiredRole !== OrgRole::ROLE_MEMBER) {
-                        $desiredRole = OrgRole::ROLE_MEMBER;
-                    }
-                    $inviterRole = OrgRole::ROLE_MEMBER;
-                    if ($inviterId > 0) {
-                        $inviterRole = RoleContext::orgRole($pdo, $inviterId, $orgId) ?? OrgRole::ROLE_MEMBER;
-                    }
-                    if ($desiredRole !== OrgRole::ROLE_MEMBER && !OrgRole::canElevateOrgRoles($inviterRole)) {
-                        $desiredRole = OrgRole::ROLE_MEMBER;
-                    }
+                    $desiredRole = OrgRole::ROLE_MEMBER;
 
                     $ph = password_hash($password, PASSWORD_DEFAULT);
                     $ins = $pdo->prepare(

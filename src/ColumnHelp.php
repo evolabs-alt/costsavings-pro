@@ -46,15 +46,15 @@ final class ColumnHelp
             ],
             'vendor' => [
                 'title' => 'Vendor',
-                'html' => '<p class="column-help-intro">The vendor or subscription name for this spend line. Administrators edit this field; members can view only. Use the filter icon to search by name (case-insensitive). Use the sort icon to order alphabetically. The list icon on a row opens imported raw transaction history for that vendor.</p>',
+                'html' => '<p class="column-help-intro">The vendor or subscription name for this spend line. Editable by project members on rows they can see. Use the filter icon to search by name (case-insensitive). Use the sort icon to order alphabetically. The list icon on a row opens imported raw transaction history for that vendor.</p>',
             ],
             'cost' => [
                 'title' => 'Cost',
-                'html' => '<p class="column-help-intro">The amount charged per billing period (e.g. one month or one quarter). Administrators edit this field; members can view only. The app uses Cost with Frequency to compute Annual Cost.</p>',
+                'html' => '<p class="column-help-intro">The amount charged per billing period (e.g. one month or one quarter). Editable by project members on rows they can see. The app uses Cost with Frequency to compute Annual Cost.</p>',
             ],
             'frequency' => [
                 'title' => 'Frequency',
-                'html' => '<p class="column-help-intro">How often this vendor bills: weekly, bi-weekly, semi-monthly, monthly, quarterly, semi-annual, annually, or one-off. Administrators edit this field; members can view only. Together with Cost, this drives the annualized spend figure used in savings totals.</p>',
+                'html' => '<p class="column-help-intro">How often this vendor bills: weekly, bi-weekly, semi-monthly, monthly, quarterly, semi-annual, annually, or one-off. Editable by project members on rows they can see. Together with Cost, this drives the annualized spend figure used in savings totals.</p>',
             ],
             'annual_cost' => [
                 'title' => 'Annual Cost',
@@ -66,7 +66,7 @@ final class ColumnHelp
             ],
             'visibility' => [
                 'title' => 'Visibility',
-                'html' => '<p class="column-help-intro"><strong>Public</strong> rows are visible to admins across the organization. <strong>Confidential</strong> rows are limited to the assigned manager and super admins. Members always see public rows plus confidential rows they manage.</p>',
+                'html' => '<p class="column-help-intro"><strong>Public</strong> rows are visible to all project members. <strong>Confidential</strong> rows are limited to the assigned manager and project super admins. Members see public rows plus confidential rows they manage.</p>',
             ],
             'status' => [
                 'title' => 'Status',

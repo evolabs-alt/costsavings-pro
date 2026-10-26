@@ -133,7 +133,7 @@ class ProjectService
             }
             $uid = (int) $userId;
             $role = strtolower(trim((string) ($memberRoles[$uid] ?? OrgRole::ROLE_MEMBER)));
-            if (!in_array($role, [OrgRole::ROLE_SUPER_ADMIN, OrgRole::ROLE_ADMIN, OrgRole::ROLE_MEMBER], true)) {
+            if (!in_array($role, [OrgRole::ROLE_SUPER_ADMIN, OrgRole::ROLE_MEMBER], true)) {
                 $role = OrgRole::ROLE_MEMBER;
             }
             $ins->execute([$projectId, $uid, $role, $assignedBy]);
