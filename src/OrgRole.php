@@ -33,7 +33,7 @@ final class OrgRole
                 return 'Super admin';
             case self::ROLE_MEMBER:
             default:
-                return 'Member';
+                return 'Manager';
         }
     }
 
@@ -47,12 +47,12 @@ final class OrgRole
         return [
             [
                 'title' => 'Super admin',
-                'description' => 'Organization: invite members, org settings, create/delete projects, QuickBooks. Project: full vendor access including confidential rows and copy operations.',
+                'description' => 'Organization: invite managers, org settings, create/delete projects, QuickBooks. Project: full vendor access including confidential rows and copy operations.',
                 'note' => 'Org super admin can create projects; project super admin controls all vendor data within a project.',
             ],
             [
-                'title' => 'Member',
-                'description' => 'Organization: invite and manage members, org settings, assign project members. Project: add/edit vendors (spend, manager, visibility), public rows plus confidential rows they manage.',
+                'title' => 'Manager',
+                'description' => 'Organization: invite and manage managers, org settings, assign project managers. Project: add/edit vendors (spend, manager, visibility), public rows plus confidential rows they manage.',
             ],
         ];
     }

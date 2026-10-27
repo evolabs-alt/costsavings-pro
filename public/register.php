@@ -69,7 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accept_invite'])) {
                 $inOrg = $pdo->prepare('SELECT 1 FROM user_organizations WHERE user_id = ? AND org_id = ? LIMIT 1');
                 $inOrg->execute([$existingUserId, $orgId]);
                 if ($inOrg->fetchColumn()) {
-                    $error = 'You are already a member of this organization. Please log in.';
+                    $error = 'You are already a manager of this organization. Please log in.';
                 } elseif (getOrganizationMemberCount($pdo, $orgId) >= getOrganizationMaxUsers($pdo, $orgId)) {
                     $error = 'This organization already has the maximum number of users.';
                 } else {
@@ -131,7 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
                     $inOrg->execute([$existingUserId, $orgId]);
                     if ($inOrg->fetchColumn()) {
                         error_log('[invite-register] blocked_existing_member org_id=' . $orgId . ' email=' . $email);
-                        $error = 'You are already a member of this organization. Please log in.';
+                        $error = 'You are already a manager of this organization. Please log in.';
                     } else {
                         $desiredRole = OrgRole::ROLE_MEMBER;
                         RoleContext::upsertOrgMembership($pdo, $existingUserId, $orgId, $desiredRole);

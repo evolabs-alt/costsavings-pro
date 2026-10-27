@@ -598,7 +598,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .cost-calculator-grid th {
             position: sticky;
-            top: 0;
+            top: var(--sticky-toolbar-height, 0px);
             z-index: 25;
             padding: 8px 6px;
             text-align: left;
@@ -880,7 +880,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .cost-calculator-grid th.th-with-filter {
             position: sticky;
-            top: 0;
+            top: var(--sticky-toolbar-height, 0px);
             z-index: 25;
             vertical-align: middle;
         }
@@ -1159,12 +1159,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             display: flex;
             flex-direction: column;
             align-items: stretch;
-            gap: 0;
+            gap: 12px;
             margin-bottom: 20px;
-            padding: 15px;
+            padding: 12px 15px;
             background: #f8f9fa;
             border-radius: 8px;
             border: 1px solid #e5e7eb;
+            position: sticky;
+            top: 0;
+            z-index: 30;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
         }
 
         .report-filters .column-toggle-btn {
@@ -1185,12 +1189,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .report-filters .column-toggle-btn:hover {
             border-color: #6b5b95;
             color: #4a3f6b;
-        }
-
-        .report-filters .bulk-action-btn {
-            padding: 8px 12px;
-            font-size: 13px;
-            border-radius: 8px;
         }
 
         .report-filters-top {
@@ -1416,20 +1414,31 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .bulk-action-btn {
+            display: none;
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            z-index: 9000;
+            align-items: center;
+            justify-content: center;
             background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
             color: #fff;
             border: none;
-            padding: 10px 20px;
-            border-radius: 8px;
+            padding: 12px 22px;
+            border-radius: 999px;
             cursor: pointer;
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 600;
-            box-shadow: 0 4px 12px rgba(11, 88, 163, 0.22);
+            box-shadow: 0 8px 24px rgba(11, 88, 163, 0.35);
+        }
+
+        .bulk-action-btn.is-visible {
+            display: inline-flex;
         }
 
         .bulk-action-btn:hover {
             background: var(--color-primary-hover);
-            box-shadow: 0 8px 20px rgba(10, 75, 142, 0.28);
+            box-shadow: 0 10px 28px rgba(10, 75, 142, 0.42);
         }
 
         .bulk-actions-form {
@@ -1509,13 +1518,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .savings-summary {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            margin-top: 30px;
+            gap: 12px;
+            margin-top: 0;
+            width: 100%;
+        }
+
+        .report-filters .savings-summary {
+            margin-top: 0;
         }
 
         .savings-section {
-            padding: 20px;
-            background: #f8f9fa;
+            padding: 10px 14px;
+            background: #fff;
             border: 2px solid #6b5b95;
             border-radius: 8px;
             text-align: center;
@@ -1527,13 +1541,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .savings-section h3 {
             color: #424242;
-            margin-bottom: 10px;
+            margin: 0 0 4px 0;
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.25;
         }
 
         .savings-amount {
-            font-size: 32px;
+            font-size: 22px;
             font-weight: 700;
             color: #6b5b95;
+            line-height: 1.2;
         }
 
         .confirmed-savings-amount {
@@ -1645,7 +1663,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
             .report-filters {
                 flex-direction: column;
-                align-items: flex-start;
+                align-items: stretch;
+                gap: 10px;
+                padding: 10px 12px;
             }
 
             .report-filters .column-toggle-btn {
@@ -1672,27 +1692,22 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 font-size: 14px;
             }
 
-            .bulk-action-btn {
-                padding: 8px 16px;
-                font-size: 14px;
-            }
-
             .savings-summary {
                 grid-template-columns: 1fr;
-                gap: 15px;
+                gap: 10px;
             }
 
             .savings-section {
-                margin-top: 20px;
-                padding: 15px;
+                margin-top: 0;
+                padding: 10px 12px;
             }
 
             .savings-section h3 {
-                font-size: 18px;
+                font-size: 13px;
             }
 
             .savings-amount {
-                font-size: 24px;
+                font-size: 20px;
             }
         }
 
@@ -4507,14 +4522,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     </ul>
                                 </li>
                                 <li class="app-nav-item has-submenu" id="appMembersNavItem">
-                                    <button type="button" class="app-nav-link" id="appMembersMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appMembersSubmenu">Members</button>
-                                    <ul class="app-submenu" id="appMembersSubmenu" role="menu" aria-label="Members actions">
+                                    <button type="button" class="app-nav-link" id="appMembersMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appMembersSubmenu">Managers</button>
+                                    <ul class="app-submenu" id="appMembersSubmenu" role="menu" aria-label="Managers actions">
                                         <?php if ($is_org_admin): ?>
                                         <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersInvite">Invite</button></li>
                                         <?php endif; ?>
                                         <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage</button></li>
                                         <?php if ($is_org_admin): ?>
-                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalProjectMembers">Project members</button></li>
+                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalProjectMembers">Project managers</button></li>
                                         <?php endif; ?>
                                     </ul>
                                 </li>
@@ -4578,8 +4593,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             <div class="content-padding">
                 <div class="report-filters">
                     <div class="report-filters-top">
-                        <button type="button" class="bulk-action-btn" data-open-modal="appModalBulkActions">Bulk Actions</button>
+                        <button type="button" class="bulk-action-btn" data-open-modal="appModalBulkActions" aria-hidden="true">Bulk Actions</button>
                         <button type="button" id="togglePurposeColumnBtn" class="column-toggle-btn" aria-pressed="false">Show Purpose</button>
+                    </div>
+                    <div class="savings-summary">
+                        <div class="savings-section">
+                            <h3>Potential + Confirmed Annual Savings</h3>
+                            <div class="savings-amount" id="potentialSavings">$0.00</div>
+                        </div>
+                        <div class="savings-section confirmed-savings-section">
+                            <h3>Confirmed Annual Savings</h3>
+                            <div class="savings-amount confirmed-savings-amount" id="confirmedSavings">$0.00</div>
+                        </div>
                     </div>
                 </div>
                 
@@ -4806,17 +4831,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <button type="button" class="add-row-btn" onclick="addCalculatorRow()">+ Add Row</button>
                     <?php endif; ?>
                 </div>
-                
-                <div class="savings-summary">
-                    <div class="savings-section">
-                        <h3>Potential + Confirmed Annual Savings</h3>
-                        <div class="savings-amount" id="potentialSavings">$0.00</div>
-                    </div>
-                    <div class="savings-section confirmed-savings-section">
-                        <h3>Confirmed Annual Savings</h3>
-                        <div class="savings-amount confirmed-savings-amount" id="confirmedSavings">$0.00</div>
-                    </div>
-                </div>
             </div>
             
             <script>
@@ -4901,7 +4915,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         '<td>' + escapeHtml(m.display_name || m.username || m.email || '—') + '</td>' +
                         '<td>' + escapeHtml(m.email || '') + '</td>' +
                         '<td><select class="project-member-role-select">' +
-                        '<option value="member"' + (role === 'member' ? ' selected' : '') + '>Member</option>' +
+                        '<option value="member"' + (role === 'member' ? ' selected' : '') + '>Manager</option>' +
                         '<option value="super_admin"' + (role === 'super_admin' ? ' selected' : '') + '>Super admin</option>' +
                         '</select></td>';
                     tbody.appendChild(tr);
@@ -4918,13 +4932,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 postJson({ action: 'load_project_members', project_id: projectId })
                     .then(function(d) {
                         if (!d || !d.success) {
-                            showSnackbar((d && d.error) || 'Could not load project members.', 'error');
+                            showSnackbar((d && d.error) || 'Could not load project managers.', 'error');
                             return;
                         }
                         renderProjectMembersTable(d.members || [], d.org_members || []);
                     })
                     .catch(function() {
-                        showSnackbar('Could not load project members.', 'error');
+                        showSnackbar('Could not load project managers.', 'error');
                     });
             }
 
@@ -7026,13 +7040,26 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 });
             }
 
+            function updateBulkActionsButtonVisibility() {
+                const btn = document.querySelector('.bulk-action-btn');
+                if (!btn) return;
+                const count = getSelectedVendorRows().length;
+                const visible = count > 0;
+                btn.classList.toggle('is-visible', visible);
+                btn.setAttribute('aria-hidden', visible ? 'false' : 'true');
+            }
+
             function updateSelectAllCheckboxState() {
                 const selectAll = document.getElementById('selectAllVendors');
-                if (!selectAll) return;
+                if (!selectAll) {
+                    updateBulkActionsButtonVisibility();
+                    return;
+                }
                 const filtered = getFilteredVendorRows();
                 if (!filtered.length) {
                     selectAll.checked = false;
                     selectAll.indeterminate = false;
+                    updateBulkActionsButtonVisibility();
                     return;
                 }
                 let selectedCount = 0;
@@ -7042,6 +7069,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 });
                 selectAll.checked = selectedCount === filtered.length;
                 selectAll.indeterminate = selectedCount > 0 && selectedCount < filtered.length;
+                updateBulkActionsButtonVisibility();
             }
 
             function setAllRowSelection(checked) {
@@ -9027,6 +9055,29 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 });
             }
 
+            function syncStickyToolbarHeight() {
+                const toolbar = document.querySelector('.content-padding > .report-filters');
+                if (!toolbar) {
+                    document.documentElement.style.removeProperty('--sticky-toolbar-height');
+                    return;
+                }
+                const height = Math.ceil(toolbar.getBoundingClientRect().height);
+                document.documentElement.style.setProperty('--sticky-toolbar-height', height + 'px');
+            }
+
+            function initStickyToolbarOffset() {
+                const toolbar = document.querySelector('.content-padding > .report-filters');
+                if (!toolbar) return;
+                syncStickyToolbarHeight();
+                if (typeof ResizeObserver !== 'undefined') {
+                    const observer = new ResizeObserver(function() {
+                        syncStickyToolbarHeight();
+                    });
+                    observer.observe(toolbar);
+                }
+                window.addEventListener('resize', syncStickyToolbarHeight);
+            }
+
             function initNewCategoryModal() {
                 var saveBtn = document.getElementById('newCategorySaveBtn');
                 var cancelBtn = document.getElementById('newCategoryCancelBtn');
@@ -9084,6 +9135,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 resumePostCreateQboSyncFromOAuth();
                 initNavSubmenus();
                 initPurposeColumnToggle();
+                initStickyToolbarOffset();
                 initVendorPageSizeSelect();
                 initVendorColumnSort();
                 initVendorColumnHeaderFilters();
@@ -9191,12 +9243,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             member_roles: memberRoles
                         }).then(function(d) {
                             if (!d || !d.success) {
-                                showSnackbar((d && d.error) || 'Could not save project members.', 'error');
+                                showSnackbar((d && d.error) || 'Could not save project managers.', 'error');
                                 return;
                             }
-                            showSnackbar('Project members saved.', 'success');
+                            showSnackbar('Project managers saved.', 'success');
                         }).catch(function() {
-                            showSnackbar('Could not save project members.', 'error');
+                            showSnackbar('Could not save project managers.', 'error');
                         });
                     });
                 }
@@ -10382,7 +10434,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
     </div>
 
     <?php
-    $expense_visibility_notice = 'Please note that upon linking QBO to Savvy Saver, expenses will be visible to users. Review and remove any sensitive records before inviting members to the project.';
+    $expense_visibility_notice = 'Please note that upon linking QBO to Savvy Saver, expenses will be visible to users. Review and remove any sensitive records before inviting managers to the project.';
     ?>
     <div class="app-modal-overlay" id="appModalMembersInvite" role="dialog" aria-modal="true" aria-labelledby="appModalMembersInviteTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
@@ -10392,7 +10444,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             </div>
             <div class="app-modal-body">
                 <p style="margin:0 0 10px;color:#4b5563;font-size:14px;">
-                    Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> members
+                    Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> managers
                 </p>
                 <p class="privacy-notice"><?php echo htmlspecialchars($expense_visibility_notice); ?></p>
                 <div class="invite-block">
@@ -10415,13 +10467,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
     <div class="app-modal-overlay" id="appModalProjectMembers" role="dialog" aria-modal="true" aria-labelledby="appModalProjectMembersTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1" style="max-width:720px;">
             <div class="app-modal-header">
-                <h2 id="appModalProjectMembersTitle">Project members &amp; roles</h2>
+                <h2 id="appModalProjectMembersTitle">Project managers &amp; roles</h2>
                 <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
             </div>
             <div class="app-modal-body">
                 <p style="margin:0 0 12px;color:#4b5563;font-size:14px;line-height:1.5;">
-                    Assign organization members to the active project with an explicit project role.
-                    Project super admins see all vendors (including confidential); members see public rows plus confidential rows they manage.
+                    Assign organization managers to the active project with an explicit project role.
+                    Project super admins see all vendors (including confidential); managers see public rows plus confidential rows they manage.
                 </p>
                 <label style="display:grid;gap:6px;font-size:14px;max-width:360px;margin-bottom:12px;">
                     <span>Project</span>
@@ -10443,7 +10495,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     </table>
                 </div>
                 <div style="margin-top:14px;">
-                    <button type="button" id="projectMembersSaveBtn">Save project members</button>
+                    <button type="button" id="projectMembersSaveBtn">Save project managers</button>
                 </div>
             </div>
         </div>
@@ -10453,12 +10505,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
     <div class="app-modal-overlay" id="appModalMembersManage" role="dialog" aria-modal="true" aria-labelledby="appModalMembersManageTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
-                <h2 id="appModalMembersManageTitle">Manage Members</h2>
+                <h2 id="appModalMembersManageTitle">Manage Managers</h2>
                 <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
             </div>
             <div class="app-modal-body">
                 <p style="margin:0 0 10px;color:#4b5563;font-size:14px;">
-                    Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> members
+                    Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> managers
                 </p>
                 <div class="members-table-wrap">
                     <table class="members-table">
@@ -10476,7 +10528,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         <tbody>
                             <?php $members_colspan = $is_org_admin ? 5 : 4; ?>
                             <?php if (empty($team_members_rows)): ?>
-                            <tr><td colspan="<?php echo (int) $members_colspan; ?>">No members in this organization yet.</td></tr>
+                            <tr><td colspan="<?php echo (int) $members_colspan; ?>">No managers in this organization yet.</td></tr>
                             <?php else: ?>
                             <?php foreach ($team_members_rows as $tm): ?>
                             <?php $member_is_disabled = !empty($tm['is_disabled']); ?>
@@ -10760,7 +10812,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             </div>
             <div class="app-modal-body">
                 <p style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;">
-                    You will become the super admin of this organization and can invite members, create projects, and connect QuickBooks.
+                    You will become the super admin of this organization and can invite managers, create projects, and connect QuickBooks.
                 </p>
                 <form id="createOrgForm" style="display:grid;gap:12px;">
                     <label style="display:grid;gap:6px;font-size:14px;">

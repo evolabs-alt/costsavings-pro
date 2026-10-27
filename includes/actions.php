@@ -526,7 +526,7 @@ function handleInviteMember() {
         exit;
     };
     if (empty($_SESSION['user_id']) || (int) ($_SESSION['org_id'] ?? 0) < 1) {
-        $_SESSION['error'] = 'You must be signed in to invite members.';
+        $_SESSION['error'] = 'You must be signed in to invite managers.';
         $redir();
     }
     $email = normalizeUserEmail($_POST['email'] ?? '');
@@ -561,7 +561,7 @@ function handleInviteMember() {
         $alreadyMember->execute([$existingUserId, $orgId]);
         if ($alreadyMember->fetchColumn()) {
             logInviteEvent('blocked_existing_member', ['org_id' => $orgId, 'email' => $email]);
-            $_SESSION['error'] = 'This user is already a member of your organization.';
+            $_SESSION['error'] = 'This user is already a manager of your organization.';
             $redir();
         }
     }
@@ -1265,13 +1265,13 @@ function handleToggleMemberDisabled(): void
         exit;
     };
     if (empty($_SESSION['user_id']) || (int) ($_SESSION['org_id'] ?? 0) < 1) {
-        $_SESSION['error'] = 'You must be signed in to manage member status.';
+        $_SESSION['error'] = 'You must be signed in to manage manager status.';
         $redir();
     }
     $memberId = (int) ($_POST['member_id'] ?? 0);
     $disable = (int) ($_POST['disable'] ?? 0) === 1 ? 1 : 0;
     if ($memberId <= 0) {
-        $_SESSION['error'] = 'Invalid member selected.';
+        $_SESSION['error'] = 'Invalid manager selected.';
         $redir();
     }
 
@@ -1281,17 +1281,17 @@ function handleToggleMemberDisabled(): void
     $lookup->execute([$memberId, $orgId]);
     $member = $lookup->fetch(PDO::FETCH_ASSOC);
     if (!$member) {
-        $_SESSION['error'] = 'Member not found.';
+        $_SESSION['error'] = 'Manager not found.';
         $redir();
     }
     if (($member['role'] ?? '') !== OrgRole::ROLE_MEMBER) {
-        $_SESSION['error'] = 'Only members can be disabled or enabled.';
+        $_SESSION['error'] = 'Only managers can be disabled or enabled.';
         $redir();
     }
 
     $upd = $pdo->prepare('UPDATE user_organizations SET is_disabled = ? WHERE user_id = ? AND org_id = ?');
     $upd->execute([$disable, $memberId, $orgId]);
-    $_SESSION['message'] = $disable === 1 ? 'Member disabled successfully.' : 'Member enabled successfully.';
+    $_SESSION['message'] = $disable === 1 ? 'Manager disabled successfully.' : 'Manager enabled successfully.';
     $redir();
 }
 
@@ -2163,7 +2163,7 @@ function handleOrgSetActive(): void
     $pdo = getDBConnection();
     $orgRole = RoleContext::orgRole($pdo, $userId, $orgId);
     if ($orgRole === null) {
-        echo json_encode(['success' => false, 'error' => 'You are not a member of that organization.']);
+        echo json_encode(['success' => false, 'error' => 'You are not a manager of that organization.']);
         exit;
     }
     RoleContext::persistLastOrgId($pdo, $userId, $orgId);
@@ -2197,7 +2197,7 @@ function handleOrgCreate(): void
     if (userJoinedViaInvite($pdo, $userId)) {
         echo json_encode([
             'success' => false,
-            'error' => 'Invited members can only access the organization they were invited to.',
+            'error' => 'Invited managers can only access the organization they were invited to.',
         ]);
         exit;
     }
@@ -2296,12 +2296,12 @@ function handleSaveProjectMembers(): void
         exit;
     }
     if (count($memberIds) === 0) {
-        echo json_encode(['success' => false, 'error' => 'Select at least one member.']);
+        echo json_encode(['success' => false, 'error' => 'Select at least one manager.']);
         exit;
     }
     $filtered = ProjectService::filterOrgMemberUserIds($pdo, $orgId, $memberIds);
     if (count($filtered) === 0) {
-        echo json_encode(['success' => false, 'error' => 'No valid organization members selected.']);
+        echo json_encode(['success' => false, 'error' => 'No valid organization managers selected.']);
         exit;
     }
     ProjectService::assignMembers($pdo, $projectId, $userId, $filtered, $memberRoles);
