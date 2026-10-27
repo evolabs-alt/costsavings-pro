@@ -1157,8 +1157,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         /* Table toolbar styles */
         .report-filters {
             display: flex;
-            flex-direction: column;
-            align-items: stretch;
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
             gap: 12px;
             margin-bottom: 20px;
             padding: 12px 15px;
@@ -1172,7 +1174,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .report-filters .column-toggle-btn {
-            margin-left: auto;
+            margin-left: 0;
             border: 1px solid #d1d5db;
             background: #fff;
             color: #374151;
@@ -1181,9 +1183,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             font-size: 13px;
             font-weight: 600;
             cursor: pointer;
-            white-space: normal;
+            white-space: nowrap;
             line-height: 1.2;
             text-align: center;
+            flex-shrink: 0;
         }
 
         .report-filters .column-toggle-btn:hover {
@@ -1194,9 +1197,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         .report-filters-top {
             display: flex;
             align-items: center;
-            gap: 15px;
+            justify-content: flex-end;
+            gap: 12px;
             flex-wrap: wrap;
-            width: 100%;
+            margin-left: auto;
+            flex-shrink: 0;
         }
 
         .th-label-with-info {
@@ -1517,10 +1522,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .savings-summary {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
+            grid-template-columns: minmax(0, 220px) minmax(0, 180px);
+            gap: 10px;
             margin-top: 0;
-            width: 100%;
+            width: auto;
+            flex: 0 1 auto;
+            max-width: 100%;
         }
 
         .report-filters .savings-summary {
@@ -1528,11 +1535,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         }
 
         .savings-section {
-            padding: 10px 14px;
+            padding: 8px 10px;
             background: #fff;
             border: 2px solid #6b5b95;
             border-radius: 8px;
             text-align: center;
+            min-width: 0;
         }
 
         .confirmed-savings-section {
@@ -1541,14 +1549,14 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .savings-section h3 {
             color: #424242;
-            margin: 0 0 4px 0;
-            font-size: 14px;
+            margin: 0 0 2px 0;
+            font-size: 12px;
             font-weight: 600;
             line-height: 1.25;
         }
 
         .savings-amount {
-            font-size: 22px;
+            font-size: 18px;
             font-weight: 700;
             color: #6b5b95;
             line-height: 1.2;
@@ -1561,6 +1569,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         @media (max-width: 768px) {
             .savings-summary {
                 grid-template-columns: 1fr;
+                width: 100%;
             }
         }
 
@@ -1668,10 +1677,17 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 padding: 10px 12px;
             }
 
+            .report-filters-top {
+                margin-left: 0;
+                width: 100%;
+                justify-content: stretch;
+            }
+
             .report-filters .column-toggle-btn {
                 margin-left: 0;
                 width: 100%;
                 text-align: center;
+                white-space: normal;
             }
 
             .cost-calculator-grid .notes {
@@ -1695,19 +1711,20 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             .savings-summary {
                 grid-template-columns: 1fr;
                 gap: 10px;
+                width: 100%;
             }
 
             .savings-section {
                 margin-top: 0;
-                padding: 10px 12px;
+                padding: 8px 10px;
             }
 
             .savings-section h3 {
-                font-size: 13px;
+                font-size: 12px;
             }
 
             .savings-amount {
-                font-size: 20px;
+                font-size: 18px;
             }
         }
 
@@ -4592,10 +4609,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         <?php elseif ($current_view === 'placeholder'): ?>
             <div class="content-padding">
                 <div class="report-filters">
-                    <div class="report-filters-top">
-                        <button type="button" class="bulk-action-btn" data-open-modal="appModalBulkActions" aria-hidden="true">Bulk Actions</button>
-                        <button type="button" id="togglePurposeColumnBtn" class="column-toggle-btn" aria-pressed="false">Show Purpose</button>
-                    </div>
                     <div class="savings-summary">
                         <div class="savings-section">
                             <h3>Potential + Confirmed Annual Savings</h3>
@@ -4605,6 +4618,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <h3>Confirmed Annual Savings</h3>
                             <div class="savings-amount confirmed-savings-amount" id="confirmedSavings">$0.00</div>
                         </div>
+                    </div>
+                    <div class="report-filters-top">
+                        <button type="button" id="togglePurposeColumnBtn" class="column-toggle-btn" aria-pressed="false">Show Purpose</button>
                     </div>
                 </div>
                 
@@ -11029,6 +11045,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             </div>
         </div>
     </div>
+
+    <button type="button" class="bulk-action-btn" data-open-modal="appModalBulkActions" aria-hidden="true">Bulk Actions</button>
 
     <div class="app-modal-overlay" id="appModalBulkActions" role="dialog" aria-modal="true" aria-labelledby="appModalBulkActionsTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
