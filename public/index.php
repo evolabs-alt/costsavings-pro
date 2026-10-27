@@ -1522,11 +1522,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .savings-summary {
             display: grid;
-            grid-template-columns: minmax(0, 220px) minmax(0, 180px);
+            grid-template-columns: 1fr 1fr;
             gap: 10px;
             margin-top: 0;
             width: auto;
-            flex: 0 1 auto;
+            flex: 1 1 auto;
+            min-width: 0;
             max-width: 100%;
         }
 
@@ -6682,7 +6683,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             + '</tr></thead><tbody>';
                         rows.forEach(function(row) {
                             var date = aiEscapeHtml(String(row.transaction_date || ''));
-                            var amount = aiEscapeHtml(formatMoneyInteger(row.amount || 0));
+                            var amountNum = Number(row.amount) || 0;
+                            if (/^deposit$/i.test(String(row.transaction_type || '').trim())) {
+                                amountNum = -Math.abs(amountNum);
+                            }
+                            var amount = aiEscapeHtml(formatMoneyInteger(amountNum));
                             var type = aiEscapeHtml(String(row.transaction_type || ''));
                             var account = aiEscapeHtml(String(row.account || ''));
                             var memo = aiEscapeHtml(String(row.memo || ''));
@@ -10045,7 +10050,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 + '</tr></thead><tbody>';
                             rows.forEach(function(row) {
                                 var date = aiEscapeHtml(String(row.transaction_date || ''));
-                                var amount = aiEscapeHtml(formatMoneyInteger(row.amount || 0));
+                                var amountNum = Number(row.amount) || 0;
+                                if (/^deposit$/i.test(String(row.transaction_type || '').trim())) {
+                                    amountNum = -Math.abs(amountNum);
+                                }
+                                var amount = aiEscapeHtml(formatMoneyInteger(amountNum));
                                 var type = aiEscapeHtml(String(row.transaction_type || ''));
                                 var account = aiEscapeHtml(String(row.account || ''));
                                 var memo = aiEscapeHtml(String(row.memo || ''));

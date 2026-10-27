@@ -518,7 +518,7 @@ class MappedCsvImport
         return [
             'vendor_name' => $vendorName,
             'transaction_date' => $date,
-            'amount' => abs($amount),
+            'amount' => CsvImport::normalizeAmountByType($amount, $transactionType),
             'transaction_type' => $transactionType,
             'account' => $account,
             'memo' => $memo,
@@ -570,6 +570,7 @@ class MappedCsvImport
                 'date' => $row['transaction_date'],
                 'amount' => $row['amount'],
                 'account' => $row['account'] ?? '',
+                'transaction_type' => $row['transaction_type'] ?? '',
             ];
         }
 

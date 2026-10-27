@@ -406,6 +406,8 @@ function migrateSchema(PDO $pdo) {
             CONSTRAINT `fk_mrs_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+        migrateEmailReminderDigestSchema($pdo);
+
         $pdo->exec("CREATE TABLE IF NOT EXISTS `cs_gmail_tokens` (
             `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             `token_data` TEXT NOT NULL,
@@ -431,10 +433,42 @@ function migrateSchema(PDO $pdo) {
         migrateUserOrganizationsSchema($pdo);
         migrateRolesAdminIntoMember($pdo);
         migrateCostCalculatorSchema($pdo);
+        migrateEmailReminderDigestSchema($pdo);
         seedInitialAdminIfNeeded($pdo);
         $migrated = true;
     } catch (PDOException $e) {
         error_log('migrateSchema error: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Dedup tables for approaching-renewal reminders and periodic digests.
+ *
+ * @param PDO $pdo
+ */
+function migrateEmailReminderDigestSchema(PDO $pdo): void
+{
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `renewal_reminder_sent` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `vendor_item_id` INT NOT NULL,
+            `reminder_type` VARCHAR(32) NOT NULL,
+            `sent_on_date` DATE NOT NULL,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uk_renewal_reminder` (`vendor_item_id`, `reminder_type`, `sent_on_date`),
+            KEY `idx_renewal_reminder_date` (`sent_on_date`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `email_digest_sent` (
+            `user_id` INT UNSIGNED NOT NULL,
+            `digest_type` VARCHAR(64) NOT NULL,
+            `period_key` VARCHAR(16) NOT NULL,
+            `sent_at` DATETIME NOT NULL,
+            PRIMARY KEY (`user_id`, `digest_type`, `period_key`),
+            CONSTRAINT `fk_eds_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    } catch (PDOException $e) {
+        error_log('migrateEmailReminderDigestSchema: ' . $e->getMessage());
     }
 }
 

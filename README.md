@@ -10,7 +10,12 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
 - **CSV import** — QuickBooks “Transaction Detail by Account” exports (primary): upload shows a checklist of GL account sections; only payees (Name column) under selected accounts are imported, with account stored on raw transactions ([src/CsvImport.php](src/CsvImport.php)). Legacy “Transaction List by Vendor” CSVs still import in one step without the account picker. Custom column-mapped CSV is also supported.
 - **QuickBooks Online sync** — Super admin connects the company in Settings, then uses Data → **Sync with QBO** to pull a date range via the General Ledger / Transaction List reports (GL account picker, same flow as CSV) ([src/QboService.php](src/QboService.php)).
 - **Exports** — Excel (PhpSpreadsheet) and PDF (Dompdf) for vendor list and executive summary ([src/ExportService.php](src/ExportService.php)).
-- **Email reminders** — Cron script [public/cron_reminders.php](public/cron_reminders.php) sends cancellation deadlines (T−7, T, T+7) and monthly renewal summaries through **GoHighLevel Conversations API** (LeadConnector).
+- **Email reminders** — Daily cron [public/cron_reminders.php](public/cron_reminders.php) sends (via **GoHighLevel Conversations API** / LeadConnector):
+  - Cancellation deadlines (T−7, day-of, T+7)
+  - Approaching non-monthly renewals (annual T−60/T−30, semi-annual T−30/T−14, quarterly T−21/T−7) — replaces the old calendar-month renewal summary
+  - Non-monthly charges from the previous month (quarterly / semi-annual / annual vendors; sends on days 1–3)
+  - Weekly cancellation progress (pending potential + confirmed cancelled annual savings; Mondays)
+  - Org/user `deadline_reminders_enabled` gates all reminder emails; multi-project emails respect row visibility
 - **Ask AI** — Perplexity Chat Completions when `PERPLEXITY_API_KEY` is set; otherwise OpenAI (`OPENAI_API_KEY`). 50 requests per user per month ([src/AiService.php](src/AiService.php)); see `config.example.php` for `AI_MODEL`, `AI_MAX_TOKENS`, and `AI_TEMPERATURE`.
 - **GoHighLevel** — Reminder sends upsert the recipient as a contact (tag `Cost Savings Pro`) then email via Conversations.
 
@@ -41,7 +46,7 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
 1. Copy `config.example.php` to `config.php`, then set `CACHE_DIR`, **Gmail OAuth**, **GHL**, database credentials, and at least one of `PERPLEXITY_API_KEY` or `OPENAI_API_KEY` for Ask AI. Set **`BASE_URL`** to your public app URL with trailing slash (e.g. `https://yourdomain.com/public/`) so invitation emails use correct links. Optionally set `QBO_REDIRECT_URI` if you need an override.
 2. **Composer:** From the project root run `composer install` (requires PHP with Composer) for PhpSpreadsheet, Dompdf, and `google/apiclient`.
 3. **Seed admin (local testing):** Set `SEED_ADMIN_PASSWORD` in the environment or in `config.php`. Leave empty in production if you do not want a seeded account.
-4. **Cron:** Schedule `php public/cron_reminders.php` daily (or HTTP with `CRON_SECRET`). Schedule `php public/cron_refresh_gmail_token.php` every 30 minutes.
+4. **Cron:** Schedule `php public/cron_reminders.php` daily (or HTTP with `CRON_SECRET`). The same daily job applies day/weekday gates for monthly and weekly digests. Flags: `--debug`, `--force-resend` (clears today’s renewal dedup and current digest periods; bypasses day/weekday gates). Schedule `php public/cron_refresh_gmail_token.php` every 30 minutes.
 5. **Gmail OAuth (invites):**
    - Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `GMAIL_OAUTH_SETUP_KEY`.
    - Set `SMTP_FROM_EMAIL` / `SMTP_FROM_NAME` to the Workspace mailbox you authorize (e.g. `contactus@savvycfo.com`).

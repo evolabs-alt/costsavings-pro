@@ -117,6 +117,7 @@ class CsvImport
                 'date' => $txn['date'],
                 'amount' => $txn['amount'],
                 'account' => $txn['account'],
+                'transaction_type' => $txn['transaction_type'],
             ];
             $rawRows[] = [
                 'vendor_name' => $payee,
@@ -246,12 +247,14 @@ class CsvImport
             return null;
         }
 
+        $transactionType = self::csvField($parsed, $headerMap, ['transaction type', 'type']);
+
         return [
             'account' => $currentAccount,
             'payee' => $payee,
             'date' => $dt,
-            'amount' => abs($amt),
-            'transaction_type' => self::csvField($parsed, $headerMap, ['transaction type', 'type']),
+            'amount' => self::normalizeAmountByType($amt, $transactionType),
+            'transaction_type' => $transactionType,
             'memo' => self::csvField($parsed, $headerMap, ['description', 'memo/description', 'memo', 'memo desc', 'memo/desc']),
         ];
     }
@@ -329,16 +332,23 @@ class CsvImport
                 $headerMap,
                 ['account', 'account name']
             );
-            $rows[] = ['date' => $dt, 'amount' => abs($amt), 'account' => $account];
+            $transactionType = self::csvField(
+                $parsed,
+                $headerMap,
+                ['transaction type', 'type']
+            );
+            $normalizedAmount = self::normalizeAmountByType($amt, $transactionType);
+            $rows[] = [
+                'date' => $dt,
+                'amount' => $normalizedAmount,
+                'account' => $account,
+                'transaction_type' => $transactionType,
+            ];
             $rawRows[] = [
                 'vendor_name' => $currentVendor,
                 'transaction_date' => $dt,
-                'amount' => abs($amt),
-                'transaction_type' => self::csvField(
-                    $parsed,
-                    $headerMap,
-                    ['transaction type', 'type']
-                ),
+                'amount' => $normalizedAmount,
+                'transaction_type' => $transactionType,
                 'account' => $account,
                 'memo' => self::csvField(
                     $parsed,
@@ -418,7 +428,7 @@ class CsvImport
     }
 
     /**
-     * @param array<int, array{date:string,amount:float,account?:string}> $rows
+     * @param array<int, array{date:string,amount:float,account?:string,transaction_type?:string}> $rows
      * @return array{vendor_name:string,cost_per_period:float,frequency:string,annual_cost:float,last_payment_date:?string,account:string}
      */
     public static function buildVendorSummary(string $vendorName, array $rows): array
@@ -427,10 +437,41 @@ class CsvImport
             return strcmp($a['date'], $b['date']);
         });
 
-        $lastRow = $rows[count($rows) - 1];
+        $spendRows = [];
+        foreach ($rows as $r) {
+            $type = isset($r['transaction_type']) ? (string) $r['transaction_type'] : '';
+            if (self::isDepositType($type)) {
+                continue;
+            }
+            $spendRows[] = $r;
+        }
+
+        $accountNames = [];
+        foreach ($rows as $r) {
+            if (isset($r['account'])) {
+                $accountNames[] = (string) $r['account'];
+            }
+        }
+        $accountJoined = self::uniqueAccountsJoined($accountNames);
+
+        if (count($spendRows) === 0) {
+            $allDates = array_column($rows, 'date');
+            $lastAny = $allDates[count($allDates) - 1] ?? null;
+
+            return [
+                'vendor_name' => $vendorName,
+                'cost_per_period' => 0.0,
+                'frequency' => 'one_off',
+                'annual_cost' => 0.0,
+                'last_payment_date' => $lastAny,
+                'account' => $accountJoined,
+            ];
+        }
+
+        $lastRow = $spendRows[count($spendRows) - 1];
         $latestAmount = (float) $lastRow['amount'];
 
-        $dates = array_column($rows, 'date');
+        $dates = array_column($spendRows, 'date');
         $gaps = [];
         for ($i = 1; $i < count($dates); $i++) {
             $d1 = new \DateTimeImmutable($dates[$i - 1]);
@@ -443,21 +484,28 @@ class CsvImport
         $annual = $latestAmount * $mult;
         $last = $dates[count($dates) - 1] ?? null;
 
-        $accountNames = [];
-        foreach ($rows as $r) {
-            if (isset($r['account'])) {
-                $accountNames[] = (string) $r['account'];
-            }
-        }
-
         return [
             'vendor_name' => $vendorName,
             'cost_per_period' => round($latestAmount, 2),
             'frequency' => $frequency,
             'annual_cost' => round($annual, 2),
             'last_payment_date' => $last,
-            'account' => self::uniqueAccountsJoined($accountNames),
+            'account' => $accountJoined,
         ];
+    }
+
+    public static function isDepositType(?string $type): bool
+    {
+        return preg_match('/^deposit$/i', trim((string) $type)) === 1;
+    }
+
+    public static function normalizeAmountByType(float $amount, ?string $type): float
+    {
+        if (self::isDepositType($type)) {
+            return -abs($amount);
+        }
+
+        return abs($amount);
     }
 
     /**

@@ -3,9 +3,16 @@
  * Run daily via Task Scheduler: php cron_reminders.php
  * Optional: set CRON_SECRET in config.php and call ?key=...
  *
+ * Jobs (same process):
+ *   - Cancellation deadline reminders (T−7 / day / T+7)
+ *   - Approaching non-monthly renewals (annual / semi-annual / quarterly lead days)
+ *   - Non-monthly charges digest (previous calendar month; sends on days 1–3)
+ *   - Cancellation progress digest (weekly on Monday)
+ *
  * CLI flags:
  *   --debug         Verbose per-user / GHL response output
- *   --force-resend  Clear this month's monthly_renewal_sent rows before sending
+ *   --force-resend  Clear today's renewal + current digest period dedup, then send
+ *                   (also bypasses day/weekday gates for digests)
  */
 
 require_once __DIR__ . '/../config.php';
@@ -33,11 +40,11 @@ if (php_sapi_name() !== 'cli') {
 $pdo = getDBConnection();
 
 if ($forceResend) {
-    $ym = (new DateTimeImmutable('first day of this month'))->modify('+1 month')->format('Y-m');
-    $del = $pdo->prepare('DELETE FROM monthly_renewal_sent WHERE `year_month` = ?');
-    $del->execute([$ym]);
+    $cleared = \CostSavings\ReminderService::clearForceResendDedup($pdo);
     if ($debug || php_sapi_name() === 'cli') {
-        echo "force-resend: cleared monthly_renewal_sent for {$ym} (rows={$del->rowCount()})\n";
+        echo 'force-resend: cleared renewal_reminder_sent today=' . $cleared['renewal_reminder_sent']
+            . ', non_monthly_charges=' . $cleared['non_monthly_charges']
+            . ', cancel_progress=' . $cleared['cancel_progress'] . "\n";
     }
 }
 
@@ -88,7 +95,9 @@ $send = function ($to, $subject, $body) use ($debug) {
 };
 
 $r1 = \CostSavings\ReminderService::runDeadlineReminders($pdo, $send);
-$r2 = \CostSavings\ReminderService::runMonthlyRenewalSummaries($pdo, $send);
+$r2 = \CostSavings\ReminderService::runApproachingRenewalReminders($pdo, $send);
+$r3 = \CostSavings\ReminderService::runNonMonthlyChargesDigest($pdo, $send, $forceResend);
+$r4 = \CostSavings\ReminderService::runCancelProgressDigest($pdo, $send, $forceResend);
 
 if (php_sapi_name() === 'cli') {
     echo 'Deadline reminders sent: ' . $r1['sent'] . "\n";
@@ -98,20 +107,67 @@ if (php_sapi_name() === 'cli') {
             echo "  - {$err}\n";
         }
     }
-    echo 'Monthly renewal emails sent: ' . $r2['sent'] . "\n";
+
+    echo 'Approaching renewal emails sent: ' . $r2['sent'] . "\n";
     if (!empty($r2['errors'])) {
-        echo "Monthly errors:\n";
+        echo "Approaching renewal errors:\n";
         foreach ($r2['errors'] as $err) {
             echo "  - {$err}\n";
         }
     }
     if ($debug && !empty($r2['debug'])) {
-        echo "Monthly debug (year_month=" . ($r2['year_month'] ?? '') . "):\n";
+        echo "Approaching renewal debug:\n";
         foreach ($r2['debug'] as $row) {
             $action = $row['action'] ?? '';
             $email = $row['email'] ?? '';
             $lines = $row['lines'] ?? 0;
             echo "  [{$action}] {$email} lines={$lines}";
+            if (!empty($row['send_result'])) {
+                echo ' send=' . json_encode($row['send_result']);
+            }
+            echo "\n";
+        }
+    }
+
+    $chargesGate = !empty($r3['skipped_day_gate']) ? ' (skipped: day gate)' : '';
+    echo 'Non-monthly charges emails sent: ' . $r3['sent']
+        . ' period=' . ($r3['period_key'] ?? '') . $chargesGate . "\n";
+    if (!empty($r3['errors'])) {
+        echo "Non-monthly charges errors:\n";
+        foreach ($r3['errors'] as $err) {
+            echo "  - {$err}\n";
+        }
+    }
+    if ($debug && !empty($r3['debug'])) {
+        echo "Non-monthly charges debug:\n";
+        foreach ($r3['debug'] as $row) {
+            $action = $row['action'] ?? '';
+            $email = $row['email'] ?? '';
+            $lines = $row['lines'] ?? 0;
+            echo "  [{$action}] {$email} lines={$lines}";
+            if (!empty($row['send_result'])) {
+                echo ' send=' . json_encode($row['send_result']);
+            }
+            echo "\n";
+        }
+    }
+
+    $cancelGate = !empty($r4['skipped_weekday_gate']) ? ' (skipped: weekday gate)' : '';
+    echo 'Cancel progress emails sent: ' . $r4['sent']
+        . ' period=' . ($r4['period_key'] ?? '') . $cancelGate . "\n";
+    if (!empty($r4['errors'])) {
+        echo "Cancel progress errors:\n";
+        foreach ($r4['errors'] as $err) {
+            echo "  - {$err}\n";
+        }
+    }
+    if ($debug && !empty($r4['debug'])) {
+        echo "Cancel progress debug:\n";
+        foreach ($r4['debug'] as $row) {
+            $action = $row['action'] ?? '';
+            $email = $row['email'] ?? '';
+            $projects = $row['projects'] ?? 0;
+            echo "  [{$action}] {$email} projects={$projects}";
             if (!empty($row['send_result'])) {
                 echo ' send=' . json_encode($row['send_result']);
             }

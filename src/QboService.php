@@ -846,6 +846,7 @@ class QboService
                 'date' => $row['transaction_date'],
                 'amount' => $row['amount'],
                 'account' => $row['account'] ?? '',
+                'transaction_type' => $row['transaction_type'] ?? '',
             ];
         }
 
@@ -1582,11 +1583,13 @@ class QboService
             $account = $get('account');
         }
 
+        $transactionType = $get('txn_type');
+
         return [
             'vendor_name' => $vendor,
             'transaction_date' => $date,
-            'amount' => abs((float) $amount),
-            'transaction_type' => $get('txn_type'),
+            'amount' => CsvImport::normalizeAmountByType((float) $amount, $transactionType),
+            'transaction_type' => $transactionType,
             'account' => $account,
             'memo' => $get('memo'),
         ];
