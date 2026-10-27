@@ -446,6 +446,9 @@ class CsvImport
             $spendRows[] = $r;
         }
 
+        // Prefer non-deposit spend; deposit-only vendors use deposit amounts (already negative).
+        $costRows = count($spendRows) > 0 ? $spendRows : $rows;
+
         $accountNames = [];
         foreach ($rows as $r) {
             if (isset($r['account'])) {
@@ -454,24 +457,21 @@ class CsvImport
         }
         $accountJoined = self::uniqueAccountsJoined($accountNames);
 
-        if (count($spendRows) === 0) {
-            $allDates = array_column($rows, 'date');
-            $lastAny = $allDates[count($allDates) - 1] ?? null;
-
+        if (count($costRows) === 0) {
             return [
                 'vendor_name' => $vendorName,
                 'cost_per_period' => 0.0,
                 'frequency' => 'one_off',
                 'annual_cost' => 0.0,
-                'last_payment_date' => $lastAny,
+                'last_payment_date' => null,
                 'account' => $accountJoined,
             ];
         }
 
-        $lastRow = $spendRows[count($spendRows) - 1];
+        $lastRow = $costRows[count($costRows) - 1];
         $latestAmount = (float) $lastRow['amount'];
 
-        $dates = array_column($spendRows, 'date');
+        $dates = array_column($costRows, 'date');
         $gaps = [];
         for ($i = 1; $i < count($dates); $i++) {
             $d1 = new \DateTimeImmutable($dates[$i - 1]);

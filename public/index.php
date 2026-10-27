@@ -7630,7 +7630,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     const annualCostText = row.querySelector('.annual-cost-display').textContent;
                     const annualCost = parseFloat(annualCostText.replace(/[^0-9.-]/g, '')) || 0;
 
-                    if (status === 'mark_for_cancellation' || status === 'cancelled') {
+                    if ((status === 'mark_for_cancellation' || status === 'cancelled') && annualCost > 0) {
                         totalSavings += annualCost;
                     }
                 });
@@ -7648,7 +7648,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     const annualCostText = row.querySelector('.annual-cost-display').textContent;
                     const annualCost = parseFloat(annualCostText.replace(/[^0-9.-]/g, '')) || 0;
 
-                    if (status === 'cancelled') {
+                    if (status === 'cancelled' && annualCost > 0) {
                         totalConfirmedSavings += annualCost;
                     }
                 });
@@ -8497,10 +8497,10 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const cancelDl = deadlineIn && deadlineIn.value ? deadlineIn.value : '';
                 const lastPay = lastPayIn && lastPayIn.value ? lastPayIn.value : '';
 
-                if (idVal && !vendorName && costPerPeriod <= 0 && !notes && status === 'pending') {
+                if (idVal && !vendorName && costPerPeriod === 0 && !notes && status === 'pending') {
                     return null;
                 }
-                if (!(vendorName || costPerPeriod > 0 || status !== 'pending' || notes || idVal)) {
+                if (!(vendorName || costPerPeriod !== 0 || status !== 'pending' || notes || idVal)) {
                     return null;
                 }
                 const o = {
@@ -8788,7 +8788,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                         setVendorChatTaggedState(cbtn, tch);
                                     }
 
-                                    if (costInput) costInput.value = item.cost_per_period > 0 ? formatCostInputValue(item.cost_per_period) : '';
+                                    if (costInput) costInput.value = Number(item.cost_per_period) !== 0 ? formatCostInputValue(item.cost_per_period) : '';
                                     if (frequencySelect) frequencySelect.value = item.frequency || '';
                                     if (mgr) {
                                         const mid = item.manager_user_id ? String(item.manager_user_id) : '';

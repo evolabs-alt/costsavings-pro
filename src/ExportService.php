@@ -92,9 +92,9 @@ class ExportService
             $status = isset($it['status']) && $it['status'] !== ''
                 ? VendorService::normalizeStatus($it['status'])
                 : VendorService::resolveStatusFromItem(is_array($it) ? $it : []);
-            if ($status === VendorService::STATUS_MARK) {
+            if ($a > 0 && $status === VendorService::STATUS_MARK) {
                 $pendingCancel += $a;
-            } elseif ($status === VendorService::STATUS_CANCELLED) {
+            } elseif ($a > 0 && $status === VendorService::STATUS_CANCELLED) {
                 $confirmed += $a;
             }
         }
