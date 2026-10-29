@@ -76,7 +76,9 @@ function csGhlLastResponse(): ?array
 }
 
 /**
- * Upsert contact with Cost Savings Pro tag (plus optional extras). Returns contact id or null.
+ * Upsert contact, then add tags via the additive tags API (never send tags on upsert —
+ * GHL overwrites the contact's full tag set if tags are included in upsert/update).
+ * Returns contact id or null. Tag failures are logged; contact id is still returned.
  *
  * @param array{email:string, first_name?:string, last_name?:string} $contact
  * @param list<string> $extraTags
@@ -108,7 +110,6 @@ function csUpsertGhlContact(array $contact, array $extraTags = []): ?string
         'locationId' => $locationId,
         'firstName' => (string) ($contact['first_name'] ?? ''),
         'lastName' => (string) ($contact['last_name'] ?? ''),
-        'tags' => $tags,
     ];
 
     $res = csGhlRequest('POST', 'contacts/upsert', $payload);
@@ -125,6 +126,22 @@ function csUpsertGhlContact(array $contact, array $extraTags = []): ?string
     if (!is_string($id) || $id === '') {
         error_log('GHL upsert: contact id missing: ' . $res['body']);
         return null;
+    }
+
+    if ($tags !== []) {
+        $tagRes = csGhlRequest('POST', 'contacts/' . rawurlencode($id) . '/tags', ['tags' => $tags]);
+        if (!$tagRes['ok']) {
+            error_log('GHL add tags failed HTTP ' . $tagRes['status'] . ': ' . $tagRes['body']);
+            if (function_exists('proLog')) {
+                proLog('ghl_add_tags_fail', [
+                    'email' => $email,
+                    'contact_id' => $id,
+                    'tags' => $tags,
+                    'status' => $tagRes['status'],
+                    'body' => $tagRes['body'],
+                ]);
+            }
+        }
     }
 
     return $id;
