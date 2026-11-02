@@ -10817,7 +10817,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     <div class="ai-presets-row">
                         <button type="button" class="btn-secondary ai-preset" data-preset="overlap">Overlap between vendors</button>
                         <button type="button" class="btn-secondary ai-preset" data-preset="duplicates">Duplicate subscriptions</button>
-                        <button type="button" class="btn-secondary ai-preset" data-preset="executive">AI Assistant Report</button>
+                        <button type="button" class="btn-secondary ai-preset" data-preset="executive">Executive Summary</button>
                     </div>
                     <div id="aiChatLog" class="chat-container ai-chat-log" aria-label="AI Assistant conversation"></div>
                     <div class="ai-composer">

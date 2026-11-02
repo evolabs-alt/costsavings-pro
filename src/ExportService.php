@@ -123,7 +123,7 @@ class ExportService
             . '.reply-body ul,.reply-body ol{margin:0.35em 0 0.5em 0;padding-left:1.25em;}'
             . '.reply-body li{margin-bottom:0.25em;}'
             . '</style></head><body>';
-        $html .= '<h1>AI Assistant Report</h1>';
+        $html .= '<h1>Executive Summary</h1>';
         if ($q !== '') {
             $html .= '<p class="prompt-label">Prompt</p>';
             $html .= '<p class="prompt-text">' . htmlspecialchars($q, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</p>';

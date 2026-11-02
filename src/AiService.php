@@ -15,7 +15,7 @@ class AiService
         'alternatives' => 'Suggest alternative vendors that might cost less for similar services on the keep list.',
         'lower_tiers' => 'Are there lower tiers of the same service that might fit based on how the vendor is being used (keep list)?',
         'duplicates' => 'Identify cases where the same vendor appears more than once in the vendor list, suggesting the user is paying that vendor twice (duplicate subscriptions, multiple accounts, or repeated charges). Only flag rows that share the same vendor name.',
-        'executive' => 'Produce a concise AI Assistant Report of cost optimization suggestions a savvy CFO would consider for the vendor data provided.',
+        'executive' => 'Produce a concise Executive Summary of cost optimization suggestions a savvy CFO would consider for the vendor data provided.',
         'cancel_steps' => 'Provide a practical cancellation playbook for this vendor: exact preparation checklist, account artifacts to save, cancellation path options, negotiation fallback, and post-cancellation validation steps. '
             . 'Always include a "Cancellation contacts" section listing the vendor\'s cancellation/support email address and phone number (plus the cancellation URL or in-app path when one exists). '
             . 'If a contact detail cannot be verified, say so explicitly instead of guessing.',
