@@ -182,9 +182,11 @@ class MappedCsvImport
             $rawRows[] = $row;
         }
 
+        $payload = FrequencyPatternService::buildSplitImportPayload($rawRows);
+
         return [
-            'summary' => self::buildSummaryFromRaw($rawRows),
-            'raw' => $rawRows,
+            'summary' => $payload['summary'],
+            'raw' => $payload['raw'],
             'skipped_rows' => $skipped,
         ];
     }
@@ -554,33 +556,4 @@ class MappedCsvImport
         return trim((string) $parsed[$idx]);
     }
 
-    /**
-     * @param array<int, array{vendor_name:string,transaction_date:string,amount:float,transaction_type:string,account:string,memo:string}> $rawRows
-     * @return array<int, array{vendor_name:string,cost_per_period:float,frequency:string,annual_cost:float,last_payment_date:?string}>
-     */
-    private static function buildSummaryFromRaw(array $rawRows): array
-    {
-        $payeeRows = [];
-        foreach ($rawRows as $row) {
-            $vendor = $row['vendor_name'];
-            if (!isset($payeeRows[$vendor])) {
-                $payeeRows[$vendor] = [];
-            }
-            $payeeRows[$vendor][] = [
-                'date' => $row['transaction_date'],
-                'amount' => $row['amount'],
-                'account' => $row['account'] ?? '',
-                'transaction_type' => $row['transaction_type'] ?? '',
-            ];
-        }
-
-        $summary = [];
-        foreach ($payeeRows as $payee => $rows) {
-            if (count($rows) > 0) {
-                $summary[] = CsvImport::buildVendorSummary($payee, $rows);
-            }
-        }
-
-        return $summary;
-    }
 }

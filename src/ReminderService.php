@@ -467,7 +467,12 @@ class ReminderService
                 $confirmedSum = 0.0;
                 foreach ($bundle['rows'] as $row) {
                     $status = VendorService::resolveStatusFromRow($row);
+                    $freq = VendorService::normalizeFrequencyValue($row['frequency'] ?? '');
+                    $cost = (float) ($row['cost_per_period'] ?? 0);
                     $annual = (float) ($row['annual_cost'] ?? 0);
+                    if ($freq === 'irregular' || $cost <= 0 || $annual <= 0) {
+                        continue;
+                    }
                     $vendor = (string) ($row['vendor_name'] ?? 'Vendor');
                     if ($status === VendorService::STATUS_MARK) {
                         $pending[] = ['vendor_name' => $vendor, 'annual_cost' => $annual];
@@ -1017,14 +1022,12 @@ class ReminderService
         } catch (\Exception $e) {
             return null;
         }
-        $freq = $row['frequency'] ?? 'monthly';
+        $freq = VendorService::normalizeFrequencyValue($row['frequency'] ?? 'monthly');
         switch ($freq) {
             case 'weekly':
                 return $base->modify('+7 days');
             case 'bi_weekly':
                 return $base->modify('+14 days');
-            case 'semi_monthly':
-                return $base->modify('+15 days');
             case 'monthly':
                 return $base->modify('+1 month');
             case 'quarterly':
@@ -1033,7 +1036,7 @@ class ReminderService
                 return $base->modify('+6 months');
             case 'annually':
                 return $base->modify('+1 year');
-            case 'one_off':
+            case 'irregular':
                 return null;
             default:
                 return $base->modify('+1 month');

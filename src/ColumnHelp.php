@@ -50,15 +50,15 @@ final class ColumnHelp
             ],
             'cost' => [
                 'title' => 'Cost',
-                'html' => '<p class="column-help-intro">The amount charged per billing period (e.g. one month or one quarter). Editable by project managers on rows they can see. The app uses Cost with Frequency to compute Annual Cost.</p>',
+                'html' => '<p class="column-help-intro">The amount charged per billing period (e.g. one month or one quarter). Editable by project managers on rows they can see. When imported amounts vary, a min–max range appears under the field until you enter an amount. The app uses Cost with Frequency to compute Annual Cost.</p>',
             ],
             'frequency' => [
                 'title' => 'Frequency',
-                'html' => '<p class="column-help-intro">How often this vendor bills: weekly, bi-weekly, semi-monthly, monthly, quarterly, semi-annual, annually, or one-off. Editable by project managers on rows they can see. Together with Cost, this drives the annualized spend figure used in savings totals.</p>',
+                'html' => '<p class="column-help-intro">How often this vendor bills: weekly, bi-weekly, monthly, quarterly, semi-annual, annually, or irregular. Irregular rows are highlighted and excluded from savings until you confirm a regular cadence and amount. Editable by project managers on rows they can see. Together with Cost, this drives the annualized spend figure used in savings totals.</p>',
             ],
             'annual_cost' => [
                 'title' => 'Annual Cost',
-                'html' => '<p class="column-help-intro">Estimated yearly spend, calculated from Cost and Frequency. Sort this column to surface the largest line items and savings opportunities. Mark-for-cancellation and cancelled rows contribute to Potential and Confirmed savings summaries below the table.</p>',
+                'html' => '<p class="column-help-intro">Estimated yearly spend, calculated from Cost and Frequency. Blank when frequency is irregular or cost is empty. Sort this column to surface the largest line items and savings opportunities. Mark-for-cancellation and cancelled rows contribute to Potential and Confirmed savings summaries below the table (irregular / empty-amount rows are excluded).</p>',
             ],
             'manager' => [
                 'title' => 'Manager',

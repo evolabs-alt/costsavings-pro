@@ -87,14 +87,22 @@ class ExportService
         $pendingCancel = 0.0;
         $confirmed = 0.0;
         foreach ($items as $it) {
+            $freq = VendorService::normalizeFrequencyValue($it['frequency'] ?? '');
+            if ($freq === 'irregular') {
+                continue;
+            }
+            $cost = (float) ($it['cost_per_period'] ?? 0);
             $a = (float) ($it['annual_cost'] ?? 0);
+            if ($cost <= 0 || $a <= 0) {
+                continue;
+            }
             $totalAnnual += $a;
             $status = isset($it['status']) && $it['status'] !== ''
                 ? VendorService::normalizeStatus($it['status'])
                 : VendorService::resolveStatusFromItem(is_array($it) ? $it : []);
-            if ($a > 0 && $status === VendorService::STATUS_MARK) {
+            if ($status === VendorService::STATUS_MARK) {
                 $pendingCancel += $a;
-            } elseif ($a > 0 && $status === VendorService::STATUS_CANCELLED) {
+            } elseif ($status === VendorService::STATUS_CANCELLED) {
                 $confirmed += $a;
             }
         }

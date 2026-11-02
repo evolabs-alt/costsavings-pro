@@ -124,6 +124,60 @@ class VendorChatService
     }
 
     /**
+     * System review note that counts as unread for all real users (is_action_log = 0, user_id = 0).
+     * Failures are logged and do not throw.
+     */
+    public static function appendSystemReviewNote(
+        PDO $pdo,
+        int $orgId,
+        int $projectId,
+        int $vendorItemId,
+        string $message
+    ): void {
+        if ($vendorItemId <= 0) {
+            return;
+        }
+
+        $cleanMessage = trim(str_replace("\r\n", "\n", $message));
+        if ($cleanMessage === '') {
+            return;
+        }
+        $msgLen = function_exists('mb_strlen') ? mb_strlen($cleanMessage, 'UTF-8') : strlen($cleanMessage);
+        if ($msgLen > self::MESSAGE_MAX_LENGTH) {
+            $cleanMessage = function_exists('mb_substr')
+                ? mb_substr($cleanMessage, 0, self::MESSAGE_MAX_LENGTH, 'UTF-8')
+                : substr($cleanMessage, 0, self::MESSAGE_MAX_LENGTH);
+        }
+
+        try {
+            $st = $pdo->prepare(
+                'SELECT id FROM cost_calculator_items
+                 WHERE id = ? AND org_id = ? AND project_id = ?
+                 LIMIT 1'
+            );
+            $st->execute([$vendorItemId, $orgId, $projectId]);
+            if (!$st->fetchColumn()) {
+                return;
+            }
+
+            $ins = $pdo->prepare(
+                'INSERT INTO vendor_item_chat_messages
+                (org_id, project_id, vendor_item_id, user_id, username_snapshot, message, is_action_log)
+                VALUES (?, ?, ?, 0, ?, ?, 0)'
+            );
+            $ins->execute([
+                $orgId,
+                $projectId,
+                $vendorItemId,
+                'System',
+                $cleanMessage,
+            ]);
+        } catch (PDOException $e) {
+            error_log('VendorChatService::appendSystemReviewNote: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Append an automatic action-log line to a vendor chat thread (server-side only).
      * Failures are logged and do not throw.
      */

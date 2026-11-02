@@ -833,31 +833,7 @@ class QboService
      */
     public static function buildImportPayload(array $rawRows): array
     {
-        $payeeRows = [];
-        foreach ($rawRows as $row) {
-            $vendor = trim((string) ($row['vendor_name'] ?? ''));
-            if ($vendor === '') {
-                continue;
-            }
-            if (!isset($payeeRows[$vendor])) {
-                $payeeRows[$vendor] = [];
-            }
-            $payeeRows[$vendor][] = [
-                'date' => $row['transaction_date'],
-                'amount' => $row['amount'],
-                'account' => $row['account'] ?? '',
-                'transaction_type' => $row['transaction_type'] ?? '',
-            ];
-        }
-
-        $summary = [];
-        foreach ($payeeRows as $payee => $rows) {
-            if (count($rows) > 0) {
-                $summary[] = CsvImport::buildVendorSummary($payee, $rows);
-            }
-        }
-
-        return ['summary' => $summary, 'raw' => $rawRows];
+        return FrequencyPatternService::buildSplitImportPayload($rawRows);
     }
 
     /**

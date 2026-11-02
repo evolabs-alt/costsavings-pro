@@ -764,6 +764,9 @@ function importParsedVendorCsvData(array $summaryRows, array $rawRows, ?int $ski
         $items[] = [
             'vendor_name' => $row['vendor_name'],
             'cost_per_period' => $row['cost_per_period'],
+            'amount_min' => $row['amount_min'] ?? null,
+            'amount_max' => $row['amount_max'] ?? null,
+            'amount_irregular' => !empty($row['amount_irregular']),
             'frequency' => $row['frequency'],
             'annual_cost' => $row['annual_cost'],
             'status' => VendorService::STATUS_PENDING,
@@ -788,6 +791,7 @@ function importParsedVendorCsvData(array $summaryRows, array $rawRows, ?int $ski
         return $rawRes;
     }
     backfillCostCalculatorAccountsFromRaw($pdo);
+    postImportFrequencyReviewNotes($pdo, $orgId, $activeProjectId, $res['inserted_meta'] ?? []);
     $res['raw_inserted'] = (int) ($rawRes['inserted'] ?? 0);
     $res['upload_batch_id'] = $batchId;
     if ($skippedRows !== null) {
@@ -795,6 +799,133 @@ function importParsedVendorCsvData(array $summaryRows, array $rawRows, ?int $ski
     }
 
     return $res;
+}
+
+/**
+ * Additive import for revisit sync: insert only new vendor rows; append only new raw txs.
+ * Existing vendor amount/frequency are left untouched.
+ *
+ * @param array<int, array<string, mixed>> $summaryRows
+ * @param array<int, array<string, mixed>> $rawRows
+ * @return array{success:bool, inserted?:int, vendors_skipped?:int, raw_inserted?:int, raw_skipped?:int, upload_batch_id?:string, error?:string}
+ */
+function importIncrementalVendorData(array $summaryRows, array $rawRows): array
+{
+    $pdo = getDBConnection();
+    $orgId = (int) $_SESSION['org_id'];
+    $uid = (int) $_SESSION['user_id'];
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        return ['success' => false, 'error' => 'No active project selected'];
+    }
+    $existing = VendorService::existingNormalizedVendorNames($pdo, $orgId, $activeProjectId);
+    $purposeMap = ProjectService::purposeMapFromProject($pdo, $orgId, $activeProjectId);
+    $items = [];
+    $vendorsSkipped = 0;
+    foreach ($summaryRows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $norm = VendorService::normalizeVendorName((string) ($row['vendor_name'] ?? ''));
+        if ($norm === '' || isset($existing[$norm])) {
+            if ($norm !== '' && isset($existing[$norm])) {
+                ++$vendorsSkipped;
+            }
+            continue;
+        }
+        $items[] = [
+            'vendor_name' => $row['vendor_name'],
+            'cost_per_period' => $row['cost_per_period'],
+            'amount_min' => $row['amount_min'] ?? null,
+            'amount_max' => $row['amount_max'] ?? null,
+            'amount_irregular' => !empty($row['amount_irregular']),
+            'frequency' => $row['frequency'],
+            'annual_cost' => $row['annual_cost'],
+            'status' => VendorService::STATUS_PENDING,
+            'cancel_keep' => 'Keep',
+            'cancelled_status' => 0,
+            'purpose_of_subscription' => $purposeMap[$norm] ?? '',
+            'notes' => '',
+            'visibility' => 'confidential',
+            'manager_user_id' => null,
+            'cancellation_deadline' => null,
+            'last_payment_date' => $row['last_payment_date'] ?? null,
+            'account' => $row['account'] ?? '',
+        ];
+        $existing[$norm] = true;
+    }
+    $res = ['success' => true, 'inserted' => 0];
+    if (count($items) > 0) {
+        $res = VendorService::appendImportedRows($pdo, $orgId, $activeProjectId, $uid, $items);
+        if (!($res['success'] ?? false)) {
+            return $res;
+        }
+        postImportFrequencyReviewNotes($pdo, $orgId, $activeProjectId, $res['inserted_meta'] ?? []);
+    }
+    $batchId = bin2hex(random_bytes(12));
+    $rawRes = VendorService::appendRawTransactionsDeduped(
+        $pdo,
+        $orgId,
+        $activeProjectId,
+        $uid,
+        $batchId,
+        $rawRows
+    );
+    if (!($rawRes['success'] ?? false)) {
+        return $rawRes;
+    }
+    backfillCostCalculatorAccountsFromRaw($pdo);
+    $res['vendors_skipped'] = $vendorsSkipped;
+    $res['raw_inserted'] = (int) ($rawRes['inserted'] ?? 0);
+    $res['raw_skipped'] = (int) ($rawRes['skipped'] ?? 0);
+    $res['upload_batch_id'] = $batchId;
+
+    return $res;
+}
+
+/**
+ * @param array<int, array{id:int,frequency:string,amount_min:?float,amount_max:?float,amount_irregular:bool}> $insertedMeta
+ */
+function postImportFrequencyReviewNotes(PDO $pdo, int $orgId, int $projectId, array $insertedMeta): void
+{
+    foreach ($insertedMeta as $meta) {
+        if (!is_array($meta)) {
+            continue;
+        }
+        $id = (int) ($meta['id'] ?? 0);
+        if ($id <= 0) {
+            continue;
+        }
+        $frequency = VendorService::normalizeFrequencyValue($meta['frequency'] ?? '');
+        $amountIrregular = !empty($meta['amount_irregular']);
+        $amountMin = isset($meta['amount_min']) && $meta['amount_min'] !== null
+            ? (float) $meta['amount_min'] : null;
+        $amountMax = isset($meta['amount_max']) && $meta['amount_max'] !== null
+            ? (float) $meta['amount_max'] : null;
+
+        if ($frequency === 'irregular') {
+            VendorChatService::appendSystemReviewNote(
+                $pdo,
+                $orgId,
+                $projectId,
+                $id,
+                'Payment timing does not match a regular cadence (weekly, bi-weekly, monthly, quarterly, bi-annual, or annual). Amount and annual cost are left blank, and this vendor is excluded from potential and confirmed savings until frequency and amount are confirmed.'
+            );
+        }
+
+        if ($amountIrregular && $amountMin !== null && $amountMax !== null) {
+            $minLabel = number_format($amountMin, 2, '.', ',');
+            $maxLabel = number_format($amountMax, 2, '.', ',');
+            VendorChatService::appendSystemReviewNote(
+                $pdo,
+                $orgId,
+                $projectId,
+                $id,
+                'Payment amounts vary between $' . $minLabel . ' and $' . $maxLabel
+                . '. Enter the expected amount per period to calculate annual cost. This vendor is excluded from savings totals until an amount is entered.'
+            );
+        }
+    }
 }
 
 function handlePreviewCsvImport() {
@@ -1344,8 +1475,16 @@ function handleSaveReminderSettings() {
             header('Location: ' . $_SERVER['PHP_SELF']);
             exit;
         }
-        $stOrg = $pdo->prepare('UPDATE organizations SET deadline_reminders_enabled = ?, notification_webhook_url = ? WHERE id = ?');
-        $stOrg->execute([$orgOn ? 1 : 0, ($webhookUrl !== '' ? $webhookUrl : null), $orgId]);
+        $promptQbo = !OrgRole::isSuperAdmin(sessionOrgRole())
+            ? null
+            : (isset($_POST['prompt_qbo_sync_on_revisit']) && $_POST['prompt_qbo_sync_on_revisit'] === '1' ? 1 : 0);
+        if ($promptQbo === null) {
+            $stOrg = $pdo->prepare('UPDATE organizations SET deadline_reminders_enabled = ?, notification_webhook_url = ? WHERE id = ?');
+            $stOrg->execute([$orgOn ? 1 : 0, ($webhookUrl !== '' ? $webhookUrl : null), $orgId]);
+        } else {
+            $stOrg = $pdo->prepare('UPDATE organizations SET deadline_reminders_enabled = ?, notification_webhook_url = ?, prompt_qbo_sync_on_revisit = ? WHERE id = ?');
+            $stOrg->execute([$orgOn ? 1 : 0, ($webhookUrl !== '' ? $webhookUrl : null), $promptQbo, $orgId]);
+        }
     }
 
     $userOn = isset($_POST['user_deadline_reminders']) && $_POST['user_deadline_reminders'] === '1';
@@ -1595,6 +1734,146 @@ function handleSaveQboWeeklyImportConsent(): void
     } catch (Throwable $e) {
         error_log('handleSaveQboWeeklyImportConsent: ' . $e->getMessage());
         echo json_encode(['success' => false, 'error' => 'Could not save consent']);
+    }
+    exit;
+}
+
+function handleQboRevisitPromptStatus(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id']) || empty($_SESSION['org_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Not authenticated']);
+        exit;
+    }
+    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
+        echo json_encode([
+            'success' => true,
+            'show' => false,
+            'connected' => false,
+            'prompt_enabled' => false,
+        ]);
+        exit;
+    }
+    try {
+        $pdo = getDBConnection();
+        $orgId = (int) $_SESSION['org_id'];
+        $activeProjectId = requireActiveProjectId($pdo);
+        $promptEnabled = true;
+        $st = $pdo->prepare('SELECT prompt_qbo_sync_on_revisit FROM organizations WHERE id = ? LIMIT 1');
+        $st->execute([$orgId]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if ($row && array_key_exists('prompt_qbo_sync_on_revisit', $row)) {
+            $promptEnabled = (bool) $row['prompt_qbo_sync_on_revisit'];
+        }
+        $svc = new QboService($pdo);
+        $connected = $svc->isConnected($orgId);
+        $hasVendors = $activeProjectId !== null
+            && VendorService::projectHasVendors($pdo, $orgId, $activeProjectId);
+        $onboarding = !empty($_SESSION['project_onboarding_required']);
+        $show = $promptEnabled && $connected && $hasVendors && !$onboarding;
+        echo json_encode([
+            'success' => true,
+            'show' => $show,
+            'connected' => $connected,
+            'prompt_enabled' => $promptEnabled,
+            'has_vendors' => $hasVendors,
+            'active_project_id' => $activeProjectId,
+        ]);
+    } catch (Throwable $e) {
+        error_log('handleQboRevisitPromptStatus: ' . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => 'Could not load revisit prompt status']);
+    }
+    exit;
+}
+
+function handleSaveQboRevisitPromptPref(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id']) || empty($_SESSION['org_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Not authenticated']);
+        exit;
+    }
+    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only a super admin can change this setting.']);
+        exit;
+    }
+    $enabled = isset($_POST['prompt_enabled']) && (string) $_POST['prompt_enabled'] === '1';
+    try {
+        $pdo = getDBConnection();
+        $st = $pdo->prepare('UPDATE organizations SET prompt_qbo_sync_on_revisit = ? WHERE id = ?');
+        $st->execute([$enabled ? 1 : 0, (int) $_SESSION['org_id']]);
+        echo json_encode(['success' => true, 'prompt_enabled' => $enabled]);
+    } catch (Throwable $e) {
+        error_log('handleSaveQboRevisitPromptPref: ' . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => 'Could not save preference']);
+    }
+    exit;
+}
+
+function handleQboIncrementalSync(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id']) || empty($_SESSION['org_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Not authenticated']);
+        exit;
+    }
+    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only a super admin can sync QuickBooks.']);
+        exit;
+    }
+    $startDate = trim((string) ($_POST['start_date'] ?? ''));
+    $endDate = trim((string) ($_POST['end_date'] ?? ''));
+    try {
+        if ($startDate === '' || $endDate === '') {
+            $end = new DateTimeImmutable('today');
+            $start = $end->modify('-1 year');
+            $startDate = $start->format('Y-m-d');
+            $endDate = $end->format('Y-m-d');
+        }
+        QboService::assertValidDateRange($startDate, $endDate);
+        $pdo = getDBConnection();
+        $activeProjectId = requireActiveProjectId($pdo);
+        if ($activeProjectId === null) {
+            echo json_encode(['success' => false, 'error' => 'No active project selected']);
+            exit;
+        }
+        $svc = new QboService($pdo);
+        if (!$svc->isConnected((int) $_SESSION['org_id'])) {
+            echo json_encode([
+                'success' => false,
+                'error' => 'QuickBooks is not connected. Open Settings to connect.',
+                'needs_setup' => true,
+            ]);
+            exit;
+        }
+        $rows = $svc->fetchTransactionRows((int) $_SESSION['org_id'], $startDate, $endDate);
+        if (count($rows) === 0) {
+            echo json_encode([
+                'success' => true,
+                'inserted' => 0,
+                'vendors_skipped' => 0,
+                'raw_inserted' => 0,
+                'raw_skipped' => 0,
+                'message' => 'No transactions found for the selected date range.',
+            ]);
+            exit;
+        }
+        $payload = QboService::buildImportPayload($rows);
+        $summaryRows = $payload['summary'] ?? [];
+        $rawRows = $payload['raw'] ?? [];
+        if (!is_array($summaryRows)) {
+            $summaryRows = [];
+        }
+        if (!is_array($rawRows)) {
+            $rawRows = [];
+        }
+        $result = importIncrementalVendorData($summaryRows, $rawRows);
+        echo json_encode($result);
+    } catch (InvalidArgumentException $e) {
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    } catch (Throwable $e) {
+        error_log('handleQboIncrementalSync: ' . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
     }
     exit;
 }

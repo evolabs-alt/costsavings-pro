@@ -150,6 +150,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'save_qbo_weekly_import_consent':
                 handleSaveQboWeeklyImportConsent();
                 break;
+            case 'qbo_revisit_prompt_status':
+                handleQboRevisitPromptStatus();
+                break;
+            case 'save_qbo_revisit_prompt_pref':
+                handleSaveQboRevisitPromptPref();
+                break;
+            case 'qbo_incremental_sync':
+                handleQboIncrementalSync();
+                break;
             case 'project_list':
                 handleProjectList();
                 break;
@@ -274,6 +283,7 @@ if ($is_logged_in && empty($user_orgs) && !empty($_SESSION['user_id'])) {
 $deadline_reminders_org = true;
 $deadline_reminders_user = true;
 $notification_webhook_url = '';
+$prompt_qbo_sync_on_revisit = true;
 $qbo_status = [
     'connected' => false,
     'has_credentials' => \CostSavings\QboService::hasAppCredentials(),
@@ -285,7 +295,7 @@ $qbo_status = [
 if ($is_logged_in && !empty($_SESSION['org_id'])) {
     try {
         $pdoView = getDBConnection();
-        $st = $pdoView->prepare('SELECT deadline_reminders_enabled, notification_webhook_url FROM organizations WHERE id = ?');
+        $st = $pdoView->prepare('SELECT deadline_reminders_enabled, notification_webhook_url, prompt_qbo_sync_on_revisit FROM organizations WHERE id = ?');
         $st->execute([(int) $_SESSION['org_id']]);
         $or = $st->fetch(PDO::FETCH_ASSOC);
         if ($or && isset($or['deadline_reminders_enabled'])) {
@@ -293,6 +303,9 @@ if ($is_logged_in && !empty($_SESSION['org_id'])) {
         }
         if ($or && isset($or['notification_webhook_url'])) {
             $notification_webhook_url = trim((string) $or['notification_webhook_url']);
+        }
+        if ($or && array_key_exists('prompt_qbo_sync_on_revisit', $or)) {
+            $prompt_qbo_sync_on_revisit = (bool) $or['prompt_qbo_sync_on_revisit'];
         }
         if (!empty($_SESSION['user_id'])) {
             $st2 = $pdoView->prepare('SELECT deadline_reminders_enabled, joined_via_invite FROM users WHERE id = ?');
@@ -850,6 +863,23 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 
         .cost-calculator-grid .cost-input {
             text-align: right;
+        }
+
+        .cost-calculator-grid .amount-range-hint {
+            display: block;
+            margin-top: 2px;
+            font-size: 11px;
+            line-height: 1.2;
+            color: #9a3412;
+            text-align: right;
+        }
+
+        .cost-calculator-grid tr.freq-irregular {
+            background-color: #fff7ed;
+        }
+
+        .cost-calculator-grid tr.freq-irregular:hover {
+            background-color: #ffedd5;
         }
 
         .cost-calculator-grid .frequency {
@@ -4857,6 +4887,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             let deleteProjectExpectedName = '';
             const isAdminUser = <?php echo $is_admin ? 'true' : 'false'; ?>;
             const canCreateProjects = <?php echo $can_create_projects ? 'true' : 'false'; ?>;
+            const canManageQbo = <?php echo $can_manage_qbo ? 'true' : 'false'; ?>;
             const COLUMN_HELP = <?php echo json_encode(\CostSavings\ColumnHelp::entriesForJs(), JSON_UNESCAPED_UNICODE); ?>;
 
             function postJson(data) {
@@ -6541,6 +6572,104 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         showSnackbar('Could not save weekly import consent', 'error');
                     });
             }
+            var qboRevisitPromptInFlight = false;
+            function saveQboRevisitPromptPrefIfNeeded() {
+                var cb = document.getElementById('qboRevisitDoNotAsk');
+                if (!cb || !cb.checked) {
+                    return Promise.resolve();
+                }
+                var fd = new FormData();
+                fd.append('action', 'save_qbo_revisit_prompt_pref');
+                fd.append('prompt_enabled', '0');
+                return fetch(window.location.href, { method: 'POST', body: fd, credentials: 'same-origin' })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (!d || !d.success) {
+                            showSnackbar((d && d.error) || 'Could not save preference', 'error');
+                        } else {
+                            var settingsCb = document.querySelector('input[name="prompt_qbo_sync_on_revisit"]');
+                            if (settingsCb) settingsCb.checked = false;
+                        }
+                    })
+                    .catch(function() {
+                        showSnackbar('Could not save preference', 'error');
+                    });
+            }
+            function runQboIncrementalSync() {
+                var range = defaultQboDateRange();
+                var fd = new FormData();
+                fd.append('action', 'qbo_incremental_sync');
+                fd.append('start_date', range.start);
+                fd.append('end_date', range.end);
+                showSnackbar('Updating vendors from QuickBooks…', 'info');
+                return fetch(window.location.href, { method: 'POST', body: fd, credentials: 'same-origin' })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (!d || !d.success) {
+                            showSnackbar((d && d.error) || 'Could not update vendors from QuickBooks', 'error');
+                            return;
+                        }
+                        var inserted = parseInt(d.inserted || 0, 10) || 0;
+                        var rawInserted = parseInt(d.raw_inserted || 0, 10) || 0;
+                        var msg = d.message
+                            || ('Added ' + inserted + ' vendor(s), ' + rawInserted + ' new transaction(s)');
+                        showSnackbar(msg, 'success');
+                        if (typeof loadCalculatorData === 'function') {
+                            loadCalculatorData();
+                        }
+                    })
+                    .catch(function() {
+                        showSnackbar('Could not update vendors from QuickBooks', 'error');
+                    });
+            }
+            function maybePromptQboRevisitSync() {
+                if (!canManageQbo || qboRevisitPromptInFlight) {
+                    return Promise.resolve();
+                }
+                qboRevisitPromptInFlight = true;
+                var fd = new FormData();
+                fd.append('action', 'qbo_revisit_prompt_status');
+                return fetch(window.location.href, { method: 'POST', body: fd, credentials: 'same-origin' })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (!d || !d.success || !d.show) {
+                            return;
+                        }
+                        var doNotAsk = document.getElementById('qboRevisitDoNotAsk');
+                        if (doNotAsk) doNotAsk.checked = false;
+                        openAppModal('appModalQboRevisitSync');
+                    })
+                    .catch(function() {})
+                    .finally(function() {
+                        qboRevisitPromptInFlight = false;
+                    });
+            }
+            function initQboRevisitSyncUi() {
+                var okBtn = document.getElementById('qboRevisitSyncOkBtn');
+                var cancelBtn = document.getElementById('qboRevisitSyncCancelBtn');
+                if (okBtn && !okBtn.dataset.qboBound) {
+                    okBtn.dataset.qboBound = '1';
+                    okBtn.addEventListener('click', function() {
+                        setButtonLoading(okBtn, true, 'Updating…');
+                        saveQboRevisitPromptPrefIfNeeded()
+                            .then(function() {
+                                closeAppModal(document.getElementById('appModalQboRevisitSync'));
+                                return runQboIncrementalSync();
+                            })
+                            .finally(function() {
+                                setButtonLoading(okBtn, false);
+                            });
+                    });
+                }
+                if (cancelBtn && !cancelBtn.dataset.qboBound) {
+                    cancelBtn.dataset.qboBound = '1';
+                    cancelBtn.addEventListener('click', function() {
+                        saveQboRevisitPromptPrefIfNeeded().finally(function() {
+                            closeAppModal(document.getElementById('appModalQboRevisitSync'));
+                        });
+                    });
+                }
+            }
             function initQboSyncUi() {
                 var consentCb = document.getElementById('qboWeeklyImportConsent');
                 if (consentCb && !consentCb.dataset.qboBound) {
@@ -7029,14 +7158,13 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 '': '(Not set)',
                 weekly: 'Weekly',
                 bi_weekly: 'Bi-weekly',
-                semi_monthly: 'Semi-monthly',
                 monthly: 'Monthly',
                 quarterly: 'Quarterly',
                 semi_annual: 'Semi-annual',
                 annually: 'Annually',
-                one_off: 'One-off',
+                irregular: 'Irregular',
             };
-            const FREQUENCY_FILTER_ORDER = ['', 'weekly', 'bi_weekly', 'semi_monthly', 'monthly', 'quarterly', 'semi_annual', 'annually', 'one_off'];
+            const FREQUENCY_FILTER_ORDER = ['', 'weekly', 'bi_weekly', 'monthly', 'quarterly', 'semi_annual', 'annually', 'irregular'];
 
             const STATUS_COLUMN_FILTER_LABELS = {
                 pending: 'Pending',
@@ -7241,6 +7369,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         const frequencySelect = row.querySelector('.frequency-select');
                         if (frequencySelect) {
                             frequencySelect.value = payload.value;
+                            syncIrregularFrequencyHighlight(row);
                             calculateAnnualCost({ target: frequencySelect });
                         }
                         markRowDirty(row);
@@ -7500,18 +7629,18 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     </td>
                     <td class="cost-per-period">
                         <input type="text" name="cost[]" class="cost-input" placeholder="$0" data-row="${rowCount}" ${memberSpendLocked} />
+                        <span class="amount-range-hint" hidden></span>
                     </td>
                     <td class="frequency">
                         <select name="frequency[]" class="frequency-select" data-row="${rowCount}" ${memberFreqLocked}>
                             <option value="">Select</option>
                             <option value="weekly">Weekly</option>
                             <option value="bi_weekly">Bi-weekly</option>
-                            <option value="semi_monthly">Semi-monthly</option>
                             <option value="monthly">Monthly</option>
                             <option value="quarterly">Quarterly</option>
                             <option value="semi_annual">Semi-annual</option>
                             <option value="annually">Annually</option>
-                            <option value="one_off">One-off</option>
+                            <option value="irregular">Irregular</option>
                         </select>
                     </td>
                     <td class="annual-cost">
@@ -7584,14 +7713,64 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const frequencySelect = row.querySelector('.frequency-select');
                 const statusSelect = row.querySelector('.row-status-select');
 
-                costInput.addEventListener('input', calculateAnnualCost);
-                frequencySelect.addEventListener('change', calculateAnnualCost);
+                costInput.addEventListener('input', function(e) {
+                    calculateAnnualCost(e);
+                    syncAmountRangeHintVisibility(row);
+                });
+                frequencySelect.addEventListener('change', function(e) {
+                    syncIrregularFrequencyHighlight(row);
+                    calculateAnnualCost(e);
+                });
                 if (statusSelect) {
                     statusSelect.addEventListener('change', function() {
                         calculateAnnualSavings();
                         calculateConfirmedSavings();
                     });
                 }
+            }
+
+            function normalizeFrequencyClient(value) {
+                const f = String(value || '').trim();
+                if (f === 'one_off') return 'irregular';
+                if (f === 'semi_monthly') return 'bi_weekly';
+                return f;
+            }
+
+            function syncIrregularFrequencyHighlight(row) {
+                if (!row) return;
+                const frequencySelect = row.querySelector('.frequency-select');
+                const freq = normalizeFrequencyClient(frequencySelect ? frequencySelect.value : '');
+                row.classList.toggle('freq-irregular', freq === 'irregular');
+            }
+
+            function setAmountRangeHint(row, amountMin, amountMax) {
+                if (!row) return;
+                const hint = row.querySelector('.amount-range-hint');
+                if (!hint) return;
+                const hasMin = amountMin !== null && amountMin !== undefined && amountMin !== '';
+                const hasMax = amountMax !== null && amountMax !== undefined && amountMax !== '';
+                if (!hasMin || !hasMax) {
+                    hint.hidden = true;
+                    hint.textContent = '';
+                    delete row.dataset.amountMin;
+                    delete row.dataset.amountMax;
+                    return;
+                }
+                const minN = Number(amountMin);
+                const maxN = Number(amountMax);
+                row.dataset.amountMin = String(minN);
+                row.dataset.amountMax = String(maxN);
+                hint.textContent = formatMoneyInteger(minN) + '-' + formatMoneyInteger(maxN);
+                syncAmountRangeHintVisibility(row);
+            }
+
+            function syncAmountRangeHintVisibility(row) {
+                const hint = row.querySelector('.amount-range-hint');
+                if (!hint) return;
+                const costInput = row.querySelector('.cost-input');
+                const cost = costInput ? parseMoneyInput(costInput.value) : 0;
+                const hasRange = row.dataset.amountMin !== undefined && row.dataset.amountMax !== undefined;
+                hint.hidden = !(hasRange && cost === 0);
             }
             
             function calculateAnnualCost(event) {
@@ -7601,24 +7780,34 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const annualCostDisplay = row.querySelector('.annual-cost-display');
                 
                 const cost = parseMoneyInput(costInput.value);
-                const frequency = frequencySelect.value;
+                const frequency = normalizeFrequencyClient(frequencySelect.value);
                 
                 let multiplier = 0;
                 switch(frequency) {
                     case 'weekly': multiplier = 52; break;
                     case 'bi_weekly': multiplier = 26; break;
-                    case 'semi_monthly': multiplier = 24; break;
                     case 'monthly': multiplier = 12; break;
                     case 'quarterly': multiplier = 4; break;
                     case 'semi_annual': multiplier = 2; break;
                     case 'annually': multiplier = 1; break;
-                    case 'one_off': multiplier = 1; break;
+                    case 'irregular': multiplier = 0; break;
                 }
                 
-                const annualCost = cost * multiplier;
+                const annualCost = (frequency === 'irregular' || cost === 0) ? 0 : (cost * multiplier);
                 annualCostDisplay.textContent = formatMoneyInteger(annualCost);
                 
                 calculateAnnualSavings();
+            }
+
+            function rowContributesToSavings(row) {
+                const frequencySelect = row.querySelector('.frequency-select');
+                const costInput = row.querySelector('.cost-input');
+                const frequency = normalizeFrequencyClient(frequencySelect ? frequencySelect.value : '');
+                const cost = costInput ? parseMoneyInput(costInput.value) : 0;
+                if (frequency === 'irregular' || frequency === '') {
+                    return false;
+                }
+                return cost > 0;
             }
             
             function calculateAnnualSavings() {
@@ -7626,6 +7815,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 let totalSavings = 0;
 
                 rows.forEach(row => {
+                    if (!rowContributesToSavings(row)) {
+                        return;
+                    }
                     const status = getRowStatus(row);
                     const annualCostText = row.querySelector('.annual-cost-display').textContent;
                     const annualCost = parseFloat(annualCostText.replace(/[^0-9.-]/g, '')) || 0;
@@ -7644,6 +7836,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 let totalConfirmedSavings = 0;
 
                 rows.forEach(row => {
+                    if (!rowContributesToSavings(row)) {
+                        return;
+                    }
                     const status = getRowStatus(row);
                     const annualCostText = row.querySelector('.annual-cost-display').textContent;
                     const annualCost = parseFloat(annualCostText.replace(/[^0-9.-]/g, '')) || 0;
@@ -8506,7 +8701,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 const o = {
                     vendor_name: vendorName,
                     cost_per_period: costPerPeriod,
-                    frequency: frequency,
+                    frequency: normalizeFrequencyClient(frequency),
                     annual_cost: annualCost,
                     status: status,
                     cancel_keep: cancelKeep,
@@ -8520,6 +8715,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                     manager_user_id: managerOk ? managerParsed : null,
                     category_id: categoryOk ? categoryParsed : null
                 };
+                if (row.dataset.amountMin !== undefined && row.dataset.amountMin !== '') {
+                    o.amount_min = parseFloat(row.dataset.amountMin);
+                }
+                if (row.dataset.amountMax !== undefined && row.dataset.amountMax !== '') {
+                    o.amount_max = parseFloat(row.dataset.amountMax);
+                }
                 if (idVal) { o.id = idVal; }
                 return o;
             }
@@ -8789,7 +8990,16 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     }
 
                                     if (costInput) costInput.value = Number(item.cost_per_period) !== 0 ? formatCostInputValue(item.cost_per_period) : '';
-                                    if (frequencySelect) frequencySelect.value = item.frequency || '';
+                                    setAmountRangeHint(lastRow, item.amount_min, item.amount_max);
+                                    if (frequencySelect) {
+                                        const freqVal = normalizeFrequencyClient(item.frequency || '');
+                                        frequencySelect.value = freqVal;
+                                        if (frequencySelect.value !== freqVal && freqVal) {
+                                            // Ensure option exists for remapped legacy values.
+                                            frequencySelect.value = freqVal === 'irregular' ? 'irregular' : '';
+                                        }
+                                    }
+                                    syncIrregularFrequencyHighlight(lastRow);
                                     if (mgr) {
                                         const mid = item.manager_user_id ? String(item.manager_user_id) : '';
                                         mgr.innerHTML = managerOptionsHtml(mid);
@@ -9153,6 +9363,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 initColumnHeaderHelp();
                 initPostProjectCreateFlow();
                 initQboConnectConsent();
+                initQboRevisitSyncUi();
                 resumePostCreateQboSyncFromOAuth();
                 initNavSubmenus();
                 initPurposeColumnToggle();
@@ -9161,7 +9372,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                 initVendorColumnSort();
                 initVendorColumnHeaderFilters();
                 initNewCategoryModal();
-                loadProjectsIntoMenu();
+                loadProjectsIntoMenu().then(function() {
+                    maybePromptQboRevisitSync();
+                });
                 syncBulkManagerOptions();
                 syncBulkCategoryOptions();
                 const projectSwitcher = document.getElementById('projectSwitcherSelect');
@@ -9181,6 +9394,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 updateActiveProjectHeader(selectedName);
                                 loadCalculatorData();
                                 showSnackbar('Switched to ' + selectedName, 'success');
+                                maybePromptQboRevisitSync();
                             })
                             .catch(function() {
                                 showSnackbar('Could not switch project.', 'error');
@@ -10884,6 +11098,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             </small>
                         </label>
                         <?php endif; ?>
+                        <?php if ($can_manage_qbo): ?>
+                        <label style="font-size:14px;"><input type="checkbox" name="prompt_qbo_sync_on_revisit" value="1" <?php echo $prompt_qbo_sync_on_revisit ? 'checked' : ''; ?>> Prompt QBO sync on revisit of a project</label>
+                        <?php endif; ?>
                         <label style="font-size:14px;"><input type="checkbox" name="user_deadline_reminders" value="1" <?php echo $deadline_reminders_user ? 'checked' : ''; ?>> Email me cancellation date reminders</label>
                         <div><button type="submit">Save</button></div>
                     </form>
@@ -11055,6 +11272,30 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         </div>
     </div>
 
+    <div class="app-modal-overlay" id="appModalQboRevisitSync" role="dialog" aria-modal="true" aria-labelledby="appModalQboRevisitSyncTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalQboRevisitSyncTitle">Update project vendors?</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <p style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;">
+                    Would you like to update this project’s vendors from QuickBooks Online?
+                    New vendors will be added, and new transactions for existing vendors will be imported.
+                    Existing vendor amounts and frequencies will not be changed.
+                </p>
+                <label class="checkbox-label" style="margin:0 0 16px;">
+                    <input type="checkbox" id="qboRevisitDoNotAsk">
+                    <span>Do not ask me again</span>
+                </label>
+                <div style="display:flex;gap:8px;justify-content:flex-end;">
+                    <button type="button" class="btn-secondary" id="qboRevisitSyncCancelBtn">Cancel</button>
+                    <button type="button" id="qboRevisitSyncOkBtn">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <button type="button" class="bulk-action-btn" data-open-modal="appModalBulkActions" aria-hidden="true">Bulk Actions</button>
 
     <div class="app-modal-overlay" id="appModalBulkActions" role="dialog" aria-modal="true" aria-labelledby="appModalBulkActionsTitle" aria-hidden="true">
@@ -11086,12 +11327,11 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 <option value="">Select frequency</option>
                                 <option value="weekly">Weekly</option>
                                 <option value="bi_weekly">Bi-weekly</option>
-                                <option value="semi_monthly">Semi-monthly</option>
                                 <option value="monthly">Monthly</option>
                                 <option value="quarterly">Quarterly</option>
                                 <option value="semi_annual">Semi-annual</option>
                                 <option value="annually">Annually</option>
-                                <option value="one_off">One-off</option>
+                                <option value="irregular">Irregular</option>
                             </select>
                         </div>
                         <div id="bulkStatusWrap" style="display:none;">

@@ -227,11 +227,22 @@ class VendorService
         $legacy = self::statusToLegacy($status);
         $purpose = $row['purpose_of_subscription'] ?? ($row['notes'] ?? '');
 
+        $amountMin = null;
+        $amountMax = null;
+        if (isset($row['amount_min']) && $row['amount_min'] !== null && $row['amount_min'] !== '') {
+            $amountMin = self::jsonSafeFloat($row['amount_min']);
+        }
+        if (isset($row['amount_max']) && $row['amount_max'] !== null && $row['amount_max'] !== '') {
+            $amountMax = self::jsonSafeFloat($row['amount_max']);
+        }
+
         return [
             'id' => (int) $row['id'],
             'vendor_name' => $row['vendor_name'],
             'cost_per_period' => self::jsonSafeFloat($row['cost_per_period'] ?? 0),
-            'frequency' => $row['frequency'],
+            'amount_min' => $amountMin,
+            'amount_max' => $amountMax,
+            'frequency' => self::normalizeFrequencyValue($row['frequency'] ?? ''),
             'annual_cost' => self::jsonSafeFloat($row['annual_cost'] ?? 0),
             'status' => $status,
             'status_label' => self::statusLabel($status),
@@ -251,6 +262,37 @@ class VendorService
             'cancellation_deadline' => $row['cancellation_deadline'] ?? null,
             'last_payment_date' => $row['last_payment_date'] ?? null,
         ];
+    }
+
+    public static function normalizeFrequencyValue($frequency): string
+    {
+        $f = trim((string) $frequency);
+        if ($f === 'one_off') {
+            return 'irregular';
+        }
+        if ($f === 'semi_monthly') {
+            return 'bi_weekly';
+        }
+
+        return $f;
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     * @return array{0:?float,1:?float}
+     */
+    private static function resolveAmountRangeFromItem(array $item): array
+    {
+        $min = null;
+        $max = null;
+        if (array_key_exists('amount_min', $item) && $item['amount_min'] !== null && $item['amount_min'] !== '') {
+            $min = self::jsonSafeFloat($item['amount_min']);
+        }
+        if (array_key_exists('amount_max', $item) && $item['amount_max'] !== null && $item['amount_max'] !== '') {
+            $max = self::jsonSafeFloat($item['amount_max']);
+        }
+
+        return [$min, $max];
     }
 
     /**
@@ -350,11 +392,11 @@ class VendorService
             $savedIds = [];
 
             $ins = $pdo->prepare(
-                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, category_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, category_id, vendor_name, cost_per_period, amount_min, amount_max, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $upd = $pdo->prepare(
-                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, category_id=?, vendor_name=?, cost_per_period=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?
+                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, category_id=?, vendor_name=?, cost_per_period=?, amount_min=?, amount_max=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?
                  WHERE id=? AND org_id=? AND project_id=?'
             );
 
@@ -379,6 +421,8 @@ class VendorService
                 $categoryId = CategoryService::resolveCategoryIdFromItem($pdo, $orgId, $projectId, $item);
                 $deadline = self::normDate($item['cancellation_deadline'] ?? null);
                 $lastPay = self::normDate($item['last_payment_date'] ?? null);
+                [$amountMin, $amountMax] = self::resolveAmountRangeFromItem($item);
+                $frequency = self::normalizeFrequencyValue($item['frequency'] ?? '');
 
                 if ($rowId > 0) {
                     if (!isset($allowedIds[$rowId])) {
@@ -399,7 +443,9 @@ class VendorService
                         $categoryId,
                         $vendorName,
                         (float) ($item['cost_per_period'] ?? 0),
-                        $item['frequency'] ?? '',
+                        $amountMin,
+                        $amountMax,
+                        $frequency,
                         (float) ($item['annual_cost'] ?? 0),
                         $status,
                         self::cancelKeepToDb($legacy['cancel_keep']),
@@ -423,7 +469,9 @@ class VendorService
                         $categoryId,
                         $item['vendor_name'] ?? '',
                         (float) ($item['cost_per_period'] ?? 0),
-                        $item['frequency'] ?? '',
+                        $amountMin,
+                        $amountMax,
+                        $frequency,
                         (float) ($item['annual_cost'] ?? 0),
                         $status,
                         self::cancelKeepToDb($legacy['cancel_keep']),
@@ -510,11 +558,11 @@ class VendorService
             $cc = '';
 
             $ins = $pdo->prepare(
-                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, category_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, category_id, vendor_name, cost_per_period, amount_min, amount_max, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $upd = $pdo->prepare(
-                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, category_id=?, vendor_name=?, cost_per_period=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?
+                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, category_id=?, vendor_name=?, cost_per_period=?, amount_min=?, amount_max=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?
                  WHERE id=? AND org_id=? AND project_id=?'
             );
 
@@ -536,6 +584,8 @@ class VendorService
                 $categoryId = CategoryService::resolveCategoryIdFromItem($pdo, $orgId, $projectId, $item);
                 $deadline = self::normDate($item['cancellation_deadline'] ?? null);
                 $lastPay = self::normDate($item['last_payment_date'] ?? null);
+                [$amountMin, $amountMax] = self::resolveAmountRangeFromItem($item);
+                $frequency = self::normalizeFrequencyValue($item['frequency'] ?? '');
 
                 if ($rowId > 0) {
                     if (!isset($allowedIds[$rowId])) {
@@ -556,7 +606,9 @@ class VendorService
                         $categoryId,
                         $vendorName,
                         (float) ($item['cost_per_period'] ?? 0),
-                        $item['frequency'] ?? '',
+                        $amountMin,
+                        $amountMax,
+                        $frequency,
                         (float) ($item['annual_cost'] ?? 0),
                         $status,
                         self::cancelKeepToDb($legacy['cancel_keep']),
@@ -580,7 +632,9 @@ class VendorService
                         $categoryId,
                         $item['vendor_name'] ?? '',
                         (float) ($item['cost_per_period'] ?? 0),
-                        $item['frequency'] ?? '',
+                        $amountMin,
+                        $amountMax,
+                        $frequency,
                         (float) ($item['annual_cost'] ?? 0),
                         $status,
                         self::cancelKeepToDb($legacy['cancel_keep']),
@@ -674,14 +728,19 @@ class VendorService
      * @param array<int, array<string, mixed>> $items
      * @return array{success:bool, inserted?:int, error?:string}
      */
+    /**
+     * @return array{success:bool, inserted?:int, inserted_ids?:array<int,int>, inserted_meta?:array<int, array{id:int,frequency:string,amount_min:?float,amount_max:?float,amount_irregular:bool}>, error?:string}
+     */
     public static function appendImportedRows(PDO $pdo, int $orgId, int $projectId, int $userId, array $items): array
     {
         $email = self::getUserEmail($pdo, $userId);
         $ins = $pdo->prepare(
-            'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date, account)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+            'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, amount_min, amount_max, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date, account)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         $n = 0;
+        $insertedIds = [];
+        $insertedMeta = [];
         try {
             foreach ($items as $item) {
                 if (!is_array($item)) {
@@ -707,6 +766,10 @@ class VendorService
                 if ($account === '(No account)') {
                     $account = '';
                 }
+                [$amountMin, $amountMax] = self::resolveAmountRangeFromItem($item);
+                $frequency = self::normalizeFrequencyValue($item['frequency'] ?? '');
+                $amountIrregular = !empty($item['amount_irregular'])
+                    || ($amountMin !== null && $amountMax !== null && $amountMin !== $amountMax);
                 $ins->execute([
                     $orgId,
                     $projectId,
@@ -715,7 +778,9 @@ class VendorService
                     $mgr,
                     $item['vendor_name'] ?? '',
                     (float) ($item['cost_per_period'] ?? 0),
-                    $item['frequency'] ?? '',
+                    $amountMin,
+                    $amountMax,
+                    $frequency,
                     (float) ($item['annual_cost'] ?? 0),
                     $status,
                     self::cancelKeepToDb($legacy['cancel_keep']),
@@ -726,10 +791,26 @@ class VendorService
                     $lastPay,
                     $account !== '' ? $account : null,
                 ]);
+                $newId = (int) $pdo->lastInsertId();
+                if ($newId > 0) {
+                    $insertedIds[] = $newId;
+                    $insertedMeta[] = [
+                        'id' => $newId,
+                        'frequency' => $frequency,
+                        'amount_min' => $amountMin,
+                        'amount_max' => $amountMax,
+                        'amount_irregular' => $amountIrregular,
+                    ];
+                }
                 ++$n;
             }
 
-            return ['success' => true, 'inserted' => $n];
+            return [
+                'success' => true,
+                'inserted' => $n,
+                'inserted_ids' => $insertedIds,
+                'inserted_meta' => $insertedMeta,
+            ];
         } catch (PDOException $e) {
             error_log('VendorService::appendImportedRows: ' . $e->getMessage());
 
@@ -805,6 +886,84 @@ class VendorService
         return StringUtil::strtolower($vendorName);
     }
 
+    public static function projectHasVendors(PDO $pdo, int $orgId, int $projectId): bool
+    {
+        $st = $pdo->prepare(
+            'SELECT 1 FROM cost_calculator_items WHERE org_id = ? AND project_id = ? LIMIT 1'
+        );
+        $st->execute([$orgId, $projectId]);
+
+        return (bool) $st->fetchColumn();
+    }
+
+    /**
+     * @return array<string, true> Map of normalized vendor name => true
+     */
+    public static function existingNormalizedVendorNames(PDO $pdo, int $orgId, int $projectId): array
+    {
+        $st = $pdo->prepare(
+            'SELECT vendor_name FROM cost_calculator_items WHERE org_id = ? AND project_id = ?'
+        );
+        $st->execute([$orgId, $projectId]);
+        $map = [];
+        while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+            $norm = self::normalizeVendorName(trim((string) ($row['vendor_name'] ?? '')));
+            if ($norm !== '') {
+                $map[$norm] = true;
+            }
+        }
+
+        return $map;
+    }
+
+    /**
+     * Fingerprint used to dedupe raw transactions within a project.
+     */
+    public static function rawTransactionFingerprint(
+        string $vendorNorm,
+        string $date,
+        float $amount,
+        string $type,
+        string $account,
+        string $memo
+    ): string {
+        return implode('|', [
+            $vendorNorm,
+            $date,
+            number_format($amount, 2, '.', ''),
+            $type,
+            $account,
+            $memo,
+        ]);
+    }
+
+    /**
+     * @return array<string, true>
+     */
+    public static function existingRawTransactionFingerprints(PDO $pdo, int $orgId, int $projectId): array
+    {
+        $st = $pdo->prepare(
+            'SELECT vendor_name_normalized, transaction_date, amount, transaction_type, account, memo
+             FROM vendor_raw_transactions
+             WHERE org_id = ? AND project_id = ?'
+        );
+        $st->execute([$orgId, $projectId]);
+        $map = [];
+        while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+            $fp = self::rawTransactionFingerprint(
+                (string) ($row['vendor_name_normalized'] ?? ''),
+                (string) ($row['transaction_date'] ?? ''),
+                (float) ($row['amount'] ?? 0),
+                trim((string) ($row['transaction_type'] ?? '')),
+                trim((string) ($row['account'] ?? '')),
+                trim((string) ($row['memo'] ?? ''))
+            );
+            $map[$fp] = true;
+        }
+
+        return $map;
+    }
+
     /**
      * @param array<int, array<string, mixed>> $rows
      * @return array{success:bool, inserted?:int, error?:string}
@@ -817,12 +976,64 @@ class VendorService
         string $uploadBatchId,
         array $rows
     ): array {
+        return self::appendRawTransactionsInternal(
+            $pdo,
+            $orgId,
+            $projectId,
+            $uploadedByUserId,
+            $uploadBatchId,
+            $rows,
+            false
+        );
+    }
+
+    /**
+     * Append raw transactions, skipping rows that already exist for the project
+     * (matched on vendor_name_normalized, date, amount, type, account, memo).
+     *
+     * @param array<int, array<string, mixed>> $rows
+     * @return array{success:bool, inserted?:int, skipped?:int, error?:string}
+     */
+    public static function appendRawTransactionsDeduped(
+        PDO $pdo,
+        int $orgId,
+        int $projectId,
+        int $uploadedByUserId,
+        string $uploadBatchId,
+        array $rows
+    ): array {
+        return self::appendRawTransactionsInternal(
+            $pdo,
+            $orgId,
+            $projectId,
+            $uploadedByUserId,
+            $uploadBatchId,
+            $rows,
+            true
+        );
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @return array{success:bool, inserted?:int, skipped?:int, error?:string}
+     */
+    private static function appendRawTransactionsInternal(
+        PDO $pdo,
+        int $orgId,
+        int $projectId,
+        int $uploadedByUserId,
+        string $uploadBatchId,
+        array $rows,
+        bool $dedupe
+    ): array {
         $stmt = $pdo->prepare(
             'INSERT INTO vendor_raw_transactions
             (org_id, project_id, uploaded_by_user_id, upload_batch_id, vendor_name, vendor_name_normalized, transaction_date, amount, transaction_type, account, memo)
             VALUES (?,?,?,?,?,?,?,?,?,?,?)'
         );
+        $existing = $dedupe ? self::existingRawTransactionFingerprints($pdo, $orgId, $projectId) : [];
         $inserted = 0;
+        $skipped = 0;
         try {
             foreach ($rows as $row) {
                 if (!is_array($row)) {
@@ -833,23 +1044,41 @@ class VendorService
                 if ($vendorName === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
                     continue;
                 }
+                $amount = (float) ($row['amount'] ?? 0);
+                $type = trim((string) ($row['transaction_type'] ?? ''));
+                $account = trim((string) ($row['account'] ?? ''));
+                $memo = trim((string) ($row['memo'] ?? ''));
+                $norm = self::normalizeVendorName($vendorName);
+                if ($dedupe) {
+                    $fp = self::rawTransactionFingerprint($norm, $date, $amount, $type, $account, $memo);
+                    if (isset($existing[$fp])) {
+                        ++$skipped;
+                        continue;
+                    }
+                    $existing[$fp] = true;
+                }
                 $stmt->execute([
                     $orgId,
                     $projectId,
                     $uploadedByUserId,
                     $uploadBatchId,
                     $vendorName,
-                    self::normalizeVendorName($vendorName),
+                    $norm,
                     $date,
-                    (float) ($row['amount'] ?? 0),
-                    trim((string) ($row['transaction_type'] ?? '')),
-                    trim((string) ($row['account'] ?? '')),
-                    trim((string) ($row['memo'] ?? '')),
+                    $amount,
+                    $type,
+                    $account,
+                    $memo,
                 ]);
                 ++$inserted;
             }
 
-            return ['success' => true, 'inserted' => $inserted];
+            $out = ['success' => true, 'inserted' => $inserted];
+            if ($dedupe) {
+                $out['skipped'] = $skipped;
+            }
+
+            return $out;
         } catch (PDOException $e) {
             error_log('VendorService::appendRawTransactions: ' . $e->getMessage());
 

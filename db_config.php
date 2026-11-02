@@ -258,6 +258,7 @@ function migrateSchema(PDO $pdo) {
             `max_users` TINYINT UNSIGNED NOT NULL DEFAULT 20,
             `deadline_reminders_enabled` TINYINT(1) NOT NULL DEFAULT 1,
             `notification_webhook_url` VARCHAR(1024) NULL,
+            `prompt_qbo_sync_on_revisit` TINYINT(1) NOT NULL DEFAULT 1,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
@@ -268,6 +269,11 @@ function migrateSchema(PDO $pdo) {
         $orgWebhookCol = $pdo->query("SHOW COLUMNS FROM `organizations` LIKE 'notification_webhook_url'")->fetch();
         if (!$orgWebhookCol) {
             $pdo->exec('ALTER TABLE `organizations` ADD COLUMN `notification_webhook_url` VARCHAR(1024) NULL AFTER `deadline_reminders_enabled`');
+        }
+
+        $orgPromptQboCol = $pdo->query("SHOW COLUMNS FROM `organizations` LIKE 'prompt_qbo_sync_on_revisit'")->fetch();
+        if (!$orgPromptQboCol) {
+            $pdo->exec('ALTER TABLE `organizations` ADD COLUMN `prompt_qbo_sync_on_revisit` TINYINT(1) NOT NULL DEFAULT 1 AFTER `notification_webhook_url`');
         }
 
         try {
@@ -745,10 +751,35 @@ function migrateCostCalculatorSchema(PDO $pdo) {
     migrateVendorDetailSchema($pdo);
     migrateVendorRawTransactionSchema($pdo);
     migrateCostCalculatorAccountSchema($pdo);
+    migrateCostCalculatorFrequencyAmountSchema($pdo);
     migrateVendorChatSchema($pdo);
     migrateVendorChatEditSchema($pdo);
     migrateVendorChatReadStateSchema($pdo);
     migrateVendorChatMentionsSchema($pdo);
+}
+
+/**
+ * Frequency value remaps + amount range columns for irregular-amount display.
+ *
+ * @param PDO $pdo
+ */
+function migrateCostCalculatorFrequencyAmountSchema(PDO $pdo): void
+{
+    try {
+        $st = $pdo->query("SHOW COLUMNS FROM `cost_calculator_items` LIKE 'amount_min'");
+        if ($st && !$st->fetch()) {
+            $pdo->exec('ALTER TABLE `cost_calculator_items` ADD COLUMN `amount_min` DECIMAL(12, 2) NULL AFTER `cost_per_period`');
+        }
+        $st = $pdo->query("SHOW COLUMNS FROM `cost_calculator_items` LIKE 'amount_max'");
+        if ($st && !$st->fetch()) {
+            $pdo->exec('ALTER TABLE `cost_calculator_items` ADD COLUMN `amount_max` DECIMAL(12, 2) NULL AFTER `amount_min`');
+        }
+
+        $pdo->exec("UPDATE `cost_calculator_items` SET `frequency` = 'irregular' WHERE `frequency` = 'one_off'");
+        $pdo->exec("UPDATE `cost_calculator_items` SET `frequency` = 'bi_weekly' WHERE `frequency` = 'semi_monthly'");
+    } catch (PDOException $e) {
+        error_log('migrateCostCalculatorFrequencyAmountSchema: ' . $e->getMessage());
+    }
 }
 
 /**

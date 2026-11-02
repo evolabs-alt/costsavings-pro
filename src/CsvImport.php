@@ -102,25 +102,14 @@ class CsvImport
             }
         }
 
-        $payeeRows = [];
         $rawRows = [];
 
         foreach ($ctx['transactions'] as $txn) {
             if ($filter !== null && !isset($filter[$txn['account']])) {
                 continue;
             }
-            $payee = $txn['payee'];
-            if (!isset($payeeRows[$payee])) {
-                $payeeRows[$payee] = [];
-            }
-            $payeeRows[$payee][] = [
-                'date' => $txn['date'],
-                'amount' => $txn['amount'],
-                'account' => $txn['account'],
-                'transaction_type' => $txn['transaction_type'],
-            ];
             $rawRows[] = [
-                'vendor_name' => $payee,
+                'vendor_name' => $txn['payee'],
                 'transaction_date' => $txn['date'],
                 'amount' => $txn['amount'],
                 'transaction_type' => $txn['transaction_type'],
@@ -129,14 +118,7 @@ class CsvImport
             ];
         }
 
-        $summary = [];
-        foreach ($payeeRows as $payee => $rows) {
-            if (count($rows) > 0) {
-                $summary[] = self::buildVendorSummary($payee, $rows);
-            }
-        }
-
-        return ['summary' => $summary, 'raw' => $rawRows];
+        return FrequencyPatternService::buildSplitImportPayload($rawRows);
     }
 
     /**
@@ -278,10 +260,8 @@ class CsvImport
         $headers = str_getcsv($lines[$headerIdx] ?? '');
         $headerMap = self::buildHeaderMap($headers);
 
-        $vendors = [];
         $rawRows = [];
         $currentVendor = null;
-        $rows = [];
 
         for ($i = $headerIdx + 1; $i < count($lines); $i++) {
             $line = $lines[$i];
@@ -293,20 +273,12 @@ class CsvImport
             $isTotal = stripos($first, 'Total for ') === 0;
 
             if ($first !== '' && !$isTotal) {
-                if ($currentVendor !== null && count($rows) > 0) {
-                    $vendors[] = self::buildVendorSummary($currentVendor, $rows);
-                }
                 $currentVendor = $first;
-                $rows = [];
                 continue;
             }
 
             if ($isTotal) {
-                if ($currentVendor !== null && count($rows) > 0) {
-                    $vendors[] = self::buildVendorSummary($currentVendor, $rows);
-                }
                 $currentVendor = null;
-                $rows = [];
                 continue;
             }
 
@@ -338,12 +310,6 @@ class CsvImport
                 ['transaction type', 'type']
             );
             $normalizedAmount = self::normalizeAmountByType($amt, $transactionType);
-            $rows[] = [
-                'date' => $dt,
-                'amount' => $normalizedAmount,
-                'account' => $account,
-                'transaction_type' => $transactionType,
-            ];
             $rawRows[] = [
                 'vendor_name' => $currentVendor,
                 'transaction_date' => $dt,
@@ -358,11 +324,7 @@ class CsvImport
             ];
         }
 
-        if ($currentVendor !== null && count($rows) > 0) {
-            $vendors[] = self::buildVendorSummary($currentVendor, $rows);
-        }
-
-        return ['summary' => $vendors, 'raw' => $rawRows];
+        return FrequencyPatternService::buildSplitImportPayload($rawRows);
     }
 
     /**
@@ -428,70 +390,12 @@ class CsvImport
     }
 
     /**
-     * @param array<int, array{date:string,amount:float,account?:string,transaction_type?:string}> $rows
-     * @return array{vendor_name:string,cost_per_period:float,frequency:string,annual_cost:float,last_payment_date:?string,account:string}
+     * @param array<int, array{date:string,amount:float,account?:string,transaction_type?:string,memo?:string}> $rows
+     * @return array{vendor_name:string,cost_per_period:float,frequency:string,annual_cost:float,last_payment_date:?string,account:string,amount_min:?float,amount_max:?float,amount_irregular:bool}
      */
     public static function buildVendorSummary(string $vendorName, array $rows): array
     {
-        usort($rows, function ($a, $b) {
-            return strcmp($a['date'], $b['date']);
-        });
-
-        $spendRows = [];
-        foreach ($rows as $r) {
-            $type = isset($r['transaction_type']) ? (string) $r['transaction_type'] : '';
-            if (self::isDepositType($type)) {
-                continue;
-            }
-            $spendRows[] = $r;
-        }
-
-        // Prefer non-deposit spend; deposit-only vendors use deposit amounts (already negative).
-        $costRows = count($spendRows) > 0 ? $spendRows : $rows;
-
-        $accountNames = [];
-        foreach ($rows as $r) {
-            if (isset($r['account'])) {
-                $accountNames[] = (string) $r['account'];
-            }
-        }
-        $accountJoined = self::uniqueAccountsJoined($accountNames);
-
-        if (count($costRows) === 0) {
-            return [
-                'vendor_name' => $vendorName,
-                'cost_per_period' => 0.0,
-                'frequency' => 'one_off',
-                'annual_cost' => 0.0,
-                'last_payment_date' => null,
-                'account' => $accountJoined,
-            ];
-        }
-
-        $lastRow = $costRows[count($costRows) - 1];
-        $latestAmount = (float) $lastRow['amount'];
-
-        $dates = array_column($costRows, 'date');
-        $gaps = [];
-        for ($i = 1; $i < count($dates); $i++) {
-            $d1 = new \DateTimeImmutable($dates[$i - 1]);
-            $d2 = new \DateTimeImmutable($dates[$i]);
-            $gaps[] = (int) $d2->diff($d1)->format('%a');
-        }
-
-        $frequency = self::inferFrequency($gaps);
-        $mult = self::annualMultiplier($frequency);
-        $annual = $latestAmount * $mult;
-        $last = $dates[count($dates) - 1] ?? null;
-
-        return [
-            'vendor_name' => $vendorName,
-            'cost_per_period' => round($latestAmount, 2),
-            'frequency' => $frequency,
-            'annual_cost' => round($annual, 2),
-            'last_payment_date' => $last,
-            'account' => $accountJoined,
-        ];
+        return FrequencyPatternService::summarizeSeries($vendorName, $rows);
     }
 
     public static function isDepositType(?string $type): bool
@@ -506,77 +410,6 @@ class CsvImport
         }
 
         return abs($amount);
-    }
-
-    /**
-     * @param array<int, float> $gaps
-     */
-    private static function inferFrequency(array $gaps): string
-    {
-        if (count($gaps) === 0) {
-            return 'one_off';
-        }
-        sort($gaps);
-        $med = self::median($gaps);
-        if ($med <= 10) {
-            return 'weekly';
-        }
-        if ($med <= 16) {
-            return 'bi_weekly';
-        }
-        if ($med <= 40) {
-            return 'monthly';
-        }
-        if ($med <= 70) {
-            return 'quarterly';
-        }
-        if ($med <= 200) {
-            return 'semi_annual';
-        }
-
-        return 'annually';
-    }
-
-    private static function annualMultiplier(string $frequency): float
-    {
-        switch ($frequency) {
-            case 'weekly':
-                return 52;
-            case 'bi_weekly':
-                return 26;
-            case 'semi_monthly':
-                return 24;
-            case 'monthly':
-                return 12;
-            case 'quarterly':
-                return 4;
-            case 'semi_annual':
-                return 2;
-            case 'annually':
-                return 1;
-            case 'one_off':
-                return 1;
-            default:
-                return 12;
-        }
-    }
-
-    /**
-     * @param array<int, float> $nums
-     */
-    private static function median(array $nums): float
-    {
-        $c = count($nums);
-        if ($c === 0) {
-            return 0.0;
-        }
-        sort($nums);
-        $mid = (int) floor(($c - 1) / 2);
-        if ($c % 2 === 1) {
-            return (float) $nums[$mid];
-        }
-
-        return ((float) $nums[$mid] + (float) $nums[$mid + 1]) / 2.0;
     }
 
     public static function parseDate(string $s): ?string
