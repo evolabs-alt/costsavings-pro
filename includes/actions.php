@@ -597,11 +597,16 @@ function handleInviteMember() {
     }
 
     $link = membersAppUrl() . '/register?email=' . rawurlencode($email);
-    $body = '<p>You have been invited to Savvy Saver (Cost Savings).</p>'
-        . '<p>Create your Savvy CFO Members account (or sign in), then open <strong>Savvy Saver</strong> from your products list.</p>'
-        . '<p><a href="' . htmlspecialchars($link) . '">Continue on Members</a></p>'
-        . '<p style="font-size:13px;color:#555;">If the link above does not work, copy and paste this address into your browser:<br>'
-        . htmlspecialchars($link) . '</p>';
+    $inviteBody = '<p>You have been invited to Savvy Saver (Cost Savings).</p>'
+        . '<p>Create your Savvy CFO Members account (or sign in), then open <strong>Savvy Saver</strong> from your products list.</p>';
+    $body = csEmailHtmlWrap(
+        'Your invitation — Savvy Saver',
+        $inviteBody,
+        'Continue on Members',
+        $link,
+        null,
+        'You have been invited to Savvy Saver'
+    );
     $mailResult = sendInviteEmail($email, 'Your invitation — Savvy Saver', $body);
     if ($mailResult !== true) {
         $mailDetail = '';

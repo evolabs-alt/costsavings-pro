@@ -33,6 +33,7 @@ class ReminderService
 
     /**
      * Send deadline reminders (T-7, T, T+7) for pending cancellations.
+     * Batches one email per manager email + reminder type.
      *
      * @param callable(string,string,string):bool|array $sendEmail fn($to, $subject, $htmlBody)
      * @return array{sent:int, errors:array<int, string>}
@@ -41,6 +42,8 @@ class ReminderService
     {
         $sent = 0;
         $errors = [];
+        /** @var array<string, array{email:string, first_name:string, type:string, vendors:array<int, array{id:int, name:string, deadline:string}>}> $buckets */
+        $buckets = [];
 
         $orgs = $pdo->query('SELECT id, deadline_reminders_enabled FROM organizations')->fetchAll(PDO::FETCH_ASSOC);
         foreach ($orgs as $org) {
@@ -48,7 +51,8 @@ class ReminderService
                 continue;
             }
             $oid = (int) $org['id'];
-            $sql = "SELECT cci.*, u.email AS mgr_email, u.deadline_reminders_enabled AS u_rem
+            $sql = "SELECT cci.*, u.email AS mgr_email, u.first_name AS mgr_first_name,
+                           u.deadline_reminders_enabled AS u_rem
                     FROM cost_calculator_items cci
                     LEFT JOIN users u ON u.id = cci.manager_user_id
                     WHERE cci.org_id = ?
@@ -95,36 +99,54 @@ class ReminderService
                     continue;
                 }
 
-                $to = $row['mgr_email'] ?? '';
+                $to = trim((string) ($row['mgr_email'] ?? ''));
                 if ($to === '') {
                     continue;
                 }
 
-                $vendor = $row['vendor_name'] ?? 'Vendor';
-                $subj = 'Cost savings: cancellation reminder — ' . $vendor;
-                $body = '<p>Reminder regarding cancellation deadline for <strong>' . htmlspecialchars($vendor) . '</strong>.</p>';
-                $body .= '<p>Deadline: ' . htmlspecialchars($deadline) . '</p>';
-                if ($type === 't_minus_7') {
-                    $body .= '<p>One week until your committed cancellation date.</p>';
-                } elseif ($type === 'deadline_day') {
-                    $body .= '<p>Today is the cancellation deadline you committed to.</p>';
-                } else {
-                    $body .= '<p>One week past your cancellation deadline — please confirm if still pending.</p>';
+                $key = strtolower($to) . '|' . $type;
+                if (!isset($buckets[$key])) {
+                    $buckets[$key] = [
+                        'email' => $to,
+                        'first_name' => trim((string) ($row['mgr_first_name'] ?? '')),
+                        'type' => $type,
+                        'vendors' => [],
+                    ];
                 }
+                $buckets[$key]['vendors'][] = [
+                    'id' => $vid,
+                    'name' => (string) ($row['vendor_name'] ?? 'Vendor'),
+                    'deadline' => (string) $deadline,
+                ];
+            }
+        }
 
-                $r = $sendEmail($to, $subj, $body);
-                $ok = $r === true;
-                if ($ok) {
-                    try {
-                        $ins = $pdo->prepare(
-                            'INSERT IGNORE INTO reminder_sent (vendor_item_id, reminder_type, sent_on_date) VALUES (?,?, CURDATE())'
-                        );
-                        $ins->execute([$vid, $type]);
-                        ++$sent;
-                    } catch (PDOException $e) {
-                        $errors[] = $e->getMessage();
+        foreach ($buckets as $bucket) {
+            if ($bucket['vendors'] === []) {
+                continue;
+            }
+            $type = $bucket['type'];
+            $subj = self::cancellationReminderSubject($type);
+            $body = self::buildCancellationReminderHtml(
+                $bucket['first_name'],
+                $type,
+                $bucket['vendors']
+            );
+            $r = $sendEmail($bucket['email'], $subj, $body);
+            if ($r === true) {
+                try {
+                    $ins = $pdo->prepare(
+                        'INSERT IGNORE INTO reminder_sent (vendor_item_id, reminder_type, sent_on_date) VALUES (?,?, CURDATE())'
+                    );
+                    foreach ($bucket['vendors'] as $vendor) {
+                        $ins->execute([(int) $vendor['id'], $type]);
                     }
+                    ++$sent;
+                } catch (PDOException $e) {
+                    $errors[] = $e->getMessage();
                 }
+            } else {
+                $errors[] = $bucket['email'] . ': ' . self::sendFailureMessage($r);
             }
         }
 
@@ -215,8 +237,9 @@ class ReminderService
                 continue;
             }
 
-            $html = self::buildApproachingRenewalsHtml($hits, $today);
-            $subj = 'Approaching renewals — ' . $today->format('M j, Y');
+            $firstName = trim((string) ($u['first_name'] ?? ''));
+            $html = self::buildApproachingRenewalsHtml($hits, $today, $firstName);
+            $subj = self::approachingRenewalsSubject($hits);
             $r = $sendEmail($email, $subj, $html);
             $entry['send_result'] = self::summarizeSendResult($r);
             if ($r === true) {
@@ -534,12 +557,12 @@ class ReminderService
     }
 
     /**
-     * @return array<int, array{id:int, email:string}>
+     * @return array<int, array{id:int, email:string, first_name:string}>
      */
     private static function eligibleReminderUsers(PDO $pdo): array
     {
         $rows = $pdo->query(
-            'SELECT u.id, u.email
+            'SELECT u.id, u.email, u.first_name
              FROM users u
              WHERE u.email IS NOT NULL AND TRIM(u.email) <> \'\'
                AND (u.deadline_reminders_enabled IS NULL OR u.deadline_reminders_enabled = 1)'
@@ -639,56 +662,206 @@ class ReminderService
     /**
      * @param array<int, array<string, mixed>> $hits
      */
-    private static function buildApproachingRenewalsHtml(array $hits, DateTimeImmutable $today): string
+    private static function approachingRenewalsSubject(array $hits): string
     {
-        $byFreq = [
-            'annually' => [],
-            'semi_annual' => [],
-            'quarterly' => [],
-        ];
+        $months = [];
         foreach ($hits as $hit) {
-            $freq = (string) ($hit['frequency'] ?? '');
-            if (!isset($byFreq[$freq])) {
-                continue;
+            $renews = $hit['renews_on'] ?? null;
+            if ($renews instanceof DateTimeImmutable) {
+                $months[$renews->format('F')] = true;
             }
-            $byFreq[$freq][] = $hit;
+        }
+        $monthKeys = array_keys($months);
+        if (count($monthKeys) === 1) {
+            return 'Savvy Saver heads-up: Review potential ' . $monthKeys[0] . ' charges before they hit';
         }
 
-        $html = '<p>These non-monthly renewals are approaching. Review each vendor and cancel before the renewal if appropriate.</p>';
-        $labels = [
-            'annually' => 'Annual',
-            'semi_annual' => 'Semi-annual',
-            'quarterly' => 'Quarterly',
-        ];
-        foreach ($labels as $freq => $label) {
-            if ($byFreq[$freq] === []) {
-                continue;
+        return 'Savvy Saver heads-up: Review potential upcoming charges before they hit';
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $hits
+     */
+    private static function buildApproachingRenewalsHtml(
+        array $hits,
+        DateTimeImmutable $today,
+        string $firstName = ''
+    ): string {
+        $monthPhrase = 'upcoming';
+        $months = [];
+        foreach ($hits as $hit) {
+            $renews = $hit['renews_on'] ?? null;
+            if ($renews instanceof DateTimeImmutable) {
+                $months[$renews->format('F')] = true;
             }
-            $html .= '<h3>' . htmlspecialchars($label) . '</h3>';
-            $byProject = [];
-            foreach ($byFreq[$freq] as $hit) {
-                $byProject[(string) $hit['project_name']][] = $hit;
+        }
+        $monthKeys = array_keys($months);
+        if (count($monthKeys) === 1) {
+            $monthPhrase = $monthKeys[0];
+        }
+
+        $greeting = self::emailGreeting($firstName);
+        $body = $greeting;
+        $body .= '<p>Savvy Saver identified potentially unexpected charges your business may see'
+            . ($monthPhrase === 'upcoming' ? ' soon' : ' in ' . htmlspecialchars($monthPhrase, ENT_QUOTES, 'UTF-8'))
+            . '. Here’s an early heads-up so you can review them before they happen—and avoid paying for anything you no longer need.</p>';
+        $body .= '<p><strong>Your potential'
+            . ($monthPhrase === 'upcoming' ? ' upcoming' : ' ' . htmlspecialchars($monthPhrase, ENT_QUOTES, 'UTF-8'))
+            . ' charges:</strong></p>';
+
+        usort($hits, static function (array $a, array $b): int {
+            /** @var DateTimeImmutable $ra */
+            $ra = $a['renews_on'];
+            /** @var DateTimeImmutable $rb */
+            $rb = $b['renews_on'];
+            return $ra <=> $rb;
+        });
+
+        $body .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 16px 0;">';
+        $body .= '<tr>'
+            . '<th align="left" style="padding:8px 10px;border-bottom:2px solid #e5e7eb;font-size:13px;color:#6b7280;">Vendor</th>'
+            . '<th align="left" style="padding:8px 10px;border-bottom:2px solid #e5e7eb;font-size:13px;color:#6b7280;">Estimated billing date</th>'
+            . '</tr>';
+        foreach ($hits as $hit) {
+            /** @var DateTimeImmutable $renews */
+            $renews = $hit['renews_on'];
+            $body .= '<tr>'
+                . '<td style="padding:10px;border-bottom:1px solid #e5e7eb;font-size:15px;">'
+                . htmlspecialchars((string) $hit['vendor_name'], ENT_QUOTES, 'UTF-8')
+                . '</td>'
+                . '<td style="padding:10px;border-bottom:1px solid #e5e7eb;font-size:15px;">'
+                . htmlspecialchars($renews->format('F j, Y'), ENT_QUOTES, 'UTF-8')
+                . '</td>'
+                . '</tr>';
+        }
+        $body .= '</table>';
+
+        $body .= '<p><strong>Your next step:</strong><br>'
+            . 'Review each item and decide whether to keep it, make a change, or cancel it if it’s no longer needed. '
+            . 'Before making changes, confirm what the charge covers, check the vendor’s terms, and contact them before any applicable cancellation deadline.</p>';
+        $body .= '<p>If you cancel an item, update your Savvy Saver project to indicate that you no longer expect that charge. '
+            . 'Updating your project does not cancel the service with the vendor.</p>';
+        $body .= '<p style="color:#6b7280;font-size:13px;">These are potential charges identified by Savvy Saver, not confirmed bills. '
+            . 'Actual billing dates and amounts may vary, and this list may not include every upcoming charge.</p>';
+        $body .= '<p>— Your Savvy Saver team</p>';
+
+        return \csEmailHtmlWrap(
+            'Review potential charges before they hit',
+            $body,
+            'Log in to review upcoming charges',
+            \csEmailLoginUrl(),
+            null,
+            'Savvy Saver heads-up: review potential charges before they hit'
+        );
+    }
+
+    /**
+     * @param array<int, array{id:int, name:string, deadline:string}> $vendors
+     */
+    private static function cancellationReminderSubject(string $type): string
+    {
+        if ($type === 't_minus_7') {
+            return 'Savvy Saver | Cancellation deadline in 7 days';
+        }
+        if ($type === 't_plus_7') {
+            return 'Savvy Saver | Cancellation deadline was 7 days ago';
+        }
+
+        return 'Savvy Saver | Cancellation deadline today';
+    }
+
+    /**
+     * @param array<int, array{id:int, name:string, deadline:string}> $vendors
+     */
+    private static function buildCancellationReminderHtml(
+        string $firstName,
+        string $type,
+        array $vendors
+    ): string {
+        $deadlines = [];
+        foreach ($vendors as $vendor) {
+            $deadlines[$vendor['deadline']] = true;
+        }
+        $uniqueDeadlines = array_keys($deadlines);
+        $singleDeadline = count($uniqueDeadlines) === 1;
+        $deadlineFormatted = '';
+        if ($singleDeadline) {
+            try {
+                $deadlineFormatted = (new DateTimeImmutable($uniqueDeadlines[0]))->format('F j, Y');
+            } catch (\Exception $e) {
+                $deadlineFormatted = $uniqueDeadlines[0];
             }
-            foreach ($byProject as $projectName => $projectHits) {
-                $html .= '<p><strong>' . htmlspecialchars($projectName) . '</strong></p><ul>';
-                foreach ($projectHits as $hit) {
-                    /** @var DateTimeImmutable $renews */
-                    $renews = $hit['renews_on'];
-                    $cost = number_format((float) $hit['cost_per_period'], 2);
-                    $html .= '<li>'
-                        . htmlspecialchars((string) $hit['vendor_name'])
-                        . ' — renews ' . htmlspecialchars($renews->format('M j, Y'))
-                        . ' (in ' . (int) $hit['days_until'] . ' days)'
-                        . ' — $' . $cost . ' / ' . htmlspecialchars($freq)
-                        . '</li>';
+        }
+
+        $greeting = self::emailGreeting($firstName);
+        $body = $greeting;
+
+        if ($type === 'deadline_day') {
+            $body .= '<p style="margin:0 0 12px 0;font-size:14px;color:#6b7280;">You set today as your cancellation deadline.</p>';
+            $body .= '<p>You marked this list of vendors for cancellation in Savvy Saver'
+                . ($singleDeadline
+                    ? ' and set <strong>' . htmlspecialchars($deadlineFormatted, ENT_QUOTES, 'UTF-8') . '</strong> as your deadline.'
+                    : '.')
+                . '</p>';
+        } elseif ($type === 't_minus_7') {
+            $body .= '<p>You marked this list of vendors for cancellation in Savvy Saver'
+                . ($singleDeadline
+                    ? ' and set <strong>' . htmlspecialchars($deadlineFormatted, ENT_QUOTES, 'UTF-8') . '</strong> as your deadline (7 days away).'
+                    : ' with deadlines 7 days away.')
+                . '</p>';
+        } else {
+            $body .= '<p>You marked this list of vendors for cancellation in Savvy Saver'
+                . ($singleDeadline
+                    ? ' and set <strong>' . htmlspecialchars($deadlineFormatted, ENT_QUOTES, 'UTF-8') . '</strong> as your deadline (7 days ago).'
+                    : ' with deadlines that passed 7 days ago.')
+                . '</p>';
+        }
+
+        $body .= '<p style="margin:16px 0 8px 0;">';
+        foreach ($vendors as $vendor) {
+            $line = htmlspecialchars($vendor['name'], ENT_QUOTES, 'UTF-8');
+            if (!$singleDeadline) {
+                try {
+                    $df = (new DateTimeImmutable($vendor['deadline']))->format('F j, Y');
+                } catch (\Exception $e) {
+                    $df = $vendor['deadline'];
                 }
-                $html .= '</ul>';
+                $line .= ' <span style="color:#6b7280;">(' . htmlspecialchars($df, ENT_QUOTES, 'UTF-8') . ')</span>';
             }
+            $body .= '<strong style="display:block;margin:0 0 6px 0;">' . $line . '</strong>';
         }
-        $html .= '<p>Open Savvy Saver to review these vendors.</p>';
-        $html .= '<p style="color:#6b7280;font-size:12px;">Generated ' . htmlspecialchars($today->format('Y-m-d')) . '</p>';
+        $body .= '</p>';
 
-        return $html;
+        $body .= '<p>If you haven’t finished, take a moment to review the cancellation requirements and contact the vendor to complete the next step.</p>';
+        $body .= '<p>If you’ve already canceled, update the vendor’s status in your project to keep your review current.</p>';
+        $body .= '<p>Plans changed? You can revisit your decision or update the deadline inside your project.</p>';
+        $body .= '<p>One decision. One next step. Keep your review moving.</p>';
+
+        $heading = 'Cancellation deadline today';
+        if ($type === 't_minus_7') {
+            $heading = 'Cancellation deadline in 7 days';
+        } elseif ($type === 't_plus_7') {
+            $heading = 'Cancellation deadline was 7 days ago';
+        }
+
+        return \csEmailHtmlWrap(
+            $heading,
+            $body,
+            'Log In to Savvy Saver',
+            \csEmailLoginUrl(),
+            'Savvy Saver | Smart Review Reminder',
+            $heading
+        );
+    }
+
+    private static function emailGreeting(string $firstName): string
+    {
+        $name = trim($firstName);
+        if ($name === '' || strcasecmp($name, 'there') === 0) {
+            return '<p>Hi,</p>';
+        }
+
+        return '<p>Hi ' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . ',</p>';
     }
 
     /**
@@ -700,27 +873,34 @@ class ReminderService
         int $totalCount,
         float $totalAmount
     ): string {
-        $html = '<p>Non-monthly recurring charges recorded in <strong>'
-            . htmlspecialchars($monthLabel)
+        $body = '<p>Non-monthly recurring charges recorded in <strong>'
+            . htmlspecialchars($monthLabel, ENT_QUOTES, 'UTF-8')
             . '</strong> (' . $totalCount . ' charge'
             . ($totalCount === 1 ? '' : 's')
             . ', $' . number_format($totalAmount, 2) . ' total).</p>';
         foreach ($linesByProject as $projectName => $lines) {
-            $html .= '<h3>' . htmlspecialchars($projectName) . '</h3><ul>';
+            $body .= '<h3 style="margin:16px 0 8px 0;font-size:16px;">'
+                . htmlspecialchars((string) $projectName, ENT_QUOTES, 'UTF-8')
+                . '</h3><ul>';
             foreach ($lines as $line) {
-                $html .= '<li>'
-                    . htmlspecialchars((string) $line['vendor_name'])
-                    . ' — ' . htmlspecialchars((string) $line['transaction_date'])
+                $body .= '<li>'
+                    . htmlspecialchars((string) $line['vendor_name'], ENT_QUOTES, 'UTF-8')
+                    . ' — ' . htmlspecialchars((string) $line['transaction_date'], ENT_QUOTES, 'UTF-8')
                     . ' — $' . number_format((float) $line['amount'], 2)
-                    . ' (' . htmlspecialchars((string) $line['frequency']) . ')'
+                    . ' (' . htmlspecialchars((string) $line['frequency'], ENT_QUOTES, 'UTF-8') . ')'
                     . ' — annual cost $' . number_format((float) $line['annual_cost'], 2)
                     . '</li>';
             }
-            $html .= '</ul>';
+            $body .= '</ul>';
         }
-        $html .= '<p>Open Savvy Saver to review these vendors.</p>';
+        $body .= '<p>Open Savvy Saver to review these vendors.</p>';
 
-        return $html;
+        return \csEmailHtmlWrap(
+            'Non-monthly charges in ' . $monthLabel,
+            $body,
+            'Log In to Savvy Saver',
+            \csEmailLoginUrl()
+        );
     }
 
     /**
@@ -734,29 +914,36 @@ class ReminderService
         int $grandConfirmedCount,
         float $grandConfirmedSum
     ): string {
-        $html = '<p>Cancellation progress as of <strong>' . htmlspecialchars($weekLabel) . '</strong>.</p>';
-        $html .= '<p><strong>Across your projects:</strong> '
+        $body = '<p>Cancellation progress as of <strong>' . htmlspecialchars($weekLabel, ENT_QUOTES, 'UTF-8') . '</strong>.</p>';
+        $body .= '<p><strong>Across your projects:</strong> '
             . $grandPendingCount . ' pending ($' . number_format($grandPendingSum, 2) . ' potential annual)'
             . '; '
             . $grandConfirmedCount . ' cancelled ($' . number_format($grandConfirmedSum, 2) . ' confirmed annual)'
             . '.</p>';
 
         foreach ($projectSections as $section) {
-            $html .= '<h3>' . htmlspecialchars((string) $section['project_name']) . '</h3>';
+            $body .= '<h3 style="margin:16px 0 8px 0;font-size:16px;">'
+                . htmlspecialchars((string) $section['project_name'], ENT_QUOTES, 'UTF-8')
+                . '</h3>';
             $pending = $section['pending'];
             $confirmed = $section['confirmed'];
-            $html .= '<p>Pending (mark for cancellation): <strong>'
+            $body .= '<p>Pending (mark for cancellation): <strong>'
                 . count($pending) . '</strong> — $'
                 . number_format((float) $section['pending_sum'], 2) . ' annual</p>';
-            $html .= self::buildCappedVendorList($pending);
-            $html .= '<p>Confirmed cancelled: <strong>'
+            $body .= self::buildCappedVendorList($pending);
+            $body .= '<p>Confirmed cancelled: <strong>'
                 . count($confirmed) . '</strong> — $'
                 . number_format((float) $section['confirmed_sum'], 2) . ' annual</p>';
-            $html .= self::buildCappedVendorList($confirmed);
+            $body .= self::buildCappedVendorList($confirmed);
         }
-        $html .= '<p>Open Savvy Saver to continue cancellations or confirm completed ones.</p>';
+        $body .= '<p>Open Savvy Saver to continue cancellations or confirm completed ones.</p>';
 
-        return $html;
+        return \csEmailHtmlWrap(
+            'Cancellation progress — week of ' . $weekLabel,
+            $body,
+            'Log In to Savvy Saver',
+            \csEmailLoginUrl()
+        );
     }
 
     /**

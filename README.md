@@ -10,12 +10,13 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
 - **CSV import** — QuickBooks “Transaction Detail by Account” exports (primary): upload shows a checklist of GL account sections; only payees (Name column) under selected accounts are imported, with account stored on raw transactions ([src/CsvImport.php](src/CsvImport.php)). Legacy “Transaction List by Vendor” CSVs still import in one step without the account picker. Custom column-mapped CSV is also supported.
 - **QuickBooks Online sync** — Super admin connects the company in Settings, then uses Data → **Sync with QBO** to pull a date range via the General Ledger / Transaction List reports (GL account picker, same flow as CSV) ([src/QboService.php](src/QboService.php)).
 - **Exports** — Excel (PhpSpreadsheet) and PDF (Dompdf) for vendor list and executive summary ([src/ExportService.php](src/ExportService.php)).
-- **Email reminders** — Daily cron [public/cron_reminders.php](public/cron_reminders.php) sends (via **GoHighLevel Conversations API** / LeadConnector):
-  - Cancellation deadlines (T−7, day-of, T+7)
-  - Approaching non-monthly renewals (annual T−60/T−30, semi-annual T−30/T−14, quarterly T−21/T−7) — replaces the old calendar-month renewal summary
+- **Email reminders** — Daily cron [public/cron_reminders.php](public/cron_reminders.php) sends branded HTML (Savvy CFO logo + Members login CTA) via **GoHighLevel Conversations API** / LeadConnector:
+  - Cancellation deadlines (T−7, day-of, T+7) — one batched email per manager per reminder type (`Savvy Saver | Cancellation deadline…`)
+  - Approaching non-monthly renewals (annual T−60/T−30, semi-annual T−30/T−14, quarterly T−21/T−7) — heads-up subject `Savvy Saver heads-up: Review potential {Month} charges…`
   - Non-monthly charges from the previous month (quarterly / semi-annual / annual vendors; sends on days 1–3)
   - Weekly cancellation progress (pending potential + confirmed cancelled annual savings; Mondays)
   - Org/user `deadline_reminders_enabled` gates all reminder emails; multi-project emails respect row visibility
+  - Invitation emails (Gmail) use the same branded shell
 - **Ask AI** — Perplexity Chat Completions when `PERPLEXITY_API_KEY` is set; otherwise OpenAI (`OPENAI_API_KEY`). 50 requests per user per month ([src/AiService.php](src/AiService.php)); see `config.example.php` for `AI_MODEL`, `AI_MAX_TOKENS`, and `AI_TEMPERATURE`.
 - **GoHighLevel** — Reminder sends upsert the recipient as a contact (tag `Cost Savings Pro`) then email via Conversations.
 
