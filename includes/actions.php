@@ -2591,6 +2591,43 @@ function handleOrgCreate(): void
     exit;
 }
 
+function handleOrgRename(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id']) || (int) ($_SESSION['org_id'] ?? 0) < 1) {
+        echo json_encode(['success' => false, 'error' => 'Not logged in']);
+        exit;
+    }
+    if (!OrgRole::canElevateOrgRoles(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only an Organization Admin can rename the organization.']);
+        exit;
+    }
+    $orgId = (int) $_SESSION['org_id'];
+    $orgName = trim((string) ($_POST['org_name'] ?? ''));
+    if ($orgName === '') {
+        echo json_encode(['success' => false, 'error' => 'Organization name is required.']);
+        exit;
+    }
+    if (strlen($orgName) > 255) {
+        $orgName = substr($orgName, 0, 255);
+    }
+    try {
+        $pdo = getDBConnection();
+        $upd = $pdo->prepare('UPDATE organizations SET name = ? WHERE id = ?');
+        $upd->execute([$orgName, $orgId]);
+        $_SESSION['user_orgs'] = RoleContext::listUserOrganizations($pdo, (int) $_SESSION['user_id']);
+        echo json_encode([
+            'success' => true,
+            'org_id' => $orgId,
+            'org_name' => $orgName,
+        ]);
+    } catch (PDOException $e) {
+        error_log('handleOrgRename: ' . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => 'Could not rename organization.']);
+    }
+    exit;
+}
+
 function handleLoadProjectMembers(): void
 {
     header('Content-Type: application/json');

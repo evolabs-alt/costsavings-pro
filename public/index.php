@@ -192,6 +192,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'org_create':
                 handleOrgCreate();
                 break;
+            case 'org_rename':
+                handleOrgRename();
+                break;
             case 'load_project_members':
                 handleLoadProjectMembers();
                 break;
@@ -4575,6 +4578,11 @@ foreach ($team_members_rows as $tmRow) {
                                         <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalCreateOrg">Create organization…</button>
                                     </li>
                                     <?php endif; ?>
+                                    <?php if ($is_org_admin): ?>
+                                    <li role="none">
+                                        <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersInvite">Invite member</button>
+                                    </li>
+                                    <?php endif; ?>
                                     <li role="none">
                                         <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage Managers</button>
                                     </li>
@@ -4606,10 +4614,6 @@ foreach ($team_members_rows as $tmRow) {
                                 <li class="app-nav-item has-submenu" id="appMembersNavItem">
                                     <button type="button" class="app-nav-link" id="appMembersMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appMembersSubmenu">Managers</button>
                                     <ul class="app-submenu" id="appMembersSubmenu" role="menu" aria-label="Managers actions">
-                                        <?php if ($is_org_admin): ?>
-                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersInvite">Invite</button></li>
-                                        <?php endif; ?>
-                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage Managers</button></li>
                                         <?php if ($is_org_admin): ?>
                                         <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalProjectMembers">Project managers</button></li>
                                         <?php endif; ?>
@@ -9487,6 +9491,32 @@ foreach ($team_members_rows as $tmRow) {
                             });
                     });
                 }
+                const renameOrgSaveBtn = document.getElementById('renameOrgSaveBtn');
+                if (renameOrgSaveBtn) {
+                    renameOrgSaveBtn.addEventListener('click', function() {
+                        const nameEl = document.getElementById('renameOrgName');
+                        const orgName = nameEl ? String(nameEl.value || '').trim() : '';
+                        if (!orgName) {
+                            showSnackbar('Organization name is required.', 'error');
+                            return;
+                        }
+                        renameOrgSaveBtn.disabled = true;
+                        postJson({ action: 'org_rename', org_name: orgName })
+                            .then(function(d) {
+                                if (!d || !d.success) {
+                                    showSnackbar((d && d.error) || 'Could not rename organization.', 'error');
+                                    renameOrgSaveBtn.disabled = false;
+                                    return;
+                                }
+                                showSnackbar('Organization renamed.', 'success');
+                                window.location.reload();
+                            })
+                            .catch(function() {
+                                showSnackbar('Could not rename organization.', 'error');
+                                renameOrgSaveBtn.disabled = false;
+                            });
+                    });
+                }
                 const projectMembersSaveBtn = document.getElementById('projectMembersSaveBtn');
                 if (projectMembersSaveBtn) {
                     projectMembersSaveBtn.addEventListener('click', function() {
@@ -11185,6 +11215,17 @@ foreach ($team_members_rows as $tmRow) {
                     These settings apply to <strong><?php echo htmlspecialchars($active_org_name); ?></strong>, including QuickBooks connection.
                     To import vendors into the current project, use <strong>Data → Sync with QBO</strong>.
                 </p>
+                <?php if (!empty($can_elevate_org_roles)): ?>
+                <div class="settings-block" style="margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid #e5e7eb;">
+                    <label style="display:grid;gap:6px;font-size:14px;max-width:420px;">
+                        <span>Organization name</span>
+                        <input type="text" id="renameOrgName" name="org_name" required maxlength="255" value="<?php echo htmlspecialchars($active_org_name); ?>" placeholder="Organization name" style="min-width:280px;">
+                    </label>
+                    <div style="margin-top:10px;">
+                        <button type="button" id="renameOrgSaveBtn" class="member-action-btn">Save name</button>
+                    </div>
+                </div>
+                <?php endif; ?>
                 <div class="settings-block">
                     <form method="POST" style="display:grid;gap:10px;">
                         <input type="hidden" name="action" value="save_reminder_settings">
