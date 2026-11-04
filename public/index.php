@@ -198,6 +198,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'save_project_members':
                 handleSaveProjectMembers();
                 break;
+            case 'save_org_member_role':
+                handleSaveOrgMemberRole();
+                break;
         }
     }
 }
@@ -246,6 +249,8 @@ $is_org_admin = $is_logged_in;
 $is_admin = $is_logged_in;
 $can_create_projects = ($is_logged_in && \CostSavings\OrgRole::isSuperAdmin($org_role));
 $can_manage_qbo = ($is_logged_in && \CostSavings\OrgRole::isSuperAdmin($org_role));
+$can_elevate_org_roles = ($is_logged_in && \CostSavings\OrgRole::canElevateOrgRoles($org_role));
+$session_user_id = $is_logged_in ? (int) ($_SESSION['user_id'] ?? 0) : 0;
 $user_orgs = ($is_logged_in && !empty($_SESSION['user_orgs']) && is_array($_SESSION['user_orgs']))
     ? $_SESSION['user_orgs']
     : [];
@@ -349,6 +354,12 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
         $team_members_json = '[]';
         $team_members_count = 0;
         $team_members_max = 20;
+    }
+}
+$org_admin_count = 0;
+foreach ($team_members_rows as $tmRow) {
+    if (\CostSavings\OrgRole::isSuperAdmin((string) ($tmRow['role'] ?? ''))) {
+        $org_admin_count++;
     }
 }
 ?>
@@ -4545,6 +4556,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     </li>
                                     <?php endif; ?>
                                     <li role="none">
+                                        <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage Managers</button>
+                                    </li>
+                                    <li role="none">
                                         <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings">Organization settings</button>
                                     </li>
                                 </ul>
@@ -4574,9 +4588,6 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                     <ul class="app-submenu" id="appMembersSubmenu" role="menu" aria-label="Managers actions">
                                         <?php if ($is_org_admin): ?>
                                         <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersInvite">Invite</button></li>
-                                        <?php endif; ?>
-                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage</button></li>
-                                        <?php if ($is_org_admin): ?>
                                         <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalProjectMembers">Project managers</button></li>
                                         <?php endif; ?>
                                     </ul>
@@ -4963,8 +4974,8 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                         '<td>' + escapeHtml(m.display_name || m.username || m.email || '—') + '</td>' +
                         '<td>' + escapeHtml(m.email || '') + '</td>' +
                         '<td><select class="project-member-role-select">' +
-                        '<option value="member"' + (role === 'member' ? ' selected' : '') + '>Manager</option>' +
-                        '<option value="super_admin"' + (role === 'super_admin' ? ' selected' : '') + '>Super admin</option>' +
+                        '<option value="member"' + (role === 'member' ? ' selected' : '') + '>Project manager</option>' +
+                        '<option value="super_admin"' + (role === 'super_admin' ? ' selected' : '') + '>Project super admin</option>' +
                         '</select></td>';
                     tbody.appendChild(tr);
                 });
@@ -9481,12 +9492,38 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 showSnackbar((d && d.error) || 'Could not save project managers.', 'error');
                                 return;
                             }
-                            showSnackbar('Project managers saved.', 'success');
+                            showSnackbar('Project managers saved. Organization role is unchanged.', 'success');
                         }).catch(function() {
                             showSnackbar('Could not save project managers.', 'error');
                         });
                     });
                 }
+                document.querySelectorAll('.org-role-change-btn').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        const memberId = parseInt(btn.getAttribute('data-member-id'), 10) || 0;
+                        const role = btn.getAttribute('data-role') || '';
+                        if (!memberId || (role !== 'super_admin' && role !== 'member')) {
+                            return;
+                        }
+                        btn.disabled = true;
+                        postJson({
+                            action: 'save_org_member_role',
+                            member_id: memberId,
+                            role: role
+                        }).then(function(d) {
+                            if (!d || !d.success) {
+                                showSnackbar((d && d.error) || 'Could not update organization role.', 'error');
+                                btn.disabled = false;
+                                return;
+                            }
+                            showSnackbar('Organization role updated.', 'success');
+                            window.location.reload();
+                        }).catch(function() {
+                            showSnackbar('Could not update organization role.', 'error');
+                            btn.disabled = false;
+                        });
+                    });
+                });
                 document.querySelectorAll('[data-open-modal="appModalProjectMembers"]').forEach(function(btn) {
                     btn.addEventListener('click', function() {
                         loadProjectMembersModal();
@@ -10711,8 +10748,9 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
             </div>
             <div class="app-modal-body">
                 <p style="margin:0 0 12px;color:#4b5563;font-size:14px;line-height:1.5;">
-                    Assign organization managers to the active project with an explicit project role.
-                    Project super admins see all vendors (including confidential); managers see public rows plus confidential rows they manage.
+                    Assign organization members to the selected project with a <strong>project</strong> role only.
+                    These roles do not change the organization role shown in Manage Managers.
+                    Project super admins see all vendors (including confidential); project managers see public rows plus confidential rows they manage.
                 </p>
                 <label style="display:grid;gap:6px;font-size:14px;max-width:360px;margin-bottom:12px;">
                     <span>Project</span>
@@ -10742,12 +10780,15 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
     <?php endif; ?>
 
     <div class="app-modal-overlay" id="appModalMembersManage" role="dialog" aria-modal="true" aria-labelledby="appModalMembersManageTitle" aria-hidden="true">
-        <div class="app-modal" tabindex="-1">
+        <div class="app-modal" tabindex="-1" style="max-width:820px;">
             <div class="app-modal-header">
                 <h2 id="appModalMembersManageTitle">Manage Managers</h2>
                 <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
             </div>
             <div class="app-modal-body">
+                <p style="margin:0 0 10px;color:#4b5563;font-size:14px;line-height:1.5;">
+                    Organization membership and <strong>organization</strong> role only. Project access and project roles are set under Managers → Project managers.
+                </p>
                 <p style="margin:0 0 10px;color:#4b5563;font-size:14px;">
                     Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> managers
                 </p>
@@ -10757,7 +10798,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <tr>
                                 <th>Name</th>
                                 <th>Email</th>
-                                <th>Org role</th>
+                                <th>Organization role</th>
                                 <th>Status</th>
                                 <?php if ($is_org_admin): ?>
                                 <th>Action</th>
@@ -10770,11 +10811,19 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                             <tr><td colspan="<?php echo (int) $members_colspan; ?>">No managers in this organization yet.</td></tr>
                             <?php else: ?>
                             <?php foreach ($team_members_rows as $tm): ?>
-                            <?php $member_is_disabled = !empty($tm['is_disabled']); ?>
-                            <tr>
+                            <?php
+                                $member_is_disabled = !empty($tm['is_disabled']);
+                                $member_role = (string) ($tm['role'] ?? 'member');
+                                $member_id = (int) ($tm['id'] ?? 0);
+                                $member_is_org_admin = \CostSavings\OrgRole::isSuperAdmin($member_role);
+                                $is_self = $session_user_id > 0 && $member_id === $session_user_id;
+                                $can_demote = $can_elevate_org_roles && $member_is_org_admin && !$is_self && $org_admin_count > 1;
+                                $can_promote = $can_elevate_org_roles && !$member_is_org_admin && !$is_self && !$member_is_disabled;
+                            ?>
+                            <tr data-member-id="<?php echo $member_id; ?>">
                                 <td><?php echo htmlspecialchars($tm['display_name'] ?? $tm['username'] ?? '—'); ?></td>
                                 <td><?php echo htmlspecialchars($tm['email'] ?? ''); ?></td>
-                                <td><?php echo htmlspecialchars(\CostSavings\OrgRole::label((string) ($tm['role'] ?? 'member'))); ?></td>
+                                <td class="org-member-role-label"><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel($member_role)); ?></td>
                                 <td>
                                     <?php if ($member_is_disabled): ?>
                                     <span class="member-status-pill member-status-pill--disabled">Disabled</span>
@@ -10784,16 +10833,24 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
                                 </td>
                                 <?php if ($is_org_admin): ?>
                                 <td>
-                                    <?php if (($tm['role'] ?? 'member') === 'member'): ?>
-                                    <form method="post" style="margin:0;">
-                                        <input type="hidden" name="action" value="toggle_member_disabled">
-                                        <input type="hidden" name="member_id" value="<?php echo (int) ($tm['id'] ?? 0); ?>">
-                                        <input type="hidden" name="disable" value="<?php echo $member_is_disabled ? '0' : '1'; ?>">
-                                        <button type="submit" class="member-action-btn"><?php echo $member_is_disabled ? 'Enable' : 'Disable'; ?></button>
-                                    </form>
-                                    <?php else: ?>
-                                    <span>—</span>
-                                    <?php endif; ?>
+                                    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+                                        <?php if ($can_promote): ?>
+                                        <button type="button" class="member-action-btn org-role-change-btn" data-member-id="<?php echo $member_id; ?>" data-role="super_admin">Make Organization Admin</button>
+                                        <?php endif; ?>
+                                        <?php if ($can_demote): ?>
+                                        <button type="button" class="member-action-btn org-role-change-btn" data-member-id="<?php echo $member_id; ?>" data-role="member">Make Organization Member</button>
+                                        <?php endif; ?>
+                                        <?php if (!$member_is_org_admin): ?>
+                                        <form method="post" style="margin:0;">
+                                            <input type="hidden" name="action" value="toggle_member_disabled">
+                                            <input type="hidden" name="member_id" value="<?php echo $member_id; ?>">
+                                            <input type="hidden" name="disable" value="<?php echo $member_is_disabled ? '0' : '1'; ?>">
+                                            <button type="submit" class="member-action-btn"><?php echo $member_is_disabled ? 'Enable' : 'Disable'; ?></button>
+                                        </form>
+                                        <?php elseif (!$can_demote && !$can_promote): ?>
+                                        <span>—</span>
+                                        <?php endif; ?>
+                                    </div>
                                 </td>
                                 <?php endif; ?>
                             </tr>

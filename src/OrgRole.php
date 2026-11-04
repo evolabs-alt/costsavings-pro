@@ -20,20 +20,37 @@ final class OrgRole
         return strtolower(trim($role)) === self::ROLE_SUPER_ADMIN;
     }
 
-    /** Only super admins may grant super_admin via project assignment. */
+    /** Only organization admins may grant organization admin roles. */
     public static function canElevateOrgRoles(string $role): bool
     {
         return strtolower(trim($role)) === self::ROLE_SUPER_ADMIN;
     }
 
+    /** Organization-scoped display label (Manage Managers, etc.). */
     public static function label(string $role): string
+    {
+        return self::orgLabel($role);
+    }
+
+    public static function orgLabel(string $role): string
     {
         switch (strtolower(trim($role))) {
             case self::ROLE_SUPER_ADMIN:
-                return 'Super admin';
+                return 'Organization Admin';
             case self::ROLE_MEMBER:
             default:
-                return 'Manager';
+                return 'Organization Member';
+        }
+    }
+
+    public static function projectLabel(string $role): string
+    {
+        switch (strtolower(trim($role))) {
+            case self::ROLE_SUPER_ADMIN:
+                return 'Project super admin';
+            case self::ROLE_MEMBER:
+            default:
+                return 'Project manager';
         }
     }
 
@@ -46,13 +63,13 @@ final class OrgRole
     {
         return [
             [
-                'title' => 'Super admin',
-                'description' => 'Organization: invite managers, org settings, create/delete projects, QuickBooks. Project: full vendor access including confidential rows and copy operations.',
-                'note' => 'Org super admin can create projects; project super admin controls all vendor data within a project.',
+                'title' => 'Organization Admin',
+                'description' => 'Organization: invite members, org settings, create/delete projects, QuickBooks, assign organization roles. Project: when also project super admin, full vendor access including confidential rows and copy operations.',
+                'note' => 'Organization Admin and Project super admin are separate. Organization Admin controls the org; Project super admin controls vendor data within a project.',
             ],
             [
-                'title' => 'Manager',
-                'description' => 'Organization: invite and manage managers, org settings, assign project managers. Project: add/edit vendors (spend, manager, visibility), public rows plus confidential rows they manage.',
+                'title' => 'Organization Member',
+                'description' => 'Organization: invite and manage members, org settings, assign project managers. Project: as project manager, add/edit vendors (spend, manager, visibility), public rows plus confidential rows they manage.',
             ],
         ];
     }

@@ -1431,6 +1431,76 @@ function handleToggleMemberDisabled(): void
     $redir();
 }
 
+function handleSaveOrgMemberRole(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id']) || (int) ($_SESSION['org_id'] ?? 0) < 1) {
+        echo json_encode(['success' => false, 'error' => 'Not logged in']);
+        exit;
+    }
+    if (!OrgRole::canElevateOrgRoles(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only an Organization Admin can change organization roles.']);
+        exit;
+    }
+    $memberId = (int) ($_POST['member_id'] ?? 0);
+    $desiredRole = strtolower(trim((string) ($_POST['role'] ?? '')));
+    if ($memberId <= 0 || !in_array($desiredRole, [OrgRole::ROLE_SUPER_ADMIN, OrgRole::ROLE_MEMBER], true)) {
+        echo json_encode(['success' => false, 'error' => 'Invalid member or role.']);
+        exit;
+    }
+    $actorId = (int) $_SESSION['user_id'];
+    if ($memberId === $actorId) {
+        echo json_encode(['success' => false, 'error' => 'You cannot change your own organization role.']);
+        exit;
+    }
+
+    $pdo = getDBConnection();
+    $orgId = (int) $_SESSION['org_id'];
+    $lookup = $pdo->prepare(
+        'SELECT role, is_disabled FROM user_organizations WHERE user_id = ? AND org_id = ? LIMIT 1'
+    );
+    $lookup->execute([$memberId, $orgId]);
+    $member = $lookup->fetch(PDO::FETCH_ASSOC);
+    if (!$member) {
+        echo json_encode(['success' => false, 'error' => 'Member not found in this organization.']);
+        exit;
+    }
+
+    $currentRole = (string) ($member['role'] ?? OrgRole::ROLE_MEMBER);
+    if ($currentRole === $desiredRole) {
+        echo json_encode([
+            'success' => true,
+            'member_id' => $memberId,
+            'role' => $desiredRole,
+            'role_label' => OrgRole::orgLabel($desiredRole),
+        ]);
+        exit;
+    }
+
+    if ($desiredRole === OrgRole::ROLE_MEMBER && OrgRole::isSuperAdmin($currentRole)) {
+        $countSt = $pdo->prepare(
+            'SELECT COUNT(*) FROM user_organizations WHERE org_id = ? AND role = ? AND is_disabled = 0'
+        );
+        $countSt->execute([$orgId, OrgRole::ROLE_SUPER_ADMIN]);
+        $adminCount = (int) $countSt->fetchColumn();
+        if ($adminCount <= 1) {
+            echo json_encode(['success' => false, 'error' => 'Cannot demote the last Organization Admin.']);
+            exit;
+        }
+    }
+
+    $isDisabled = (int) ($member['is_disabled'] ?? 0);
+    RoleContext::upsertOrgMembership($pdo, $memberId, $orgId, $desiredRole, $isDisabled);
+
+    echo json_encode([
+        'success' => true,
+        'member_id' => $memberId,
+        'role' => $desiredRole,
+        'role_label' => OrgRole::orgLabel($desiredRole),
+    ]);
+    exit;
+}
+
 function handleSaveOrgReminders() {
     if (empty($_SESSION['user_id']) || (int) ($_SESSION['org_id'] ?? 0) < 1) {
         $_SESSION['error'] = 'You must be signed in to change organization settings.';
