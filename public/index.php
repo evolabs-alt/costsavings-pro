@@ -3632,10 +3632,30 @@ foreach ($team_members_rows as $tmRow) {
             cursor: pointer;
             font-size: 12px;
             font-weight: 600;
+            margin: 0;
         }
 
         .member-action-btn:hover {
             background: #f8fafc;
+        }
+
+        .org-member-role-cell .org-member-role-edit {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .org-member-role-cell .org-member-role-select {
+            width: auto;
+            min-width: 12rem;
+            max-width: 100%;
+            flex: 1 1 10rem;
+            margin: 0;
+        }
+
+        .org-member-role-cell .org-role-save-btn {
+            flex: 0 0 auto;
         }
 
         .app-modal-body .invite-block {
@@ -4588,6 +4608,9 @@ foreach ($team_members_rows as $tmRow) {
                                     <ul class="app-submenu" id="appMembersSubmenu" role="menu" aria-label="Managers actions">
                                         <?php if ($is_org_admin): ?>
                                         <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersInvite">Invite</button></li>
+                                        <?php endif; ?>
+                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage Managers</button></li>
+                                        <?php if ($is_org_admin): ?>
                                         <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalProjectMembers">Project managers</button></li>
                                         <?php endif; ?>
                                     </ul>
@@ -10795,7 +10818,7 @@ foreach ($team_members_rows as $tmRow) {
     <?php endif; ?>
 
     <div class="app-modal-overlay" id="appModalMembersManage" role="dialog" aria-modal="true" aria-labelledby="appModalMembersManageTitle" aria-hidden="true">
-        <div class="app-modal" tabindex="-1" style="max-width:820px;">
+        <div class="app-modal" tabindex="-1" style="max-width:960px;">
             <div class="app-modal-header">
                 <h2 id="appModalMembersManageTitle">Manage Managers</h2>
                 <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
@@ -10803,6 +10826,11 @@ foreach ($team_members_rows as $tmRow) {
             <div class="app-modal-body">
                 <p style="margin:0 0 10px;color:#4b5563;font-size:14px;line-height:1.5;">
                     Organization membership and <strong>organization</strong> role only. Project access and project roles are set under Managers → Project managers.
+                    <?php if (!empty($can_elevate_org_roles)): ?>
+                    As an Organization Admin, change another member’s role with the dropdown in the Organization role column, then click <strong>Save</strong>.
+                    <?php else: ?>
+                    Only an Organization Admin can change organization roles.
+                    <?php endif; ?>
                 </p>
                 <p style="margin:0 0 10px;color:#4b5563;font-size:14px;">
                     Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> managers
@@ -10840,15 +10868,18 @@ foreach ($team_members_rows as $tmRow) {
                                 <td><?php echo htmlspecialchars($tm['email'] ?? ''); ?></td>
                                 <td class="org-member-role-cell">
                                     <?php if ($can_edit_org_role): ?>
-                                    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
-                                        <select class="org-member-role-select app-submenu-select" data-member-id="<?php echo $member_id; ?>" data-initial-role="<?php echo htmlspecialchars($member_role); ?>"<?php echo $block_demote_last_admin ? ' title="Cannot demote the last Organization Admin"' : ''; ?>>
+                                    <div class="org-member-role-edit">
+                                        <select class="org-member-role-select" data-member-id="<?php echo $member_id; ?>" data-initial-role="<?php echo htmlspecialchars($member_role); ?>" aria-label="Organization role"<?php echo $block_demote_last_admin ? ' title="Cannot demote the last Organization Admin"' : ''; ?>>
                                             <option value="member"<?php echo !$member_is_org_admin ? ' selected' : ''; ?><?php echo $block_demote_last_admin ? ' disabled' : ''; ?>><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel('member')); ?></option>
                                             <option value="super_admin"<?php echo $member_is_org_admin ? ' selected' : ''; ?>><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel('super_admin')); ?></option>
                                         </select>
-                                        <button type="button" class="member-action-btn org-role-save-btn" data-member-id="<?php echo $member_id; ?>">Save</button>
+                                        <button type="button" class="member-action-btn org-role-save-btn" data-member-id="<?php echo $member_id; ?>">Save role</button>
                                     </div>
                                     <?php else: ?>
                                     <span class="org-member-role-label"><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel($member_role)); ?></span>
+                                    <?php if ($can_elevate_org_roles && $is_self): ?>
+                                    <div style="font-size:12px;color:#6b7280;margin-top:4px;">Your role (cannot change here)</div>
+                                    <?php endif; ?>
                                     <?php endif; ?>
                                 </td>
                                 <td>

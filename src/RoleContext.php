@@ -158,7 +158,8 @@ final class RoleContext
 
     public static function sessionOrgRole(): string
     {
-        return (string) ($_SESSION['org_role'] ?? $_SESSION['role'] ?? 'member');
+        // Do not fall back to $_SESSION['role'] — that alias may be the project role.
+        return (string) ($_SESSION['org_role'] ?? OrgRole::ROLE_MEMBER);
     }
 
     public static function sessionProjectRole(): string
