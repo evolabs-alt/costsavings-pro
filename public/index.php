@@ -9498,11 +9498,17 @@ foreach ($team_members_rows as $tmRow) {
                         });
                     });
                 }
-                document.querySelectorAll('.org-role-change-btn').forEach(function(btn) {
+                document.querySelectorAll('.org-role-save-btn').forEach(function(btn) {
                     btn.addEventListener('click', function() {
                         const memberId = parseInt(btn.getAttribute('data-member-id'), 10) || 0;
-                        const role = btn.getAttribute('data-role') || '';
+                        const row = btn.closest('tr');
+                        const roleSel = row ? row.querySelector('.org-member-role-select') : null;
+                        const role = roleSel ? roleSel.value : '';
                         if (!memberId || (role !== 'super_admin' && role !== 'member')) {
+                            return;
+                        }
+                        if (roleSel && roleSel.options[roleSel.selectedIndex] && roleSel.options[roleSel.selectedIndex].disabled) {
+                            showSnackbar('Cannot demote the last Organization Admin.', 'error');
                             return;
                         }
                         btn.disabled = true;
@@ -10730,6 +10736,15 @@ foreach ($team_members_rows as $tmRow) {
                             <span>Email</span>
                             <input type="email" name="email" required placeholder="user@company.com" style="min-width:200px;">
                         </label>
+                        <label style="display:grid;gap:6px;font-size:14px;">
+                            <span>Organization role</span>
+                            <select name="invite_role" class="app-submenu-select">
+                                <option value="member" selected><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel('member')); ?></option>
+                                <?php if (!empty($can_elevate_org_roles)): ?>
+                                <option value="super_admin"><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel('super_admin')); ?></option>
+                                <?php endif; ?>
+                            </select>
+                        </label>
                         <div>
                             <button type="submit">Send invite</button>
                         </div>
@@ -10817,13 +10832,25 @@ foreach ($team_members_rows as $tmRow) {
                                 $member_id = (int) ($tm['id'] ?? 0);
                                 $member_is_org_admin = \CostSavings\OrgRole::isSuperAdmin($member_role);
                                 $is_self = $session_user_id > 0 && $member_id === $session_user_id;
-                                $can_demote = $can_elevate_org_roles && $member_is_org_admin && !$is_self && $org_admin_count > 1;
-                                $can_promote = $can_elevate_org_roles && !$member_is_org_admin && !$is_self && !$member_is_disabled;
+                                $can_edit_org_role = $can_elevate_org_roles && !$is_self && !$member_is_disabled;
+                                $block_demote_last_admin = $member_is_org_admin && $org_admin_count <= 1;
                             ?>
                             <tr data-member-id="<?php echo $member_id; ?>">
                                 <td><?php echo htmlspecialchars($tm['display_name'] ?? $tm['username'] ?? '—'); ?></td>
                                 <td><?php echo htmlspecialchars($tm['email'] ?? ''); ?></td>
-                                <td class="org-member-role-label"><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel($member_role)); ?></td>
+                                <td class="org-member-role-cell">
+                                    <?php if ($can_edit_org_role): ?>
+                                    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+                                        <select class="org-member-role-select app-submenu-select" data-member-id="<?php echo $member_id; ?>" data-initial-role="<?php echo htmlspecialchars($member_role); ?>"<?php echo $block_demote_last_admin ? ' title="Cannot demote the last Organization Admin"' : ''; ?>>
+                                            <option value="member"<?php echo !$member_is_org_admin ? ' selected' : ''; ?><?php echo $block_demote_last_admin ? ' disabled' : ''; ?>><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel('member')); ?></option>
+                                            <option value="super_admin"<?php echo $member_is_org_admin ? ' selected' : ''; ?>><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel('super_admin')); ?></option>
+                                        </select>
+                                        <button type="button" class="member-action-btn org-role-save-btn" data-member-id="<?php echo $member_id; ?>">Save</button>
+                                    </div>
+                                    <?php else: ?>
+                                    <span class="org-member-role-label"><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel($member_role)); ?></span>
+                                    <?php endif; ?>
+                                </td>
                                 <td>
                                     <?php if ($member_is_disabled): ?>
                                     <span class="member-status-pill member-status-pill--disabled">Disabled</span>
@@ -10833,24 +10860,16 @@ foreach ($team_members_rows as $tmRow) {
                                 </td>
                                 <?php if ($is_org_admin): ?>
                                 <td>
-                                    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
-                                        <?php if ($can_promote): ?>
-                                        <button type="button" class="member-action-btn org-role-change-btn" data-member-id="<?php echo $member_id; ?>" data-role="super_admin">Make Organization Admin</button>
-                                        <?php endif; ?>
-                                        <?php if ($can_demote): ?>
-                                        <button type="button" class="member-action-btn org-role-change-btn" data-member-id="<?php echo $member_id; ?>" data-role="member">Make Organization Member</button>
-                                        <?php endif; ?>
-                                        <?php if (!$member_is_org_admin): ?>
-                                        <form method="post" style="margin:0;">
-                                            <input type="hidden" name="action" value="toggle_member_disabled">
-                                            <input type="hidden" name="member_id" value="<?php echo $member_id; ?>">
-                                            <input type="hidden" name="disable" value="<?php echo $member_is_disabled ? '0' : '1'; ?>">
-                                            <button type="submit" class="member-action-btn"><?php echo $member_is_disabled ? 'Enable' : 'Disable'; ?></button>
-                                        </form>
-                                        <?php elseif (!$can_demote && !$can_promote): ?>
-                                        <span>—</span>
-                                        <?php endif; ?>
-                                    </div>
+                                    <?php if (!$member_is_org_admin): ?>
+                                    <form method="post" style="margin:0;">
+                                        <input type="hidden" name="action" value="toggle_member_disabled">
+                                        <input type="hidden" name="member_id" value="<?php echo $member_id; ?>">
+                                        <input type="hidden" name="disable" value="<?php echo $member_is_disabled ? '0' : '1'; ?>">
+                                        <button type="submit" class="member-action-btn"><?php echo $member_is_disabled ? 'Enable' : 'Disable'; ?></button>
+                                    </form>
+                                    <?php else: ?>
+                                    <span>—</span>
+                                    <?php endif; ?>
                                 </td>
                                 <?php endif; ?>
                             </tr>

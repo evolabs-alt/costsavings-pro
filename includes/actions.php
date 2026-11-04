@@ -151,8 +151,7 @@ function acceptPendingInviteForEmail(PDO $pdo, int $userId, string $email): bool
         return false;
     }
 
-    // Invites always grant member; legacy invite_role=admin remaps to member.
-    $desiredRole = OrgRole::ROLE_MEMBER;
+    $desiredRole = OrgRole::resolveInviteRole($inv);
 
     RoleContext::upsertOrgMembership($pdo, $userId, $orgId, $desiredRole);
     $pdo->prepare('UPDATE invitations SET consumed_at = NOW() WHERE id = ?')->execute([(int) $inv['id']]);
@@ -538,6 +537,10 @@ function handleInviteMember() {
     $orgId = (int) $_SESSION['org_id'];
 
     $inviteRole = OrgRole::ROLE_MEMBER;
+    $rawInviteRole = strtolower(trim((string) ($_POST['invite_role'] ?? '')));
+    if ($rawInviteRole === OrgRole::ROLE_SUPER_ADMIN && OrgRole::canElevateOrgRoles(sessionOrgRole())) {
+        $inviteRole = OrgRole::ROLE_SUPER_ADMIN;
+    }
 
     logInviteEvent('request_received', [
         'admin_user_id' => (int) $_SESSION['user_id'],

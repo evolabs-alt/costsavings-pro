@@ -55,6 +55,25 @@ final class OrgRole
     }
 
     /**
+     * Resolve organization role from an invitations row.
+     * Legacy invite_role=admin remaps to member; only super_admin elevates.
+     *
+     * @param array<string,mixed> $inv
+     */
+    public static function resolveInviteRole(array $inv): string
+    {
+        $role = strtolower(trim((string) ($inv['invite_role'] ?? self::ROLE_MEMBER)));
+        if ($role === 'admin') {
+            return self::ROLE_MEMBER;
+        }
+        if ($role === self::ROLE_SUPER_ADMIN) {
+            return self::ROLE_SUPER_ADMIN;
+        }
+
+        return self::ROLE_MEMBER;
+    }
+
+    /**
      * Role titles and descriptions for help UI.
      *
      * @return array<int, array{title:string, description:string, note?:string}>

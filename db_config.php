@@ -209,14 +209,8 @@ function migrateRolesAdminIntoMember(PDO $pdo): void
             $typeDisp = strtolower(trim((string) $col['Type']));
             $hasAdmin = strpos($typeDisp, "'admin'") !== false;
             if (!$hasAdmin) {
-                // Already collapsed or never had admin — ensure final two-tier shape where applicable.
-                if ($column === 'invite_role') {
-                    if (!preg_match('/enum\s*\(\s*\'member\'\s*\)/', $typeDisp)) {
-                        $pdo->exec(
-                            "ALTER TABLE `{$table}` MODIFY COLUMN `{$column}` ENUM('member') NOT NULL DEFAULT 'member'"
-                        );
-                    }
-                } elseif (!preg_match('/enum\s*\(\s*\'super_admin\'\s*,\s*\'member\'\s*\)/', $typeDisp)) {
+                // Already collapsed or never had admin — ensure final two-tier shape.
+                if (!preg_match('/enum\s*\(\s*\'super_admin\'\s*,\s*\'member\'\s*\)/', $typeDisp)) {
                     $pdo->exec(
                         "ALTER TABLE `{$table}` MODIFY COLUMN `{$column}` ENUM('super_admin','member') NOT NULL DEFAULT 'member'"
                     );
@@ -225,15 +219,9 @@ function migrateRolesAdminIntoMember(PDO $pdo): void
             }
 
             $pdo->exec("UPDATE `{$table}` SET `{$column}` = 'member' WHERE `{$column}` = 'admin'");
-            if ($column === 'invite_role') {
-                $pdo->exec(
-                    "ALTER TABLE `{$table}` MODIFY COLUMN `{$column}` ENUM('member') NOT NULL DEFAULT 'member'"
-                );
-            } else {
-                $pdo->exec(
-                    "ALTER TABLE `{$table}` MODIFY COLUMN `{$column}` ENUM('super_admin','member') NOT NULL DEFAULT 'member'"
-                );
-            }
+            $pdo->exec(
+                "ALTER TABLE `{$table}` MODIFY COLUMN `{$column}` ENUM('super_admin','member') NOT NULL DEFAULT 'member'"
+            );
         }
     } catch (PDOException $e) {
         error_log('migrateRolesAdminIntoMember: ' . $e->getMessage());
@@ -381,7 +369,7 @@ function migrateSchema(PDO $pdo) {
             `token_hash` CHAR(64) NOT NULL,
             `invited_by_user_id` INT UNSIGNED NOT NULL,
             `expires_at` DATETIME NOT NULL,
-            `invite_role` ENUM('member') NOT NULL DEFAULT 'member',
+            `invite_role` ENUM('super_admin','member') NOT NULL DEFAULT 'member',
             `consumed_at` DATETIME NULL,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             KEY `idx_inv_token` (`token_hash`),
@@ -392,7 +380,7 @@ function migrateSchema(PDO $pdo) {
 
         $invRoleCol = $pdo->query("SHOW COLUMNS FROM `invitations` LIKE 'invite_role'")->fetch();
         if (!$invRoleCol) {
-            $pdo->exec("ALTER TABLE `invitations` ADD COLUMN `invite_role` ENUM('member') NOT NULL DEFAULT 'member' AFTER `expires_at`");
+            $pdo->exec("ALTER TABLE `invitations` ADD COLUMN `invite_role` ENUM('super_admin','member') NOT NULL DEFAULT 'member' AFTER `expires_at`");
         }
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS `reminder_sent` (
