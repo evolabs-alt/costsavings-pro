@@ -63,8 +63,8 @@ final class ColumnHelp
                 'html' => '<p class="column-help-intro">Estimated yearly spend, calculated from Cost and Frequency. Blank when frequency is irregular or cost is empty. Sort this column to surface the largest line items and savings opportunities. Mark-for-cancellation and cancelled rows contribute to Potential and Confirmed savings summaries below the table (irregular / empty-amount rows are excluded).</p>',
             ],
             'manager' => [
-                'title' => 'Manager',
-                'html' => '<p class="column-help-intro">The team manager responsible for this vendor row. On confidential rows, only the assigned manager (and organization admins) can change status. Use the filter and sort icons to focus on your vendors or unassigned rows.</p>',
+                'title' => 'Cost owner',
+                'html' => '<p class="column-help-intro">The cost owner responsible for this vendor row. On confidential rows, only the assigned cost owner (and organization admins) can change status. Use the filter and sort icons to focus on your vendors or unassigned rows.</p>',
             ],
             'visibility' => [
                 'title' => 'Visibility',

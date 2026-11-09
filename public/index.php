@@ -3524,12 +3524,104 @@ foreach ($team_members_rows as $tmRow) {
 
         .app-submenu-current-name {
             display: block;
+            min-width: 0;
+            flex: 1 1 auto;
             font-size: 13px;
             font-weight: 600;
             color: var(--color-text-primary);
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+
+        .app-inline-name-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            min-width: 0;
+            width: 100%;
+        }
+
+        .app-inline-name-row.is-editing .app-submenu-current-name,
+        .app-inline-name-row.is-editing .app-inline-icon-btn:not(.app-inline-icon-btn--ok):not(.app-inline-icon-btn--cancel) {
+            display: none;
+        }
+
+        .app-inline-rename-input {
+            flex: 1 1 auto;
+            min-width: 0;
+            min-height: 32px;
+            margin: 0;
+            padding: 5px 8px;
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            background: #fff;
+            color: var(--color-text-primary);
+            font-family: 'Inter', system-ui, sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            line-height: 1.2;
+            box-sizing: border-box;
+        }
+
+        .app-inline-rename-input:focus {
+            outline: none;
+            border-color: var(--color-secondary);
+            box-shadow: 0 0 0 3px rgba(37, 168, 224, 0.18);
+        }
+
+        .app-inline-icon-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+            width: 28px;
+            height: 28px;
+            margin: 0;
+            padding: 0;
+            border: 0;
+            border-radius: 8px;
+            background: transparent;
+            color: #6b7280;
+            cursor: pointer;
+            transition: background 0.12s ease, color 0.12s ease;
+        }
+
+        .app-inline-icon-btn .material-symbols-outlined {
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        .app-inline-icon-btn:hover,
+        .app-inline-icon-btn:focus-visible {
+            background: #f3f6f9;
+            color: var(--color-primary-hover);
+            outline: none;
+        }
+
+        .app-inline-icon-btn--ok {
+            color: #047857;
+        }
+
+        .app-inline-icon-btn--ok:hover,
+        .app-inline-icon-btn--ok:focus-visible {
+            background: #ecfdf5;
+            color: #047857;
+        }
+
+        .app-inline-icon-btn--cancel {
+            color: #b91c1c;
+        }
+
+        .app-inline-icon-btn--cancel:hover,
+        .app-inline-icon-btn--cancel:focus-visible {
+            background: #fef2f2;
+            color: #b91c1c;
+        }
+
+        .app-inline-icon-btn:disabled {
+            opacity: 0.55;
+            cursor: wait;
         }
 
         .app-submenu-divider {
@@ -4737,7 +4829,21 @@ foreach ($team_members_rows as $tmRow) {
                                 <li role="none">
                                     <div class="app-submenu-item app-submenu-current">
                                         <span class="app-submenu-kicker">Current</span>
-                                        <span class="app-submenu-current-name" id="appOrgCurrentName"><?php echo htmlspecialchars($active_org_name); ?></span>
+                                        <div class="app-inline-name-row" id="appOrgNameRow">
+                                            <span class="app-submenu-current-name" id="appOrgCurrentName"><?php echo htmlspecialchars($active_org_name); ?></span>
+                                            <input type="text" id="appOrgRenameInput" class="app-inline-rename-input" maxlength="255" hidden aria-label="Organization name">
+                                            <?php if (!empty($can_rename_org)): ?>
+                                            <button type="button" class="app-inline-icon-btn" id="appOrgRenameEditBtn" aria-label="Rename organization" title="Rename organization">
+                                                <span class="material-symbols-outlined" aria-hidden="true">edit</span>
+                                            </button>
+                                            <button type="button" class="app-inline-icon-btn app-inline-icon-btn--ok" id="appOrgRenameSaveBtn" hidden aria-label="Save name" title="Save">
+                                                <span class="material-symbols-outlined" aria-hidden="true">check</span>
+                                            </button>
+                                            <button type="button" class="app-inline-icon-btn app-inline-icon-btn--cancel" id="appOrgRenameCancelBtn" hidden aria-label="Cancel rename" title="Cancel">
+                                                <span class="material-symbols-outlined" aria-hidden="true">close</span>
+                                            </button>
+                                            <?php endif; ?>
+                                        </div>
                                         <?php if ($show_org_switcher): ?>
                                         <label class="app-submenu-label" for="orgSwitcherSelect">Switch</label>
                                         <select id="orgSwitcherSelect" class="app-submenu-select" aria-label="Switch organization">
@@ -4750,11 +4856,6 @@ foreach ($team_members_rows as $tmRow) {
                                         <?php endif; ?>
                                     </div>
                                 </li>
-                                <?php if (!empty($can_rename_org)): ?>
-                                <li role="none">
-                                    <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings">Rename Organization</button>
-                                </li>
-                                <?php endif; ?>
                                 <li class="app-submenu-divider" role="separator"></li>
                                 <?php if (empty($_SESSION['joined_via_invite'])): ?>
                                 <li role="none">
@@ -4791,15 +4892,26 @@ foreach ($team_members_rows as $tmRow) {
                                 <li role="none">
                                     <div class="app-submenu-item app-submenu-current">
                                         <span class="app-submenu-kicker">Current</span>
-                                        <span class="app-submenu-current-name" id="appProjectCurrentName">Project</span>
+                                        <div class="app-inline-name-row" id="appProjectNameRow">
+                                            <span class="app-submenu-current-name" id="appProjectCurrentName">Project</span>
+                                            <input type="text" id="appProjectRenameInput" class="app-inline-rename-input" maxlength="255" hidden aria-label="Project name">
+                                            <?php if ($can_create_projects): ?>
+                                            <button type="button" class="app-inline-icon-btn" id="appProjectRenameEditBtn" aria-label="Rename project" title="Rename project">
+                                                <span class="material-symbols-outlined" aria-hidden="true">edit</span>
+                                            </button>
+                                            <button type="button" class="app-inline-icon-btn app-inline-icon-btn--ok" id="appProjectRenameSaveBtn" hidden aria-label="Save name" title="Save">
+                                                <span class="material-symbols-outlined" aria-hidden="true">check</span>
+                                            </button>
+                                            <button type="button" class="app-inline-icon-btn app-inline-icon-btn--cancel" id="appProjectRenameCancelBtn" hidden aria-label="Cancel rename" title="Cancel">
+                                                <span class="material-symbols-outlined" aria-hidden="true">close</span>
+                                            </button>
+                                            <?php endif; ?>
+                                        </div>
                                         <label class="app-submenu-label" for="projectSwitcherSelect">Switch</label>
                                         <select id="projectSwitcherSelect" class="app-submenu-select" aria-label="Switch project"></select>
                                     </div>
                                 </li>
                                 <?php if ($can_create_projects): ?>
-                                <li role="none">
-                                    <button type="button" role="menuitem" class="app-submenu-item" id="appRenameProjectBtn" data-open-modal="appModalRenameProject">Rename Current Project</button>
-                                </li>
                                 <li class="app-submenu-divider" role="separator"></li>
                                 <li role="none">
                                     <button type="button" role="menuitem" class="app-submenu-item" id="appCreateProjectBtn" data-open-modal="appModalProjectWizard">Create New Project</button>
@@ -4985,13 +5097,13 @@ foreach ($team_members_rows as $tmRow) {
                             <th class="manager-col th-with-filter th-sortable" data-vendor-sort-col="manager">
                                 <div class="th-with-filter-inner">
                                     <span class="th-label-with-info">
-                                        <span class="th-with-filter-caption">Manager</span>
-                                        <button type="button" class="th-info-btn" data-column-help="manager" aria-label="About manager" title="About manager">&#9432;</button>
+                                        <span class="th-with-filter-caption">Cost owner</span>
+                                        <button type="button" class="th-info-btn" data-column-help="manager" aria-label="About cost owner" title="About cost owner">&#9432;</button>
                                     </span>
-                                    <button type="button" class="vendor-col-sort-btn vendor-col-sort-btn--icon" data-vendor-sort="manager" aria-label="Sort by manager" title="Sort by manager">
+                                    <button type="button" class="vendor-col-sort-btn vendor-col-sort-btn--icon" data-vendor-sort="manager" aria-label="Sort by cost owner" title="Sort by cost owner">
                                         <span class="material-symbols-outlined vendor-col-sort-icon" aria-hidden="true">swap_vert</span>
                                     </button>
-                                    <button type="button" class="vendor-col-filter-btn" data-vendor-filter="manager" title="Filter by manager" aria-label="Filter by manager" aria-haspopup="true" aria-expanded="false">
+                                    <button type="button" class="vendor-col-filter-btn" data-vendor-filter="manager" title="Filter by cost owner" aria-label="Filter by cost owner" aria-haspopup="true" aria-expanded="false">
                                         <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
                                     </button>
                                     <div class="vendor-col-filter-dropdown" data-vendor-filter="manager" hidden>
@@ -7128,6 +7240,185 @@ foreach ($team_members_rows as $tmRow) {
                     });
                 });
             }
+            function initInlineNameEditor(cfg) {
+                var row = document.getElementById(cfg.rowId);
+                var nameEl = document.getElementById(cfg.nameId);
+                var input = document.getElementById(cfg.inputId);
+                var editBtn = document.getElementById(cfg.editBtnId);
+                var saveBtn = document.getElementById(cfg.saveBtnId);
+                var cancelBtn = document.getElementById(cfg.cancelBtnId);
+                if (!row || !nameEl || !input || !editBtn || !saveBtn || !cancelBtn) return;
+
+                var priorName = '';
+                var saving = false;
+
+                function setEditing(on) {
+                    row.classList.toggle('is-editing', !!on);
+                    input.hidden = !on;
+                    saveBtn.hidden = !on;
+                    cancelBtn.hidden = !on;
+                    editBtn.hidden = !!on;
+                    nameEl.hidden = !!on;
+                }
+
+                function exitEdit() {
+                    saving = false;
+                    input.disabled = false;
+                    saveBtn.disabled = false;
+                    cancelBtn.disabled = false;
+                    setEditing(false);
+                }
+
+                function cancelEdit() {
+                    if (saving) return;
+                    input.value = priorName;
+                    exitEdit();
+                }
+
+                function beginEdit(e) {
+                    if (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                    if (saving) return;
+                    priorName = String(nameEl.textContent || '').trim();
+                    input.value = priorName;
+                    setEditing(true);
+                    input.focus();
+                    input.select();
+                }
+
+                function saveEdit(e) {
+                    if (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                    if (saving) return;
+                    var nextName = String(input.value || '').trim();
+                    if (!nextName) {
+                        showSnackbar(cfg.emptyError || 'Name is required.', 'error');
+                        input.focus();
+                        return;
+                    }
+                    if (nextName === priorName) {
+                        exitEdit();
+                        return;
+                    }
+                    var payload = cfg.buildPayload(nextName);
+                    if (!payload) return;
+                    saving = true;
+                    input.disabled = true;
+                    saveBtn.disabled = true;
+                    cancelBtn.disabled = true;
+                    postJson(payload)
+                        .then(function(d) {
+                            if (!d || !d.success) {
+                                showSnackbar((d && d.error) || (cfg.failError || 'Could not rename.'), 'error');
+                                saving = false;
+                                input.disabled = false;
+                                saveBtn.disabled = false;
+                                cancelBtn.disabled = false;
+                                input.focus();
+                                return;
+                            }
+                            var savedName = String(d[cfg.responseNameKey] || nextName).trim() || nextName;
+                            nameEl.textContent = savedName;
+                            if (typeof cfg.onSuccess === 'function') {
+                                cfg.onSuccess(savedName, d);
+                            }
+                            showSnackbar(cfg.successMessage || 'Renamed.', 'success');
+                            exitEdit();
+                        })
+                        .catch(function() {
+                            showSnackbar(cfg.failError || 'Could not rename.', 'error');
+                            saving = false;
+                            input.disabled = false;
+                            saveBtn.disabled = false;
+                            cancelBtn.disabled = false;
+                            input.focus();
+                        });
+                }
+
+                [editBtn, saveBtn, cancelBtn, input].forEach(function(el) {
+                    el.addEventListener('mousedown', function(e) { e.stopPropagation(); });
+                    el.addEventListener('click', function(e) { e.stopPropagation(); });
+                });
+                editBtn.addEventListener('click', beginEdit);
+                saveBtn.addEventListener('click', saveEdit);
+                cancelBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    cancelEdit();
+                });
+                input.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        saveEdit();
+                    } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        cancelEdit();
+                    }
+                });
+            }
+
+            function initInlineNameEditors() {
+                initInlineNameEditor({
+                    rowId: 'appOrgNameRow',
+                    nameId: 'appOrgCurrentName',
+                    inputId: 'appOrgRenameInput',
+                    editBtnId: 'appOrgRenameEditBtn',
+                    saveBtnId: 'appOrgRenameSaveBtn',
+                    cancelBtnId: 'appOrgRenameCancelBtn',
+                    responseNameKey: 'org_name',
+                    emptyError: 'Organization name is required.',
+                    failError: 'Could not rename organization.',
+                    successMessage: 'Organization renamed.',
+                    buildPayload: function(orgName) {
+                        return { action: 'org_rename', org_name: orgName };
+                    },
+                    onSuccess: function(savedName) {
+                        var sel = document.getElementById('orgSwitcherSelect');
+                        if (sel && sel.selectedIndex >= 0 && sel.options[sel.selectedIndex]) {
+                            sel.options[sel.selectedIndex].textContent = savedName;
+                        }
+                        var settingsName = document.getElementById('renameOrgName');
+                        if (settingsName) settingsName.value = savedName;
+                    }
+                });
+
+                initInlineNameEditor({
+                    rowId: 'appProjectNameRow',
+                    nameId: 'appProjectCurrentName',
+                    inputId: 'appProjectRenameInput',
+                    editBtnId: 'appProjectRenameEditBtn',
+                    saveBtnId: 'appProjectRenameSaveBtn',
+                    cancelBtnId: 'appProjectRenameCancelBtn',
+                    responseNameKey: 'project_name',
+                    emptyError: 'Project name is required.',
+                    failError: 'Could not rename project.',
+                    successMessage: 'Project renamed.',
+                    buildPayload: function(projectName) {
+                        var projectId = parseInt(currentActiveProjectId || (document.getElementById('projectSwitcherSelect') || {}).value || 0, 10) || 0;
+                        if (!projectId) {
+                            showSnackbar('No active project selected.', 'error');
+                            return null;
+                        }
+                        return { action: 'project_rename', project_id: projectId, project_name: projectName };
+                    },
+                    onSuccess: function(savedName) {
+                        var sel = document.getElementById('projectSwitcherSelect');
+                        if (sel && sel.selectedIndex >= 0 && sel.options[sel.selectedIndex]) {
+                            sel.options[sel.selectedIndex].textContent = savedName;
+                        }
+                        updateActiveProjectHeader(savedName);
+                        var modalName = document.getElementById('renameProjectName');
+                        if (modalName) modalName.value = savedName;
+                    }
+                });
+            }
+
             function initNavSubmenus() {
                 var submenuItems = Array.from(document.querySelectorAll('.app-nav-item.has-submenu'));
                 if (!submenuItems.length) return;
@@ -7179,6 +7470,7 @@ foreach ($team_members_rows as $tmRow) {
                     });
                     item.querySelectorAll('.app-submenu a, .app-submenu button').forEach(function(action) {
                         if (action.classList.contains('app-submenu-parent')) return;
+                        if (action.classList.contains('app-inline-icon-btn')) return;
                         action.addEventListener('click', function() { closeAll(); });
                     });
                 });
@@ -7186,7 +7478,9 @@ foreach ($team_members_rows as $tmRow) {
                     if (!submenuItems.some(function(item) { return item.contains(e.target); })) closeAll();
                 });
                 document.addEventListener('keydown', function(e) {
-                    if (e.key === 'Escape') closeAll();
+                    if (e.key !== 'Escape') return;
+                    if (document.querySelector('.app-inline-name-row.is-editing')) return;
+                    closeAll();
                 });
                 initCsvImportUi();
                 initMappedCsvImportUi();
@@ -9665,6 +9959,7 @@ foreach ($team_members_rows as $tmRow) {
                 initQboRevisitSyncUi();
                 resumePostCreateQboSyncFromOAuth();
                 initNavSubmenus();
+                initInlineNameEditors();
                 initPurposeColumnToggle();
                 initStickyToolbarOffset();
                 initVendorPageSizeSelect();
