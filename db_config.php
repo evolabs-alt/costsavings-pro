@@ -688,6 +688,11 @@ function migrateUserOrganizationsSchema(PDO $pdo): void
             $pdo->exec('ALTER TABLE `users` ADD COLUMN `last_org_id` INT UNSIGNED NULL AFTER `org_id`');
         }
 
+        $lastProjectCol = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'last_project_id'")->fetch();
+        if (!$lastProjectCol) {
+            $pdo->exec('ALTER TABLE `users` ADD COLUMN `last_project_id` INT UNSIGNED NULL AFTER `last_org_id`');
+        }
+
         backfillUserOrganizationsFromLegacyUsers($pdo);
         backfillProjectMemberRolesFromLegacyUsers($pdo);
         backfillMissingProjectMembersForOrgUsers($pdo);

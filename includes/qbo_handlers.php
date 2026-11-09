@@ -104,11 +104,19 @@ function csQboCallback(): void
             if ($projectId > 0 && ProjectService::canAccessProject($pdo, $projectId, $orgId, $uid, $orgRole)) {
                 $activeProjectId = $projectId;
             } else {
-                $activeProjectId = ProjectService::resolveActiveProjectId($pdo, $orgId, $uid, $orgRole, null);
+                $preferredProjectId = RoleContext::readLastProjectId($pdo, $uid);
+                $activeProjectId = ProjectService::resolveActiveProjectId(
+                    $pdo,
+                    $orgId,
+                    $uid,
+                    $orgRole,
+                    $preferredProjectId > 0 ? $preferredProjectId : null
+                );
             }
             RoleContext::syncSession($pdo, $uid, $orgId, $activeProjectId);
             $_SESSION['user_orgs'] = RoleContext::listUserOrganizations($pdo, $uid);
             if ($activeProjectId !== null) {
+                RoleContext::persistLastProjectId($pdo, $uid, $activeProjectId);
                 ProjectService::backfillNullProjectRows($pdo, $orgId, $activeProjectId);
             }
             if ($resumeWizard && $projectId > 0) {

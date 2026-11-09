@@ -438,10 +438,18 @@ function establishUserSession(PDO $pdo, array $row): void
     $orgRole = RoleContext::orgRole($pdo, $userId, $orgId) ?? OrgRole::ROLE_EXECUTIVE;
     $projectCount = ProjectService::orgProjectCount($pdo, $orgId);
     $_SESSION['project_onboarding_required'] = OrgRole::canCreateProject((string) $orgRole) && $projectCount === 0;
-    $activeProjectId = ProjectService::resolveActiveProjectId($pdo, $orgId, $userId, $orgRole, null);
+    $preferredProjectId = RoleContext::readLastProjectId($pdo, $userId);
+    $activeProjectId = ProjectService::resolveActiveProjectId(
+        $pdo,
+        $orgId,
+        $userId,
+        $orgRole,
+        $preferredProjectId > 0 ? $preferredProjectId : null
+    );
     RoleContext::syncSession($pdo, $userId, $orgId, $activeProjectId);
     $_SESSION['user_orgs'] = RoleContext::listUserOrganizations($pdo, $userId);
     if ($activeProjectId !== null) {
+        RoleContext::persistLastProjectId($pdo, $userId, $activeProjectId);
         ProjectService::backfillNullProjectRows($pdo, $orgId, $activeProjectId);
     }
 }
@@ -453,16 +461,20 @@ function requireActiveProjectId(PDO $pdo): ?int
     }
     $userId = (int) $_SESSION['user_id'];
     $orgId = (int) ($_SESSION['org_id'] ?? 0);
-    $projectId = isset($_SESSION['active_project_id']) ? (int) $_SESSION['active_project_id'] : null;
+    $projectId = isset($_SESSION['active_project_id']) ? (int) $_SESSION['active_project_id'] : 0;
+    if ($projectId < 1) {
+        $projectId = RoleContext::readLastProjectId($pdo, $userId);
+    }
     $resolved = ProjectService::resolveActiveProjectId(
         $pdo,
         $orgId,
         $userId,
         sessionProjectRole(),
-        $projectId
+        $projectId > 0 ? $projectId : null
     );
     if ($resolved !== null) {
         RoleContext::syncSession($pdo, $userId, $orgId, $resolved);
+        RoleContext::persistLastProjectId($pdo, $userId, $resolved);
         ProjectService::backfillNullProjectRows($pdo, $orgId, $resolved);
     } else {
         RoleContext::syncSession($pdo, $userId, $orgId, null);
@@ -2475,6 +2487,7 @@ function handleProjectSetActive() {
     }
     $_SESSION['active_project_id'] = $projectId;
     RoleContext::syncSession($pdo, (int) $_SESSION['user_id'], (int) $_SESSION['org_id'], $projectId);
+    RoleContext::persistLastProjectId($pdo, (int) $_SESSION['user_id'], $projectId);
     echo json_encode(['success' => true, 'active_project_id' => $projectId, 'project_role' => sessionProjectRole()]);
     exit;
 }
@@ -2536,6 +2549,7 @@ function handleProjectCreate() {
     $_SESSION['active_project_id'] = $newProjectId;
     $_SESSION['project_onboarding_required'] = false;
     RoleContext::syncSession($pdo, $userId, $orgId, $newProjectId);
+    RoleContext::persistLastProjectId($pdo, $userId, $newProjectId);
     echo json_encode(['success' => true, 'project_id' => $newProjectId]);
     exit;
 }
@@ -2640,10 +2654,18 @@ function handleOrgSetActive(): void
     RoleContext::persistLastOrgId($pdo, $userId, $orgId);
     $projectCount = ProjectService::orgProjectCount($pdo, $orgId);
     $_SESSION['project_onboarding_required'] = OrgRole::canCreateProject((string) $orgRole) && $projectCount === 0;
-    $activeProjectId = ProjectService::resolveActiveProjectId($pdo, $orgId, $userId, $orgRole, null);
+    $preferredProjectId = RoleContext::readLastProjectId($pdo, $userId);
+    $activeProjectId = ProjectService::resolveActiveProjectId(
+        $pdo,
+        $orgId,
+        $userId,
+        $orgRole,
+        $preferredProjectId > 0 ? $preferredProjectId : null
+    );
     RoleContext::syncSession($pdo, $userId, $orgId, $activeProjectId);
     $_SESSION['user_orgs'] = RoleContext::listUserOrganizations($pdo, $userId);
     if ($activeProjectId !== null) {
+        RoleContext::persistLastProjectId($pdo, $userId, $activeProjectId);
         ProjectService::backfillNullProjectRows($pdo, $orgId, $activeProjectId);
     }
     echo json_encode([
@@ -2933,15 +2955,23 @@ function handleProjectDelete() {
         exit;
     }
 
+    $preferredAfterDelete = isset($_SESSION['active_project_id']) ? (int) $_SESSION['active_project_id'] : 0;
+    if ($preferredAfterDelete === $projectId) {
+        $preferredAfterDelete = RoleContext::readLastProjectId($pdo, $userId);
+        if ($preferredAfterDelete === $projectId) {
+            $preferredAfterDelete = 0;
+        }
+    }
     $newActive = ProjectService::resolveActiveProjectId(
         $pdo,
         $orgId,
         $userId,
         $role,
-        isset($_SESSION['active_project_id']) ? (int) $_SESSION['active_project_id'] : null
+        $preferredAfterDelete > 0 ? $preferredAfterDelete : null
     );
     if ($newActive !== null) {
         $_SESSION['active_project_id'] = $newActive;
+        RoleContext::persistLastProjectId($pdo, $userId, $newActive);
     } else {
         unset($_SESSION['active_project_id']);
     }

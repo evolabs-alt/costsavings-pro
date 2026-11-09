@@ -133,6 +133,26 @@ final class RoleContext
         $st->execute([$orgId, $userId]);
     }
 
+    public static function readLastProjectId(PDO $pdo, int $userId): int
+    {
+        if ($userId <= 0) {
+            return 0;
+        }
+        $st = $pdo->prepare('SELECT last_project_id FROM users WHERE id = ? LIMIT 1');
+        $st->execute([$userId]);
+
+        return (int) ($st->fetchColumn() ?: 0);
+    }
+
+    public static function persistLastProjectId(PDO $pdo, int $userId, int $projectId): void
+    {
+        if ($userId <= 0 || $projectId <= 0) {
+            return;
+        }
+        $st = $pdo->prepare('UPDATE users SET last_project_id = ? WHERE id = ?');
+        $st->execute([$projectId, $userId]);
+    }
+
     /**
      * Write org_role (and legacy project_role/role aliases) into session.
      * Project role is no longer separate — aliases mirror the org role.
