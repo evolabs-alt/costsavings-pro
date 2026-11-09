@@ -337,4 +337,70 @@ final class OrgRole
             ],
         ];
     }
+
+    /**
+     * Full role-access matrix for help UI (Module / Permission × role).
+     * Cell values are bool or a short caveat string.
+     *
+     * @return list<array{
+     *   module:string,
+     *   permission:string,
+     *   org_admin:bool|string,
+     *   finance_admin:bool|string,
+     *   project_manager:bool|string,
+     *   cost_owner:bool|string,
+     *   executive:bool|string
+     * }>
+     */
+    public static function roleAccessMatrix(): array
+    {
+        $pmLimited = 'PM, Cost Owner, Executive only';
+        $assignedOnly = 'Assigned rows only';
+
+        return [
+            ['module' => 'Organization', 'permission' => 'Connect/Disconnect QBO to organization', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => false, 'cost_owner' => false, 'executive' => false],
+            ['module' => 'Organization', 'permission' => 'Change organization name', 'org_admin' => true, 'finance_admin' => false, 'project_manager' => false, 'cost_owner' => false, 'executive' => false],
+            ['module' => 'Organization', 'permission' => 'Create organization', 'org_admin' => true, 'finance_admin' => false, 'project_manager' => false, 'cost_owner' => false, 'executive' => false],
+            ['module' => 'Organization', 'permission' => 'Invite user', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => $pmLimited, 'cost_owner' => false, 'executive' => false],
+            ['module' => 'Organization', 'permission' => 'Change user role', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => $pmLimited, 'cost_owner' => false, 'executive' => false],
+            ['module' => 'Organization', 'permission' => 'Disable user', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => $pmLimited, 'cost_owner' => false, 'executive' => false],
+            ['module' => 'Project', 'permission' => 'QBO sync to project', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => false, 'cost_owner' => false, 'executive' => false],
+            ['module' => 'Project', 'permission' => 'Create project', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
+            ['module' => 'Project', 'permission' => 'Change project name', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
+            ['module' => 'Project', 'permission' => 'Delete project', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
+            ['module' => 'Project', 'permission' => 'Export project reports (download Excel, PDF)', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => true],
+            ['module' => 'Project', 'permission' => 'Receive all project emails', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
+            ['module' => 'Project', 'permission' => 'AI Assistant', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => true, 'executive' => false],
+            ['module' => 'Project', 'permission' => 'Generate vendor purpose', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => true, 'executive' => false],
+            ['module' => 'Project', 'permission' => 'Chat with assistant', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => true, 'executive' => false],
+            ['module' => 'Grid', 'permission' => 'Update vendor name', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
+            ['module' => 'Grid', 'permission' => 'Add vendor rows', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
+            ['module' => 'Grid', 'permission' => 'Delete vendor rows', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
+            ['module' => 'Grid', 'permission' => 'View vendor rows', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => true],
+            ['module' => 'Grid', 'permission' => 'View vendor transactions detail popup', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => true],
+            ['module' => 'Grid', 'permission' => 'Update cost', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => false],
+            ['module' => 'Grid', 'permission' => 'Update frequency', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => false],
+            ['module' => 'Grid', 'permission' => 'Update cost owner', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => false],
+            ['module' => 'Grid', 'permission' => 'Update visibility', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => false],
+            ['module' => 'Grid', 'permission' => 'Update status', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => false],
+            ['module' => 'Grid', 'permission' => 'Ability to chat', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => true],
+        ];
+    }
+
+    /**
+     * Format a matrix cell for display.
+     *
+     * @param bool|string $value
+     */
+    public static function formatRoleAccessCell($value): string
+    {
+        if ($value === true) {
+            return 'Yes';
+        }
+        if ($value === false) {
+            return 'No';
+        }
+
+        return (string) $value;
+    }
 }

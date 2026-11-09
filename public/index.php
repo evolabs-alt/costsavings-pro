@@ -3866,6 +3866,122 @@ foreach ($team_members_rows as $tmRow) {
             outline: none;
         }
 
+        .role-descriptions-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin: 0;
+            padding: 6px 10px;
+            border: 1px solid rgba(11, 88, 163, 0.28);
+            border-radius: 8px;
+            background: #eaf5fd;
+            color: var(--color-primary);
+            font-family: 'Inter', system-ui, sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+        }
+
+        .role-descriptions-link .material-symbols-outlined {
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        .role-descriptions-link:hover,
+        .role-descriptions-link:focus-visible {
+            background: #dcf0fb;
+            border-color: var(--color-secondary);
+            color: var(--color-primary-hover);
+            outline: none;
+        }
+
+        .role-desc-list {
+            list-style: none;
+            margin: 0 0 18px;
+            padding: 0;
+            display: grid;
+            gap: 10px;
+        }
+
+        .role-desc-item {
+            padding: 12px 14px;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            background: #f8fafc;
+        }
+
+        .role-desc-item h3 {
+            margin: 0 0 6px;
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--color-primary);
+            text-align: left;
+            font-family: 'Inter', system-ui, sans-serif;
+            background: none;
+            -webkit-text-fill-color: currentColor;
+        }
+
+        .role-desc-item p {
+            margin: 0;
+            font-size: 13px;
+            line-height: 1.5;
+            color: #4b5563;
+        }
+
+        .role-access-matrix-wrap {
+            overflow: auto;
+            max-width: 100%;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+        }
+
+        .role-access-matrix {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 860px;
+            font-size: 12px;
+        }
+
+        .role-access-matrix th,
+        .role-access-matrix td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #eef2f7;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        .role-access-matrix thead th {
+            position: sticky;
+            top: 0;
+            background: #f1f8fd;
+            color: var(--color-primary-hover);
+            font-weight: 700;
+            white-space: nowrap;
+            z-index: 1;
+        }
+
+        .role-access-matrix .role-access-module {
+            font-weight: 700;
+            color: #374151;
+            white-space: nowrap;
+        }
+
+        .role-access-matrix .role-access-yes {
+            color: #047857;
+            font-weight: 600;
+        }
+
+        .role-access-matrix .role-access-no {
+            color: #9ca3af;
+        }
+
+        .role-access-matrix .role-access-note {
+            color: #b45309;
+            font-weight: 600;
+            line-height: 1.35;
+        }
+
         .app-modal-close {
             border: none;
             background: transparent;
@@ -4469,7 +4585,8 @@ foreach ($team_members_rows as $tmRow) {
             .app-header button,
             .app-nav button,
             .app-submenu button,
-            .app-modal-header button {
+            .app-modal-header button,
+            .role-descriptions-link {
                 width: auto;
                 margin: 0;
             }
@@ -11562,6 +11679,12 @@ foreach ($team_members_rows as $tmRow) {
                     Each user has one organization role that controls access across all projects.
                     Change another user’s role with the dropdown, then click <strong>Save</strong>.
                 </p>
+                <p style="margin:0 0 12px;">
+                    <button type="button" class="role-descriptions-link" data-open-modal="appModalRoleDescriptions">
+                        <span class="material-symbols-outlined" aria-hidden="true">info</span>
+                        View role descriptions
+                    </button>
+                </p>
                 <p style="margin:0 0 10px;color:#4b5563;font-size:14px;">
                     Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> users
                 </p>
@@ -11636,6 +11759,70 @@ foreach ($team_members_rows as $tmRow) {
                             </tr>
                             <?php endforeach; ?>
                             <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay" id="appModalRoleDescriptions" role="dialog" aria-modal="true" aria-labelledby="appModalRoleDescriptionsTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1" style="max-width:1100px;">
+            <div class="app-modal-header">
+                <h2 id="appModalRoleDescriptionsTitle">Role descriptions</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <p style="margin:0 0 14px;font-size:14px;color:#4b5563;line-height:1.5;">
+                    Each person has one organization role. That role controls organization tools, projects, and what they can do in the vendor grid.
+                </p>
+                <ul class="role-desc-list">
+                    <?php foreach (\CostSavings\OrgRole::roleDescriptionsForInvite() as $roleHelp): ?>
+                    <li class="role-desc-item">
+                        <h3><?php echo htmlspecialchars((string) ($roleHelp['title'] ?? '')); ?></h3>
+                        <p><?php echo htmlspecialchars((string) ($roleHelp['description'] ?? '')); ?></p>
+                    </li>
+                    <?php endforeach; ?>
+                </ul>
+                <h3 style="margin:0 0 10px;font-size:16px;color:var(--color-primary);text-align:left;font-family:'Inter',system-ui,sans-serif;background:none;-webkit-text-fill-color:currentColor;">Access rights</h3>
+                <div class="role-access-matrix-wrap">
+                    <table class="role-access-matrix">
+                        <thead>
+                            <tr>
+                                <th>Module</th>
+                                <th>Permission</th>
+                                <th>Org Admin</th>
+                                <th>Finance Admin</th>
+                                <th>Project Manager</th>
+                                <th>Cost Owner</th>
+                                <th>Executive/Viewer</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach (\CostSavings\OrgRole::roleAccessMatrix() as $row): ?>
+                            <?php
+                                $cells = [
+                                    $row['org_admin'] ?? false,
+                                    $row['finance_admin'] ?? false,
+                                    $row['project_manager'] ?? false,
+                                    $row['cost_owner'] ?? false,
+                                    $row['executive'] ?? false,
+                                ];
+                            ?>
+                            <tr>
+                                <td class="role-access-module"><?php echo htmlspecialchars((string) ($row['module'] ?? '')); ?></td>
+                                <td><?php echo htmlspecialchars((string) ($row['permission'] ?? '')); ?></td>
+                                <?php foreach ($cells as $cell): ?>
+                                    <?php
+                                        $label = \CostSavings\OrgRole::formatRoleAccessCell($cell);
+                                        $class = is_bool($cell)
+                                            ? ($cell ? 'role-access-yes' : 'role-access-no')
+                                            : 'role-access-note';
+                                    ?>
+                                <td class="<?php echo $class; ?>"><?php echo htmlspecialchars($label); ?></td>
+                                <?php endforeach; ?>
+                            </tr>
+                            <?php endforeach; ?>
                         </tbody>
                     </table>
                 </div>
