@@ -66,6 +66,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'logout':
                 handleLogout();
                 break;
+            case 'close_saver':
+                handleCloseSaver();
+                break;
             case 'save_cost_calculator':
                 handleSaveCostCalculator();
                 break;
@@ -214,15 +217,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
 }
 
 // Functions
-function handleLogout() {
+function handleLogout(bool $redirectToMembers = false) {
     $_SESSION = [];
     if (ini_get('session.use_cookies')) {
         $p = session_get_cookie_params();
         setcookie(session_name(), '', time() - 42000, $p['path'], $p['domain'], $p['secure'], $p['httponly']);
     }
     session_destroy();
-    header('Location: ' . $_SERVER['PHP_SELF']);
+    if ($redirectToMembers) {
+        header('Location: ' . membersAppUrl());
+    } else {
+        header('Location: ' . $_SERVER['PHP_SELF']);
+    }
     exit;
+}
+
+function handleCloseSaver() {
+    handleLogout(true);
 }
 
 try {
@@ -1637,6 +1648,45 @@ foreach ($team_members_rows as $tmRow) {
             font-weight: 600;
             letter-spacing: 0.03em;
             color: #ffffff;
+        }
+
+        .app-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px 24px;
+            width: 100%;
+            min-height: 60px;
+            margin: 0 0 14px 0;
+            padding: 8px 4px;
+            box-sizing: border-box;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .app-header-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 0;
+            flex: 0 1 auto;
+        }
+
+        .app-header-logo {
+            display: block;
+            height: 36px;
+            width: auto;
+            max-width: 140px;
+            object-fit: contain;
+        }
+
+        .app-header-product {
+            color: rgba(255, 255, 255, 0.92);
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            white-space: nowrap;
+            padding-left: 12px;
+            border-left: 1px solid rgba(255, 255, 255, 0.22);
         }
 
         /* Responsive styles for cost savings tool table */
@@ -3302,34 +3352,16 @@ foreach ($team_members_rows as $tmRow) {
         }
 
         .app-nav {
-            width: 100%;
-            margin: 0 0 18px 0;
-            border: 1px solid var(--color-border);
-            border-radius: 10px;
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(247, 250, 252, 0.96) 100%);
-            box-shadow: 0 6px 18px rgba(11, 88, 163, 0.08);
-            display: flex;
-            justify-content: stretch;
-            padding: 6px 10px;
-        }
-
-        .app-nav-shell {
-            width: 100%;
-            max-width: 100%;
-            margin: 0 auto 14px auto;
-        }
-
-        .app-nav-shell .app-nav {
-            margin-bottom: 0;
-        }
-
-        .app-nav-clusters {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            width: 100%;
-            flex-wrap: wrap;
+            justify-content: flex-end;
+            flex: 1 1 auto;
+            min-width: 0;
+            margin: 0;
+            padding: 0;
+            border: 0;
+            background: transparent;
+            box-shadow: none;
         }
 
         .app-nav-cluster {
@@ -3338,42 +3370,25 @@ foreach ($team_members_rows as $tmRow) {
             padding: 0;
             display: flex;
             align-items: center;
-            gap: 4px;
-        }
-
-        .app-nav-cluster--org {
-            flex: 0 1 auto;
-            min-width: 0;
-        }
-
-        .app-nav-cluster--account {
-            flex: 0 0 auto;
-            margin-left: auto;
-        }
-
-        .app-nav-project-workspace {
-            flex: 1 1 320px;
-            display: flex;
-            justify-content: center;
-            min-width: 0;
-            padding: 3px 6px;
-            border: 1px solid rgba(37, 168, 224, 0.28);
-            border-radius: 10px;
-            background: rgba(234, 245, 253, 0.5);
-        }
-
-        .app-nav-project-workspace .app-nav-cluster {
-            flex-wrap: wrap;
-            justify-content: center;
             gap: 2px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
         }
 
         .app-nav-item {
             position: relative;
+            display: flex;
+            align-items: center;
         }
 
-        .app-nav-link--named {
-            max-width: 200px;
+        .app-nav-sep {
+            width: 4px;
+            height: 4px;
+            margin: 0 6px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.35);
+            flex: 0 0 auto;
+            pointer-events: none;
         }
 
         .app-nav-link-label {
@@ -3393,64 +3408,80 @@ foreach ($team_members_rows as $tmRow) {
             align-items: center;
             justify-content: center;
             min-height: 40px;
-            padding: 8px 16px;
-            border-radius: 8px;
-            border: 1px solid transparent;
+            padding: 8px 14px;
+            border-radius: 999px;
+            border: 0;
             background: transparent;
-            color: var(--color-text-primary);
+            color: rgba(255, 255, 255, 0.92);
             font-family: 'Inter', system-ui, sans-serif;
-            font-size: 14px;
-            font-weight: 600;
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: 0.01em;
             text-decoration: none;
             cursor: pointer;
-            transition: background .15s ease, border-color .15s ease, color .15s ease;
+            transition: background 0.14s ease, color 0.14s ease;
+        }
+
+        .app-nav-link--quiet {
+            color: rgba(255, 255, 255, 0.72);
+            font-weight: 500;
         }
 
         .app-nav-link:hover,
         .app-nav-link:focus-visible,
         .app-nav-item.is-open > .app-nav-link {
-            background: #eaf5fd;
-            border-color: var(--color-secondary);
-            color: var(--color-primary-hover);
+            background: rgba(255, 255, 255, 0.12);
+            color: #ffffff;
             outline: none;
         }
 
-        .app-nav-item.has-submenu .app-nav-link::after {
-            content: '▾';
+        .app-nav-item.has-submenu > .app-nav-link::after {
+            content: '';
+            width: 0;
+            height: 0;
             margin-left: 8px;
-            font-size: 11px;
-            opacity: 0.8;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid rgba(255, 255, 255, 0.7);
         }
 
         .app-submenu {
             position: absolute;
-            top: calc(100% + 6px);
-            left: 50%;
-            transform: translateX(-50%);
-            min-width: 220px;
+            top: calc(100% + 8px);
+            right: 0;
+            left: auto;
+            transform: translateY(4px);
+            min-width: 260px;
             list-style: none;
             margin: 0;
             padding: 8px;
-            border: 1px solid var(--color-border);
-            border-radius: 10px;
+            border: 1px solid rgba(220, 227, 234, 0.95);
+            border-radius: 12px;
             background: #fff;
-            box-shadow: 0 12px 24px rgba(11, 88, 163, 0.14);
-            z-index: 25;
+            box-shadow: 0 16px 36px rgba(8, 54, 96, 0.18);
+            z-index: 40;
             display: none;
+            opacity: 0;
+            transition: opacity 0.14s ease, transform 0.14s ease;
         }
 
         .app-nav-item.is-open > .app-submenu {
             display: block;
+            opacity: 1;
+            transform: translateY(0);
         }
 
         .app-submenu-item {
-            display: block;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
             width: 100%;
             box-sizing: border-box;
             margin: 0;
-            padding: 9px 10px;
+            padding: 9px 11px;
             border: 0;
-            border-radius: 7px;
+            border-radius: 8px;
             background: transparent;
             color: var(--color-text-primary);
             text-decoration: none;
@@ -3459,13 +3490,54 @@ foreach ($team_members_rows as $tmRow) {
             font-size: 13px;
             font-weight: 500;
             cursor: pointer;
+            transition: background 0.12s ease, color 0.12s ease;
         }
 
         .app-submenu-item:hover,
         .app-submenu-item:focus-visible {
-            background: #edf7fd;
+            background: #f3f6f9;
             color: var(--color-primary-hover);
             outline: none;
+        }
+
+        .app-submenu-current {
+            display: grid;
+            gap: 6px;
+            padding: 8px 11px 10px;
+            cursor: default;
+        }
+
+        .app-submenu-current:hover,
+        .app-submenu-current:focus-visible {
+            background: transparent;
+            color: var(--color-text-primary);
+        }
+
+        .app-submenu-kicker {
+            display: block;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #6b7280;
+        }
+
+        .app-submenu-current-name {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--color-text-primary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .app-submenu-divider {
+            height: 1px;
+            margin: 6px 8px;
+            background: #e8edf2;
+            list-style: none;
+            pointer-events: none;
         }
 
         .app-submenu-label {
@@ -3503,6 +3575,63 @@ foreach ($team_members_rows as $tmRow) {
             outline: none;
             border-color: var(--color-secondary);
             box-shadow: 0 0 0 3px rgba(37, 168, 224, 0.18);
+        }
+
+        .app-status-pill {
+            display: inline-flex;
+            align-items: center;
+            flex: 0 0 auto;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            line-height: 1.4;
+        }
+
+        .app-status-pill--linked {
+            background: #ecfdf5;
+            color: #047857;
+        }
+
+        .app-status-pill--unlinked {
+            background: #fffbeb;
+            color: #b45309;
+        }
+
+        .app-submenu > .has-nested {
+            position: relative;
+            list-style: none;
+        }
+
+        .app-submenu-parent {
+            width: 100%;
+        }
+
+        .app-submenu-parent::after {
+            content: '›';
+            margin-left: auto;
+            font-size: 16px;
+            line-height: 1;
+            color: #9ca3af;
+        }
+
+        .app-submenu--nested {
+            top: 0;
+            right: calc(100% + 6px);
+            left: auto;
+            min-width: 180px;
+            display: none;
+            opacity: 0;
+            transform: translateX(4px);
+        }
+
+        .app-submenu > .has-nested.is-open > .app-submenu--nested,
+        .app-submenu > .has-nested:hover > .app-submenu--nested,
+        .app-submenu > .has-nested:focus-within > .app-submenu--nested {
+            display: block;
+            opacity: 1;
+            transform: translateX(0);
         }
 
         .app-modal-overlay {
@@ -4082,25 +4211,54 @@ foreach ($team_members_rows as $tmRow) {
         }
         
         /* Responsive Design */
-        @media (max-width: 768px) {
-            .app-nav-clusters {
+        @media (max-width: 720px) {
+            .app-header {
                 flex-direction: column;
                 align-items: stretch;
+                gap: 8px;
+                padding: 6px 2px 10px;
             }
 
-            .app-nav-cluster--account {
-                margin-left: 0;
-                justify-content: flex-end;
+            .app-header-brand {
+                justify-content: center;
             }
 
-            .app-nav-project-workspace {
-                flex: 1 1 auto;
+            .app-nav {
+                justify-content: center;
             }
 
-            .app-nav-link--named {
-                max-width: 160px;
+            .app-nav-cluster {
+                justify-content: center;
+                width: 100%;
             }
 
+            .app-submenu {
+                right: 50%;
+                transform: translateX(50%) translateY(4px);
+                min-width: min(280px, calc(100vw - 32px));
+            }
+
+            .app-nav-item.is-open > .app-submenu {
+                transform: translateX(50%) translateY(0);
+            }
+
+            .app-submenu--nested {
+                position: static;
+                right: auto;
+                margin-top: 4px;
+                transform: none;
+                box-shadow: none;
+                border: 1px solid #e8edf2;
+            }
+
+            .app-submenu > .has-nested.is-open > .app-submenu--nested,
+            .app-submenu > .has-nested:hover > .app-submenu--nested,
+            .app-submenu > .has-nested:focus-within > .app-submenu--nested {
+                transform: none;
+            }
+        }
+
+        @media (max-width: 768px) {
             body {
                 padding: 10px;
             }
@@ -4133,6 +4291,17 @@ foreach ($team_members_rows as $tmRow) {
             button {
                 width: 100%;
                 margin: 5px 0;
+            }
+
+            .app-header button,
+            .app-nav button,
+            .app-submenu button {
+                width: auto;
+                margin: 0;
+            }
+
+            .app-submenu .app-submenu-item {
+                width: 100%;
             }
             
             .navigation {
@@ -4539,127 +4708,142 @@ foreach ($team_members_rows as $tmRow) {
     </script>
 
     <div class="container-wrapper <?php echo ($current_view === 'placeholder') ? 'placeholder-container-wrapper' : ''; ?>">
-        <?php if ($current_view === 'placeholder' || $current_view === 'login'): ?>
-            <!-- Logo above container -->
+        <?php if ($current_view === 'login'): ?>
             <div class="logo-above-container">
-                <img src="https://savvycfo.com/wp-content/uploads/2023/06/SavvyCFO_logo_mainfinal-bluewhite_23Jun23.png" 
-                     alt="Savvy CFO Logo" 
+                <img src="https://savvycfo.com/wp-content/uploads/2023/06/SavvyCFO_logo_mainfinal-bluewhite_23Jun23.png"
+                     alt="Savvy CFO Logo"
                      class="login-logo">
                 <div class="logo-tagline">Savvy Saver</div>
             </div>
         <?php endif; ?>
         <?php if ($current_view === 'placeholder'): ?>
-            <div class="app-nav-shell">
+            <?php
+            $qbo_linked = !empty($qbo_status['connected']);
+            ?>
+            <header class="app-header">
+                <div class="app-header-brand">
+                    <img src="https://savvycfo.com/wp-content/uploads/2023/06/SavvyCFO_logo_mainfinal-bluewhite_23Jun23.png"
+                         alt="Savvy CFO"
+                         class="app-header-logo">
+                    <span class="app-header-product">Savvy Saver</span>
+                </div>
                 <nav class="app-nav" aria-label="App sections">
-                    <div class="app-nav-clusters">
-                        <ul class="app-nav-cluster app-nav-cluster--org">
-                            <li class="app-nav-item has-submenu" id="appOrgNavItem">
-                                <button type="button" class="app-nav-link app-nav-link--named" id="appOrgMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appOrgSubmenu" aria-label="Organization: <?php echo htmlspecialchars($active_org_name); ?>">
-                                    <span class="app-nav-link-label"><?php echo htmlspecialchars($active_org_name); ?></span>
-                                </button>
-                                <ul class="app-submenu" id="appOrgSubmenu" role="menu" aria-label="Organization actions">
-                                    <li role="none">
+                    <ul class="app-nav-cluster">
+                        <li class="app-nav-item has-submenu" id="appOrgNavItem">
+                            <button type="button" class="app-nav-link" id="appOrgMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appOrgSubmenu">
+                                <span class="app-nav-link-label">Organization</span>
+                            </button>
+                            <ul class="app-submenu" id="appOrgSubmenu" role="menu" aria-label="Organization actions">
+                                <li role="none">
+                                    <div class="app-submenu-item app-submenu-current">
+                                        <span class="app-submenu-kicker">Current</span>
+                                        <span class="app-submenu-current-name" id="appOrgCurrentName"><?php echo htmlspecialchars($active_org_name); ?></span>
                                         <?php if ($show_org_switcher): ?>
-                                        <label class="app-submenu-item" for="orgSwitcherSelect">
-                                            <span class="app-submenu-label">Switch organization</span>
-                                            <select id="orgSwitcherSelect" class="app-submenu-select">
-                                                <?php foreach ($user_orgs as $uo): ?>
-                                                <option value="<?php echo (int) ($uo['id'] ?? 0); ?>"<?php echo ((int) ($uo['id'] ?? 0) === $active_org_id) ? ' selected' : ''; ?>>
-                                                    <?php echo htmlspecialchars((string) ($uo['name'] ?? 'Organization')); ?>
-                                                </option>
-                                                <?php endforeach; ?>
-                                            </select>
-                                        </label>
-                                        <?php else: ?>
-                                        <span class="app-submenu-item" style="cursor:default;">
-                                            <span class="app-submenu-label">Organization</span>
-                                            <span style="display:block;font-size:13px;color:#4b5563;margin-top:2px;"><?php echo htmlspecialchars($active_org_name); ?></span>
-                                        </span>
+                                        <label class="app-submenu-label" for="orgSwitcherSelect">Switch</label>
+                                        <select id="orgSwitcherSelect" class="app-submenu-select" aria-label="Switch organization">
+                                            <?php foreach ($user_orgs as $uo): ?>
+                                            <option value="<?php echo (int) ($uo['id'] ?? 0); ?>"<?php echo ((int) ($uo['id'] ?? 0) === $active_org_id) ? ' selected' : ''; ?>>
+                                                <?php echo htmlspecialchars((string) ($uo['name'] ?? 'Organization')); ?>
+                                            </option>
+                                            <?php endforeach; ?>
+                                        </select>
                                         <?php endif; ?>
-                                    </li>
-                                    <?php if (empty($_SESSION['joined_via_invite'])): ?>
-                                    <li role="none">
-                                        <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalCreateOrg">Create organization…</button>
-                                    </li>
-                                    <?php endif; ?>
-                                    <?php if ($can_invite_users): ?>
-                                    <li role="none">
-                                        <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersInvite">Invite user</button>
-                                    </li>
-                                    <?php endif; ?>
-                                    <?php if ($can_manage_users): ?>
-                                    <li role="none">
-                                        <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage users</button>
-                                    </li>
-                                    <?php endif; ?>
-                                    <li role="none">
-                                        <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings">Organization settings</button>
-                                    </li>
-                                </ul>
-                            </li>
-                        </ul>
-                        <div class="app-nav-project-workspace" aria-label="Current project workspace">
-                            <ul class="app-nav-cluster app-nav-cluster--project">
-                                <li class="app-nav-item has-submenu" id="appProjectNavItem">
-                                    <button type="button" class="app-nav-link app-nav-link--named" id="appProjectMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appProjectSubmenu" aria-label="Project">
-                                        <span class="app-nav-link-label" id="appProjectMenuLabel">Project</span>
-                                    </button>
-                                    <ul class="app-submenu" id="appProjectSubmenu" role="menu" aria-label="Project actions">
-                                        <?php if ($can_create_projects): ?>
-                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appCreateProjectBtn" data-open-modal="appModalProjectWizard">Create New Project</button></li>
-                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appRenameProjectBtn" data-open-modal="appModalRenameProject">Rename project…</button></li>
-                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appDeleteProjectBtn">Delete project…</button></li>
-                                        <?php endif; ?>
-                                        <li role="none">
-                                            <label class="app-submenu-item" for="projectSwitcherSelect">
-                                                <span class="app-submenu-label">Switch project</span>
-                                                <select id="projectSwitcherSelect" class="app-submenu-select"></select>
-                                            </label>
-                                        </li>
-                                    </ul>
+                                    </div>
                                 </li>
-                                <li class="app-nav-item has-submenu" id="appDataNavItem">
-                                    <button type="button" class="app-nav-link" id="appDataMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appDataSubmenu">Data</button>
-                                    <ul class="app-submenu" id="appDataSubmenu" role="menu" aria-label="Data actions">
-                                        <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=xlsx">Download Excel</a></li>
-                                        <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=pdf">Download PDF</a></li>
-                                        <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=summary_pdf">Executive summary PDF</a></li>
-                                        <?php if ($can_manage_qbo): ?>
-                                        <li role="none">
-                                            <button type="button" role="menuitem" class="app-submenu-item" id="appSyncQboBtn">Sync with QBO</button>
-                                        </li>
-                                        <?php endif; ?>
+                                <?php if (!empty($can_rename_org)): ?>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings">Rename Organization</button>
+                                </li>
+                                <?php endif; ?>
+                                <li class="app-submenu-divider" role="separator"></li>
+                                <?php if (empty($_SESSION['joined_via_invite'])): ?>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalCreateOrg">Create Organization</button>
+                                </li>
+                                <li class="app-submenu-divider" role="separator"></li>
+                                <?php endif; ?>
+                                <?php if ($can_invite_users): ?>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersInvite">Invite New User</button>
+                                </li>
+                                <?php endif; ?>
+                                <?php if ($can_manage_users): ?>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage Existing Users</button>
+                                </li>
+                                <?php endif; ?>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings" aria-label="QBO Status: <?php echo $qbo_linked ? 'Linked' : 'Unlinked'; ?>">
+                                        <span>QBO Status</span>
+                                        <span class="app-status-pill <?php echo $qbo_linked ? 'app-status-pill--linked' : 'app-status-pill--unlinked'; ?>">
+                                            <?php echo $qbo_linked ? 'Linked' : 'Unlinked'; ?>
+                                        </span>
+                                    </button>
+                                </li>
+                            </ul>
+                        </li>
+                        <li class="app-nav-sep" aria-hidden="true"></li>
+                        <li class="app-nav-item has-submenu" id="appProjectNavItem">
+                            <button type="button" class="app-nav-link" id="appProjectMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appProjectSubmenu">
+                                <span class="app-nav-link-label">Projects</span>
+                            </button>
+                            <ul class="app-submenu" id="appProjectSubmenu" role="menu" aria-label="Project actions">
+                                <li role="none">
+                                    <div class="app-submenu-item app-submenu-current">
+                                        <span class="app-submenu-kicker">Current</span>
+                                        <span class="app-submenu-current-name" id="appProjectCurrentName">Project</span>
+                                        <label class="app-submenu-label" for="projectSwitcherSelect">Switch</label>
+                                        <select id="projectSwitcherSelect" class="app-submenu-select" aria-label="Switch project"></select>
+                                    </div>
+                                </li>
+                                <?php if ($can_create_projects): ?>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" id="appRenameProjectBtn" data-open-modal="appModalRenameProject">Rename Current Project</button>
+                                </li>
+                                <li class="app-submenu-divider" role="separator"></li>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" id="appCreateProjectBtn" data-open-modal="appModalProjectWizard">Create New Project</button>
+                                </li>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" id="appDeleteProjectBtn">Delete Project</button>
+                                </li>
+                                <li class="app-submenu-divider" role="separator"></li>
+                                <?php else: ?>
+                                <li class="app-submenu-divider" role="separator"></li>
+                                <?php endif; ?>
+                                <?php if ($can_manage_qbo): ?>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" id="appSyncQboBtn">Sync with QBO…</button>
+                                </li>
+                                <?php endif; ?>
+                                <li role="none" class="has-nested" id="appExportNavItem">
+                                    <button type="button" class="app-submenu-item app-submenu-parent" id="appExportMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appExportSubmenu">Export</button>
+                                    <ul class="app-submenu app-submenu--nested" id="appExportSubmenu" role="menu" aria-label="Export formats">
+                                        <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=pdf">PDF</a></li>
+                                        <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=xlsx">Excel</a></li>
+                                        <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=summary_pdf">Executive summary</a></li>
                                     </ul>
                                 </li>
                                 <?php if (!empty($can_use_ai)): ?>
-                                <li class="app-nav-item has-submenu" id="appAiNavItem">
-                                    <button type="button" class="app-nav-link" id="appAiMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appAiSubmenu">AI</button>
-                                    <ul class="app-submenu" id="appAiSubmenu" role="menu" aria-label="AI actions">
-                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appAiAssistantBtn" data-open-modal="appModalAI">Assistant</button></li>
-                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appAutoPopulatePurposeBtn">Auto populate purpose</button></li>
-                                    </ul>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" id="appAiAssistantBtn" data-open-modal="appModalAI">AI Assistant…</button>
+                                </li>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" id="appAutoPopulatePurposeBtn">Auto populate project purposes</button>
                                 </li>
                                 <?php endif; ?>
                             </ul>
-                        </div>
-                        <ul class="app-nav-cluster app-nav-cluster--account">
-                            <li class="app-nav-item has-submenu" id="appAdminNavItem">
-                                <button type="button" class="app-nav-link app-nav-link--named" id="appAdminMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appAdminSubmenu" aria-label="Account: <?php echo htmlspecialchars($_SESSION['username'] ?? $_SESSION['user_email'] ?? 'Account'); ?>">
-                                    <span class="app-nav-link-label"><?php echo htmlspecialchars($_SESSION['username'] ?? $_SESSION['user_email'] ?? 'Account'); ?></span>
-                                </button>
-                                <ul class="app-submenu" id="appAdminSubmenu" role="menu" aria-label="Account actions">
-                                    <li role="none">
-                                        <form method="POST" class="app-nav-inline-form">
-                                            <input type="hidden" name="action" value="logout">
-                                            <button type="submit" role="menuitem" class="app-submenu-item">Logout</button>
-                                        </form>
-                                    </li>
-                                </ul>
-                            </li>
-                        </ul>
-                    </div>
+                        </li>
+                        <li class="app-nav-sep" aria-hidden="true"></li>
+                        <li class="app-nav-item" id="appCloseSaverNavItem">
+                            <form method="POST" class="app-nav-inline-form">
+                                <input type="hidden" name="action" value="close_saver">
+                                <button type="submit" class="app-nav-link app-nav-link--quiet" id="appCloseSaverBtn">Close Saver</button>
+                            </form>
+                        </li>
+                    </ul>
                 </nav>
-            </div>
+            </header>
         <?php endif; ?>
         <div class="container<?php echo ($current_view === 'placeholder' && $can_create_projects && !empty($_SESSION['project_onboarding_required'])) ? ' project-onboarding-hidden' : ''; ?>">
             <?php if ($current_view === 'login'): ?>
@@ -5015,13 +5199,13 @@ foreach ($team_members_rows as $tmRow) {
                 projectName = projectName.trim();
                 document.title = projectName !== '' ? (baseTitle + ' - ' + projectName) : baseTitle;
 
-                const labelEl = document.getElementById('appProjectMenuLabel');
-                const btnEl = document.getElementById('appProjectMenuBtn');
-                if (labelEl) {
-                    labelEl.textContent = projectName !== '' ? projectName : 'Project';
+                const currentNameEl = document.getElementById('appProjectCurrentName');
+                if (currentNameEl) {
+                    currentNameEl.textContent = projectName !== '' ? projectName : 'Project';
                 }
+                const btnEl = document.getElementById('appProjectMenuBtn');
                 if (btnEl) {
-                    btnEl.setAttribute('aria-label', projectName !== '' ? ('Project: ' + projectName) : 'Project');
+                    btnEl.setAttribute('aria-label', projectName !== '' ? ('Projects: ' + projectName) : 'Projects');
                 }
             }
 
@@ -6947,10 +7131,18 @@ foreach ($team_members_rows as $tmRow) {
             function initNavSubmenus() {
                 var submenuItems = Array.from(document.querySelectorAll('.app-nav-item.has-submenu'));
                 if (!submenuItems.length) return;
+                function closeNested(item) {
+                    item.querySelectorAll('.has-nested.is-open').forEach(function(nested) {
+                        nested.classList.remove('is-open');
+                        var nestedTrigger = nested.querySelector('.app-submenu-parent');
+                        if (nestedTrigger) nestedTrigger.setAttribute('aria-expanded', 'false');
+                    });
+                }
                 function closeMenu(item) {
                     var trigger = item.querySelector('.app-nav-link[aria-controls]');
                     item.classList.remove('is-open');
                     if (trigger) trigger.setAttribute('aria-expanded', 'false');
+                    closeNested(item);
                 }
                 function closeAll() {
                     submenuItems.forEach(closeMenu);
@@ -6967,7 +7159,26 @@ foreach ($team_members_rows as $tmRow) {
                             trigger.setAttribute('aria-expanded', 'true');
                         }
                     });
+                    item.querySelectorAll('.app-submenu-parent').forEach(function(parentBtn) {
+                        parentBtn.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            var nest = parentBtn.closest('.has-nested');
+                            if (!nest) return;
+                            var willOpen = !nest.classList.contains('is-open');
+                            item.querySelectorAll('.has-nested.is-open').forEach(function(other) {
+                                if (other !== nest) {
+                                    other.classList.remove('is-open');
+                                    var otherBtn = other.querySelector('.app-submenu-parent');
+                                    if (otherBtn) otherBtn.setAttribute('aria-expanded', 'false');
+                                }
+                            });
+                            nest.classList.toggle('is-open', willOpen);
+                            parentBtn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+                        });
+                    });
                     item.querySelectorAll('.app-submenu a, .app-submenu button').forEach(function(action) {
+                        if (action.classList.contains('app-submenu-parent')) return;
                         action.addEventListener('click', function() { closeAll(); });
                     });
                 });
@@ -10782,7 +10993,8 @@ foreach ($team_members_rows as $tmRow) {
                 document.querySelectorAll('form.app-nav-inline-form').forEach(function(form) {
                     form.addEventListener('submit', function(e) {
                         var actionInput = form.querySelector('input[name="action"]');
-                        if (!actionInput || actionInput.value !== 'logout') return;
+                        var action = actionInput ? String(actionInput.value || '') : '';
+                        if (action !== 'logout' && action !== 'close_saver') return;
                         if (form.getAttribute('data-logout-flushing') === '1') return;
                         e.preventDefault();
                         form.setAttribute('data-logout-flushing', '1');
@@ -10794,7 +11006,7 @@ foreach ($team_members_rows as $tmRow) {
                                     ? window.waitForCalculatorSaveIdle()
                                     : Promise.resolve();
                             })
-                            .catch(function() { /* still logout */ })
+                            .catch(function() { /* still logout / close */ })
                             .then(function() {
                                 form.submit();
                             });
@@ -11249,7 +11461,7 @@ foreach ($team_members_rows as $tmRow) {
             <div class="app-modal-body">
                 <p style="margin:0 0 14px;font-size:14px;color:#4b5563;line-height:1.5;">
                     These settings apply to <strong><?php echo htmlspecialchars($active_org_name); ?></strong>, including QuickBooks connection.
-                    To import vendors into the current project, use <strong>Data → Sync with QBO</strong>.
+                    To import vendors into the current project, use <strong>Projects → Sync with QBO</strong>.
                 </p>
                 <?php if (!empty($can_rename_org)): ?>
                 <div class="settings-block" style="margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid #e5e7eb;">
