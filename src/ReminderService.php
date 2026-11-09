@@ -28,8 +28,11 @@ class ReminderService
 
     private const DIGEST_NON_MONTHLY = 'non_monthly_charges';
     private const DIGEST_CANCEL_PROGRESS = 'cancel_progress';
+    private const DIGEST_CHAT_MENTIONS = 'chat_mentions';
 
     private const LIST_CAP = 10;
+    private const CHAT_MENTION_SNIPPET_CAP = 10;
+    private const CHAT_MENTION_SNIPPET_CHARS = 160;
 
     /**
      * Send deadline reminders (T-7, T, T+7) for pending cancellations.
@@ -539,9 +542,145 @@ class ReminderService
     }
 
     /**
+     * Weekly digest of @mentions in vendor chat over the last 7 days.
+     * Sends on Fridays (or when force bypasses the weekday gate).
+     *
+     * @param callable(string,string,string):mixed $sendEmail
+     * @return array{sent:int, errors:array<int, string>, debug:array<int, array<string, mixed>>, period_key:string, skipped_weekday_gate?:bool}
+     */
+    public static function runChatMentionsDigest(PDO $pdo, callable $sendEmail, bool $forceIgnoreWeekdayGate = false): array
+    {
+        $sent = 0;
+        $errors = [];
+        $debug = [];
+        $today = new DateTimeImmutable('today');
+        $periodKey = $today->format('o-\WW');
+        $since = $today->modify('-7 days')->format('Y-m-d 00:00:00');
+
+        if (!$forceIgnoreWeekdayGate && (int) $today->format('N') !== 5) {
+            return [
+                'sent' => 0,
+                'errors' => [],
+                'debug' => [],
+                'period_key' => $periodKey,
+                'skipped_weekday_gate' => true,
+            ];
+        }
+
+        $users = self::eligibleReminderUsers($pdo);
+        $eligible = [];
+        foreach ($users as $u) {
+            $uid = (int) ($u['id'] ?? 0);
+            if ($uid > 0) {
+                $eligible[$uid] = $u;
+            }
+        }
+        if ($eligible === []) {
+            return ['sent' => 0, 'errors' => [], 'debug' => [], 'period_key' => $periodKey];
+        }
+
+        try {
+            $st = $pdo->prepare(
+                'SELECT t.mentioned_user_id,
+                        m.id AS message_id,
+                        m.message,
+                        m.created_at,
+                        m.username_snapshot,
+                        m.project_id,
+                        m.vendor_item_id,
+                        COALESCE(
+                            NULLIF(TRIM(author.display_name), \'\'),
+                            NULLIF(TRIM(author.username), \'\'),
+                            NULLIF(TRIM(m.username_snapshot), \'\'),
+                            \'Teammate\'
+                        ) AS author_name,
+                        COALESCE(NULLIF(TRIM(cci.vendor_name), \'\'), \'Vendor\') AS vendor_name,
+                        COALESCE(NULLIF(TRIM(p.name), \'\'), \'Project\') AS project_name
+                 FROM vendor_item_chat_mentions t
+                 INNER JOIN vendor_item_chat_messages m ON m.id = t.message_id
+                 LEFT JOIN cost_calculator_items cci ON cci.id = m.vendor_item_id
+                 LEFT JOIN projects p ON p.id = m.project_id
+                 LEFT JOIN users author ON author.id = m.user_id
+                 WHERE m.created_at >= ?
+                   AND m.is_action_log = 0
+                   AND m.user_id <> t.mentioned_user_id
+                 ORDER BY m.created_at ASC, m.id ASC'
+            );
+            $st->execute([$since]);
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            return [
+                'sent' => 0,
+                'errors' => [$e->getMessage()],
+                'debug' => [],
+                'period_key' => $periodKey,
+            ];
+        }
+
+        /** @var array<int, list<array<string, mixed>>> $byUser */
+        $byUser = [];
+        foreach ($rows as $row) {
+            $uid = (int) ($row['mentioned_user_id'] ?? 0);
+            if ($uid <= 0 || !isset($eligible[$uid])) {
+                continue;
+            }
+            if (!isset($byUser[$uid])) {
+                $byUser[$uid] = [];
+            }
+            $byUser[$uid][] = $row;
+        }
+
+        foreach ($byUser as $uid => $mentions) {
+            $u = $eligible[$uid];
+            $email = (string) ($u['email'] ?? '');
+            $entry = [
+                'user_id' => $uid,
+                'email' => $email,
+                'period_key' => $periodKey,
+                'action' => null,
+                'mentions' => count($mentions),
+                'send_result' => null,
+            ];
+
+            if ($email === '') {
+                $entry['action'] = 'skip_no_email';
+                $debug[] = $entry;
+                continue;
+            }
+
+            if (self::digestAlreadySent($pdo, $uid, self::DIGEST_CHAT_MENTIONS, $periodKey)) {
+                $entry['action'] = 'skip_already_sent';
+                $debug[] = $entry;
+                continue;
+            }
+
+            $snippets = array_slice($mentions, 0, self::CHAT_MENTION_SNIPPET_CAP);
+            $html = self::buildChatMentionsHtml(
+                (string) ($u['first_name'] ?? ''),
+                $snippets,
+                count($mentions)
+            );
+            $subj = 'You were tagged in Savvy Saver chat';
+            $r = $sendEmail($email, $subj, $html);
+            $entry['send_result'] = self::summarizeSendResult($r);
+            if ($r === true) {
+                self::markDigestSent($pdo, $uid, self::DIGEST_CHAT_MENTIONS, $periodKey);
+                ++$sent;
+                $entry['action'] = 'sent_ok';
+            } else {
+                $entry['action'] = 'send_failed';
+                $errors[] = $email . ': ' . self::sendFailureMessage($r);
+            }
+            $debug[] = $entry;
+        }
+
+        return ['sent' => $sent, 'errors' => $errors, 'debug' => $debug, 'period_key' => $periodKey];
+    }
+
+    /**
      * Clear dedup rows so --force-resend can re-deliver.
      *
-     * @return array{renewal_reminder_sent:int, non_monthly_charges:int, cancel_progress:int}
+     * @return array{renewal_reminder_sent:int, non_monthly_charges:int, cancel_progress:int, chat_mentions:int}
      */
     public static function clearForceResendDedup(PDO $pdo): array
     {
@@ -562,10 +701,16 @@ class ReminderService
         );
         $delCancel->execute([self::DIGEST_CANCEL_PROGRESS, $weekKey]);
 
+        $delChat = $pdo->prepare(
+            'DELETE FROM email_digest_sent WHERE digest_type = ? AND period_key = ?'
+        );
+        $delChat->execute([self::DIGEST_CHAT_MENTIONS, $weekKey]);
+
         return [
             'renewal_reminder_sent' => $delRenewal->rowCount(),
             'non_monthly_charges' => $delCharges->rowCount(),
             'cancel_progress' => $delCancel->rowCount(),
+            'chat_mentions' => $delChat->rowCount(),
         ];
     }
 
@@ -964,6 +1109,101 @@ class ReminderService
             'Log In to Savvy Saver',
             \csEmailLoginUrl()
         );
+    }
+
+    /**
+     * @param list<array<string, mixed>> $snippets
+     */
+    private static function buildChatMentionsHtml(string $firstName, array $snippets, int $totalCount): string
+    {
+        $greeting = self::emailGreeting($firstName);
+        $body = $greeting;
+        $body .= '<p>You were tagged in vendor chat in Savvy Saver over the past week'
+            . ($totalCount > 0
+                ? ' (<strong>' . (int) $totalCount . '</strong> mention'
+                    . ($totalCount === 1 ? '' : 's') . ').'
+                : '.')
+            . '</p>';
+
+        if ($totalCount > self::CHAT_MENTION_SNIPPET_CAP) {
+            $body .= '<p style="margin:0 0 12px 0;font-size:14px;color:#6b7280;">Showing the first '
+                . self::CHAT_MENTION_SNIPPET_CAP
+                . ' mentions. Open Savvy Saver to see the rest.</p>';
+        }
+
+        /** @var array<string, array<string, list<array<string, mixed>>>> $grouped */
+        $grouped = [];
+        foreach ($snippets as $snippet) {
+            $project = (string) ($snippet['project_name'] ?? 'Project');
+            $vendor = (string) ($snippet['vendor_name'] ?? 'Vendor');
+            if (!isset($grouped[$project])) {
+                $grouped[$project] = [];
+            }
+            if (!isset($grouped[$project][$vendor])) {
+                $grouped[$project][$vendor] = [];
+            }
+            $grouped[$project][$vendor][] = $snippet;
+        }
+
+        foreach ($grouped as $projectName => $vendors) {
+            $body .= '<h3 style="margin:16px 0 8px 0;font-size:16px;">'
+                . htmlspecialchars($projectName, ENT_QUOTES, 'UTF-8')
+                . '</h3>';
+            foreach ($vendors as $vendorName => $items) {
+                $body .= '<p style="margin:10px 0 6px 0;font-weight:700;">'
+                    . htmlspecialchars($vendorName, ENT_QUOTES, 'UTF-8')
+                    . '</p>';
+                foreach ($items as $item) {
+                    $author = trim((string) ($item['author_name'] ?? 'Teammate'));
+                    $when = '';
+                    try {
+                        $when = (new DateTimeImmutable((string) ($item['created_at'] ?? '')))->format('M j, Y g:i A');
+                    } catch (\Exception $e) {
+                        $when = (string) ($item['created_at'] ?? '');
+                    }
+                    $text = self::truncateChatSnippet((string) ($item['message'] ?? ''));
+                    $body .= '<p style="margin:0 0 10px 0;padding:10px 12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;">'
+                        . '<span style="display:block;font-size:12px;color:#6b7280;margin:0 0 4px 0;">'
+                        . htmlspecialchars($author, ENT_QUOTES, 'UTF-8')
+                        . ($when !== '' ? ' · ' . htmlspecialchars($when, ENT_QUOTES, 'UTF-8') : '')
+                        . '</span>'
+                        . htmlspecialchars($text, ENT_QUOTES, 'UTF-8')
+                        . '</p>';
+                }
+            }
+        }
+
+        $body .= '<p>Open Savvy Saver to reply in the vendor chat thread.</p>';
+
+        return \csEmailHtmlWrap(
+            'You were tagged in Savvy Saver chat',
+            $body,
+            'Log In to Savvy Saver',
+            \csEmailLoginUrl(),
+            'Savvy Saver | Chat mention digest',
+            'You were tagged in vendor chat this week'
+        );
+    }
+
+    private static function truncateChatSnippet(string $message): string
+    {
+        $message = trim(preg_replace('/\s+/u', ' ', $message) ?? $message);
+        if ($message === '') {
+            return '(no message text)';
+        }
+        $limit = self::CHAT_MENTION_SNIPPET_CHARS;
+        if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+            if (mb_strlen($message, 'UTF-8') <= $limit) {
+                return $message;
+            }
+
+            return rtrim(mb_substr($message, 0, $limit, 'UTF-8')) . '…';
+        }
+        if (strlen($message) <= $limit) {
+            return $message;
+        }
+
+        return rtrim(substr($message, 0, $limit)) . '…';
     }
 
     /**

@@ -8,6 +8,7 @@
  *   - Approaching non-monthly renewals (annual / semi-annual / quarterly lead days)
  *   - Non-monthly charges digest (previous calendar month; sends on days 1–3)
  *   - Cancellation progress digest (weekly on Monday)
+ *   - Chat @mention digest (weekly on Friday; last 7 days)
  *
  * CLI flags:
  *   --debug         Verbose per-user / GHL response output
@@ -44,7 +45,8 @@ if ($forceResend) {
     if ($debug || php_sapi_name() === 'cli') {
         echo 'force-resend: cleared renewal_reminder_sent today=' . $cleared['renewal_reminder_sent']
             . ', non_monthly_charges=' . $cleared['non_monthly_charges']
-            . ', cancel_progress=' . $cleared['cancel_progress'] . "\n";
+            . ', cancel_progress=' . $cleared['cancel_progress']
+            . ', chat_mentions=' . ($cleared['chat_mentions'] ?? 0) . "\n";
     }
 }
 
@@ -98,6 +100,7 @@ $r1 = \CostSavings\ReminderService::runDeadlineReminders($pdo, $send);
 $r2 = \CostSavings\ReminderService::runApproachingRenewalReminders($pdo, $send);
 $r3 = \CostSavings\ReminderService::runNonMonthlyChargesDigest($pdo, $send, $forceResend);
 $r4 = \CostSavings\ReminderService::runCancelProgressDigest($pdo, $send, $forceResend);
+$r5 = \CostSavings\ReminderService::runChatMentionsDigest($pdo, $send, $forceResend);
 
 if (php_sapi_name() === 'cli') {
     echo 'Deadline reminders sent: ' . $r1['sent'] . "\n";
@@ -168,6 +171,29 @@ if (php_sapi_name() === 'cli') {
             $email = $row['email'] ?? '';
             $projects = $row['projects'] ?? 0;
             echo "  [{$action}] {$email} projects={$projects}";
+            if (!empty($row['send_result'])) {
+                echo ' send=' . json_encode($row['send_result']);
+            }
+            echo "\n";
+        }
+    }
+
+    $chatGate = !empty($r5['skipped_weekday_gate']) ? ' (skipped: weekday gate)' : '';
+    echo 'Chat mention emails sent: ' . $r5['sent']
+        . ' period=' . ($r5['period_key'] ?? '') . $chatGate . "\n";
+    if (!empty($r5['errors'])) {
+        echo "Chat mention errors:\n";
+        foreach ($r5['errors'] as $err) {
+            echo "  - {$err}\n";
+        }
+    }
+    if ($debug && !empty($r5['debug'])) {
+        echo "Chat mention debug:\n";
+        foreach ($r5['debug'] as $row) {
+            $action = $row['action'] ?? '';
+            $email = $row['email'] ?? '';
+            $mentions = $row['mentions'] ?? 0;
+            echo "  [{$action}] {$email} mentions={$mentions}";
             if (!empty($row['send_result'])) {
                 echo ' send=' . json_encode($row['send_result']);
             }

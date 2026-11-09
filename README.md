@@ -15,6 +15,7 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
   - Approaching non-monthly renewals (annual T−60/T−30, semi-annual T−30/T−14, quarterly T−21/T−7) — heads-up subject `Savvy Saver heads-up: Review potential {Month} charges…`
   - Non-monthly charges from the previous month (quarterly / semi-annual / annual vendors; sends on days 1–3)
   - Weekly cancellation progress (pending potential + confirmed cancelled annual savings; Mondays)
+  - Weekly chat @mention digest (users tagged in vendor chat in the last 7 days; Fridays)
   - Org/user `deadline_reminders_enabled` gates all reminder emails; multi-project emails respect row visibility
   - Invitation emails (Gmail) use the same branded shell
 - **Ask AI** — Perplexity Chat Completions when `PERPLEXITY_API_KEY` is set; otherwise OpenAI (`OPENAI_API_KEY`). 50 requests per user per month ([src/AiService.php](src/AiService.php)); see `config.example.php` for `AI_MODEL`, `AI_MAX_TOKENS`, and `AI_TEMPERATURE`.
