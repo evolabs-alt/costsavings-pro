@@ -5106,7 +5106,7 @@ foreach ($team_members_rows as $tmRow) {
                                 </li>
                                 <li class="app-submenu-divider" role="separator"></li>
                                 <?php endif; ?>
-                                <?php if ($can_manage_users): ?>
+                                <?php if ($is_logged_in): ?>
                                 <li role="none">
                                     <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage Existing Users</button>
                                 </li>
@@ -11682,7 +11682,7 @@ foreach ($team_members_rows as $tmRow) {
     </div>
     <?php endif; ?>
 
-    <?php if ($can_manage_users): ?>
+    <?php if ($is_logged_in): ?>
     <div class="app-modal-overlay" id="appModalMembersManage" role="dialog" aria-modal="true" aria-labelledby="appModalMembersManageTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1" style="max-width:960px;">
             <div class="app-modal-header">
@@ -11700,7 +11700,9 @@ foreach ($team_members_rows as $tmRow) {
             <div class="app-modal-body">
                 <p style="margin:0 0 10px;color:#4b5563;font-size:14px;line-height:1.5;">
                     Each user has one organization role that controls access across all projects.
+                    <?php if ($can_manage_users): ?>
                     Change another user’s role with the dropdown, then click <strong>Save</strong>.
+                    <?php endif; ?>
                 </p>
                 <p style="margin:0 0 12px;">
                     <button type="button" class="role-descriptions-link" data-open-modal="appModalRoleDescriptions">
