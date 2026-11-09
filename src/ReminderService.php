@@ -79,11 +79,11 @@ class ReminderService
                 $diff = (int) $today->diff($d)->format('%r%a');
 
                 $type = null;
-                if ($diff === -7) {
+                if ($diff === 7) {
                     $type = 't_minus_7';
                 } elseif ($diff === 0) {
                     $type = 'deadline_day';
-                } elseif ($diff === 7) {
+                } elseif ($diff === -7) {
                     $type = 't_plus_7';
                 }
                 if ($type === null) {
