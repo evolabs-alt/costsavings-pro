@@ -3827,6 +3827,45 @@ foreach ($team_members_rows as $tmRow) {
             font-weight: 700;
         }
 
+        .app-modal-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 0 0 auto;
+            margin-left: auto;
+        }
+
+        .app-modal-header-action {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            min-height: 34px;
+            margin: 0;
+            padding: 6px 12px;
+            border: 1px solid rgba(11, 88, 163, 0.22);
+            border-radius: 8px;
+            background: #eaf5fd;
+            color: var(--color-primary);
+            font-family: 'Inter', system-ui, sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+        }
+
+        .app-modal-header-action .material-symbols-outlined {
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        .app-modal-header-action:hover,
+        .app-modal-header-action:focus-visible {
+            background: #dcf0fb;
+            border-color: var(--color-secondary);
+            color: var(--color-primary-hover);
+            outline: none;
+        }
+
         .app-modal-close {
             border: none;
             background: transparent;
@@ -4429,7 +4468,8 @@ foreach ($team_members_rows as $tmRow) {
 
             .app-header button,
             .app-nav button,
-            .app-submenu button {
+            .app-submenu button,
+            .app-modal-header button {
                 width: auto;
                 margin: 0;
             }
@@ -4926,16 +4966,14 @@ foreach ($team_members_rows as $tmRow) {
                                 </li>
                                 <li class="app-submenu-divider" role="separator"></li>
                                 <?php endif; ?>
-                                <?php if ($can_invite_users): ?>
-                                <li role="none">
-                                    <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersInvite">Invite New User</button>
-                                </li>
-                                <?php endif; ?>
                                 <?php if ($can_manage_users): ?>
                                 <li role="none">
                                     <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage Existing Users</button>
                                 </li>
                                 <?php endif; ?>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalEmailSettings">Email settings</button>
+                                </li>
                                 <li role="none">
                                     <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings" aria-label="QBO Status: <?php echo $qbo_linked ? 'Linked' : 'Unlinked'; ?>">
                                         <span>QBO Status</span>
@@ -7318,6 +7356,7 @@ foreach ($team_members_rows as $tmRow) {
                 }
                 function onStart(e) {
                     if (e.target === closeBtn || (closeBtn && closeBtn.contains(e.target))) return;
+                    if (e.target.closest && e.target.closest('.app-modal-header-action')) return;
                     var rect = modal.getBoundingClientRect();
                     modal.style.position = 'fixed';
                     modal.style.left = rect.left + 'px';
@@ -7588,8 +7627,6 @@ foreach ($team_members_rows as $tmRow) {
                         if (sel && sel.selectedIndex >= 0 && sel.options[sel.selectedIndex]) {
                             sel.options[sel.selectedIndex].textContent = savedName;
                         }
-                        var settingsName = document.getElementById('renameOrgName');
-                        if (settingsName) settingsName.value = savedName;
                     }
                 });
 
@@ -10206,32 +10243,6 @@ foreach ($team_members_rows as $tmRow) {
                             });
                     });
                 }
-                const renameOrgSaveBtn = document.getElementById('renameOrgSaveBtn');
-                if (renameOrgSaveBtn) {
-                    renameOrgSaveBtn.addEventListener('click', function() {
-                        const nameEl = document.getElementById('renameOrgName');
-                        const orgName = nameEl ? String(nameEl.value || '').trim() : '';
-                        if (!orgName) {
-                            showSnackbar('Organization name is required.', 'error');
-                            return;
-                        }
-                        renameOrgSaveBtn.disabled = true;
-                        postJson({ action: 'org_rename', org_name: orgName })
-                            .then(function(d) {
-                                if (!d || !d.success) {
-                                    showSnackbar((d && d.error) || 'Could not rename organization.', 'error');
-                                    renameOrgSaveBtn.disabled = false;
-                                    return;
-                                }
-                                showSnackbar('Organization renamed.', 'success');
-                                window.location.reload();
-                            })
-                            .catch(function() {
-                                showSnackbar('Could not rename organization.', 'error');
-                                renameOrgSaveBtn.disabled = false;
-                            });
-                    });
-                }
                 document.querySelectorAll('.org-role-save-btn').forEach(function(btn) {
                     btn.addEventListener('click', function() {
                         const memberId = parseInt(btn.getAttribute('data-member-id'), 10) || 0;
@@ -11536,7 +11547,15 @@ foreach ($team_members_rows as $tmRow) {
         <div class="app-modal" tabindex="-1" style="max-width:960px;">
             <div class="app-modal-header">
                 <h2 id="appModalMembersManageTitle">Manage users</h2>
-                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+                <div class="app-modal-header-actions">
+                    <?php if ($can_invite_users): ?>
+                    <button type="button" class="app-modal-header-action" data-open-modal="appModalMembersInvite">
+                        <span class="material-symbols-outlined" aria-hidden="true">person_add</span>
+                        <span>Invite user</span>
+                    </button>
+                    <?php endif; ?>
+                    <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+                </div>
             </div>
             <div class="app-modal-body">
                 <p style="margin:0 0 10px;color:#4b5563;font-size:14px;line-height:1.5;">
@@ -11906,6 +11925,43 @@ foreach ($team_members_rows as $tmRow) {
         </div>
     </div>
 
+    <div class="app-modal-overlay" id="appModalEmailSettings" role="dialog" aria-modal="true" aria-labelledby="appModalEmailSettingsTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalEmailSettingsTitle">Email settings</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <p style="margin:0 0 14px;font-size:14px;color:#4b5563;line-height:1.5;">
+                    Email and notification preferences for <strong><?php echo htmlspecialchars($active_org_name); ?></strong>.
+                </p>
+                <form method="POST" style="display:grid;gap:10px;">
+                    <input type="hidden" name="action" value="save_reminder_settings">
+                    <input type="hidden" name="settings_scope" value="email">
+                    <?php if ($can_manage_users): ?>
+                    <label><input type="checkbox" name="deadline_reminders_enabled" value="1" <?php echo $deadline_reminders_org ? 'checked' : ''; ?>> Email monthly executive summary</label>
+                    <label style="display:grid;gap:6px;font-size:14px;">
+                        <span>Webhook for notifications</span>
+                        <input
+                            type="url"
+                            name="notification_webhook_url"
+                            value="<?php echo htmlspecialchars($notification_webhook_url); ?>"
+                            placeholder="https://your-endpoint.example/webhook"
+                            style="min-width:320px;"
+                        >
+                        <small style="color:#6b7280;line-height:1.45;">
+                            Sends vendor and project details when a vendor is marked for cancellation.
+                            Example endpoints: Slack Incoming Webhook URL, Asana automation webhook endpoint, Notion automation webhook URL, Evernote integration webhook URL.
+                        </small>
+                    </label>
+                    <?php endif; ?>
+                    <label style="font-size:14px;"><input type="checkbox" name="user_deadline_reminders" value="1" <?php echo $deadline_reminders_user ? 'checked' : ''; ?>> Email me cancellation date reminders</label>
+                    <div><button type="submit">Save</button></div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <div class="app-modal-overlay" id="appModalSettings" role="dialog" aria-modal="true" aria-labelledby="appModalSettingsTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
@@ -11914,48 +11970,18 @@ foreach ($team_members_rows as $tmRow) {
             </div>
             <div class="app-modal-body">
                 <p style="margin:0 0 14px;font-size:14px;color:#4b5563;line-height:1.5;">
-                    These settings apply to <strong><?php echo htmlspecialchars($active_org_name); ?></strong>, including QuickBooks connection.
+                    QuickBooks settings for <strong><?php echo htmlspecialchars($active_org_name); ?></strong>.
                     To import vendors into the current project, use <strong>Projects → Sync with QBO</strong>.
                 </p>
-                <?php if (!empty($can_rename_org)): ?>
-                <div class="settings-block" style="margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid #e5e7eb;">
-                    <label style="display:grid;gap:6px;font-size:14px;max-width:420px;">
-                        <span>Organization name</span>
-                        <input type="text" id="renameOrgName" name="org_name" required maxlength="255" value="<?php echo htmlspecialchars($active_org_name); ?>" placeholder="Organization name" style="min-width:280px;">
-                    </label>
-                    <div style="margin-top:10px;">
-                        <button type="button" id="renameOrgSaveBtn" class="member-action-btn">Save name</button>
-                    </div>
-                </div>
-                <?php endif; ?>
-                <div class="settings-block">
+                <?php if ($can_manage_qbo): ?>
+                <div class="settings-block" style="margin-bottom:18px;">
                     <form method="POST" style="display:grid;gap:10px;">
                         <input type="hidden" name="action" value="save_reminder_settings">
-                        <?php if ($can_manage_users): ?>
-                        <label><input type="checkbox" name="deadline_reminders_enabled" value="1" <?php echo $deadline_reminders_org ? 'checked' : ''; ?>> Email monthly executive summary</label>
-                        <label style="display:grid;gap:6px;font-size:14px;">
-                            <span>Webhook for notifications</span>
-                            <input
-                                type="url"
-                                name="notification_webhook_url"
-                                value="<?php echo htmlspecialchars($notification_webhook_url); ?>"
-                                placeholder="https://your-endpoint.example/webhook"
-                                style="min-width:320px;"
-                            >
-                            <small style="color:#6b7280;line-height:1.45;">
-                                Sends vendor and project details when a vendor is marked for cancellation.
-                                Example endpoints: Slack Incoming Webhook URL, Asana automation webhook endpoint, Notion automation webhook URL, Evernote integration webhook URL.
-                            </small>
-                        </label>
-                        <?php endif; ?>
-                        <?php if ($can_manage_qbo): ?>
+                        <input type="hidden" name="settings_scope" value="qbo">
                         <label style="font-size:14px;"><input type="checkbox" name="prompt_qbo_sync_on_revisit" value="1" <?php echo $prompt_qbo_sync_on_revisit ? 'checked' : ''; ?>> Prompt QBO sync on revisit of a project</label>
-                        <?php endif; ?>
-                        <label style="font-size:14px;"><input type="checkbox" name="user_deadline_reminders" value="1" <?php echo $deadline_reminders_user ? 'checked' : ''; ?>> Email me cancellation date reminders</label>
                         <div><button type="submit">Save</button></div>
                     </form>
                 </div>
-                <?php if ($can_manage_qbo): ?>
                 <div class="settings-block" id="qboSettingsBlock" style="margin-top:18px;padding-top:16px;border-top:1px solid #e5e7eb;">
                     <h3 style="margin:0 0 8px;font-size:16px;">QuickBooks Online</h3>
                     <p style="margin:0 0 12px;font-size:13px;color:#6b7280;line-height:1.45;">

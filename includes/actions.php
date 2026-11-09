@@ -1578,6 +1578,21 @@ function handleSaveReminderSettings() {
     $pdo = getDBConnection();
     $orgId = (int) ($_SESSION['org_id'] ?? 0);
     $canEditOrgSettings = $orgId > 0 && OrgRole::canInvite(sessionOrgRole());
+    $scope = strtolower(trim((string) ($_POST['settings_scope'] ?? 'email')));
+    if ($scope !== 'qbo' && $scope !== 'email') {
+        $scope = 'email';
+    }
+
+    if ($scope === 'qbo') {
+        if ($orgId > 0 && OrgRole::canConnectQbo(sessionOrgRole())) {
+            $promptQbo = isset($_POST['prompt_qbo_sync_on_revisit']) && $_POST['prompt_qbo_sync_on_revisit'] === '1' ? 1 : 0;
+            $stOrg = $pdo->prepare('UPDATE organizations SET prompt_qbo_sync_on_revisit = ? WHERE id = ?');
+            $stOrg->execute([$promptQbo, $orgId]);
+            $_SESSION['message'] = 'Settings saved.';
+        }
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    }
 
     if ($canEditOrgSettings) {
         $orgOn = isset($_POST['deadline_reminders_enabled']) && $_POST['deadline_reminders_enabled'] === '1';
@@ -1587,23 +1602,15 @@ function handleSaveReminderSettings() {
             header('Location: ' . $_SERVER['PHP_SELF']);
             exit;
         }
-        $promptQbo = !OrgRole::canConnectQbo(sessionOrgRole())
-            ? null
-            : (isset($_POST['prompt_qbo_sync_on_revisit']) && $_POST['prompt_qbo_sync_on_revisit'] === '1' ? 1 : 0);
-        if ($promptQbo === null) {
-            $stOrg = $pdo->prepare('UPDATE organizations SET deadline_reminders_enabled = ?, notification_webhook_url = ? WHERE id = ?');
-            $stOrg->execute([$orgOn ? 1 : 0, ($webhookUrl !== '' ? $webhookUrl : null), $orgId]);
-        } else {
-            $stOrg = $pdo->prepare('UPDATE organizations SET deadline_reminders_enabled = ?, notification_webhook_url = ?, prompt_qbo_sync_on_revisit = ? WHERE id = ?');
-            $stOrg->execute([$orgOn ? 1 : 0, ($webhookUrl !== '' ? $webhookUrl : null), $promptQbo, $orgId]);
-        }
+        $stOrg = $pdo->prepare('UPDATE organizations SET deadline_reminders_enabled = ?, notification_webhook_url = ? WHERE id = ?');
+        $stOrg->execute([$orgOn ? 1 : 0, ($webhookUrl !== '' ? $webhookUrl : null), $orgId]);
     }
 
     $userOn = isset($_POST['user_deadline_reminders']) && $_POST['user_deadline_reminders'] === '1';
     $stUser = $pdo->prepare('UPDATE users SET deadline_reminders_enabled = ? WHERE id = ?');
     $stUser->execute([$userOn ? 1 : 0, (int) $_SESSION['user_id']]);
 
-    $_SESSION['message'] = $canEditOrgSettings ? 'Settings saved.' : 'Reminder preference saved.';
+    $_SESSION['message'] = $canEditOrgSettings ? 'Email settings saved.' : 'Reminder preference saved.';
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;
 }
