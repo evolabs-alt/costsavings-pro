@@ -4985,6 +4985,29 @@ foreach ($team_members_rows as $tmRow) {
             showSnackbar('<?php echo addslashes(htmlspecialchars($_SESSION['message'])); ?>', 'success');
             <?php unset($_SESSION['message']); ?>
         <?php endif; ?>
+        <?php if (!empty($_SESSION['show_entry_context_toast']) && $current_view === 'placeholder'): ?>
+            <?php
+            $entryOrgName = $active_org_name;
+            $entryProjectName = '';
+            $entryProjectId = (int) ($_SESSION['active_project_id'] ?? 0);
+            if ($entryProjectId > 0 && $active_org_id > 0) {
+                try {
+                    $entryProjectName = resolveProjectName(getDBConnection(), $active_org_id, $entryProjectId);
+                } catch (Exception $e) {
+                    $entryProjectName = '';
+                }
+            }
+            if ($entryProjectName === '' && $entryProjectId > 0) {
+                $entryProjectName = 'Project #' . $entryProjectId;
+            }
+            $entryToast = 'Organization: ' . $entryOrgName;
+            if ($entryProjectName !== '') {
+                $entryToast .= ' · Project: ' . $entryProjectName;
+            }
+            unset($_SESSION['show_entry_context_toast']);
+            ?>
+            showSnackbar(<?php echo json_encode($entryToast, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>, 'info');
+        <?php endif; ?>
         <?php if (isset($_GET['qbo']) && $_GET['qbo'] === 'connected'): ?>
             <?php if (!empty($_GET['resume_qbo_sync'])): ?>
             showSnackbar('QuickBooks Online connected. Choose a date range to sync.', 'success');

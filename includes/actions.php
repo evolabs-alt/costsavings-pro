@@ -452,6 +452,8 @@ function establishUserSession(PDO $pdo, array $row): void
         RoleContext::persistLastProjectId($pdo, $userId, $activeProjectId);
         ProjectService::backfillNullProjectRows($pdo, $orgId, $activeProjectId);
     }
+    // Show org/project context toast once per visit (SSO/session bootstrap).
+    $_SESSION['show_entry_context_toast'] = 1;
 }
 
 function requireActiveProjectId(PDO $pdo): ?int
