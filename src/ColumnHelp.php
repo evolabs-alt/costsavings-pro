@@ -20,6 +20,8 @@ final class ColumnHelp
             ['Keep', 'Reviewed and you plan to continue this vendor or spend; no cancellation in progress.'],
             ['Mark for Cancellation', 'Decision is to cancel; use the cancellation date field to track the target end until it is fully executed.'],
             ['Cancelled', 'Cancellation is complete (or the contract ended); treat this spend as off for forward-looking savings.'],
+            ['Mark for Renegotiation', 'You plan to renegotiate. The date under the status is when you intend to finish negotiations.'],
+            ['Renegotiated', 'Renegotiation is complete. Enter the annual savings; that amount is added to Confirmed Annual Savings.'],
         ];
         $statusDl = '';
         foreach ($statusSections as [$label, $desc]) {
@@ -70,7 +72,7 @@ final class ColumnHelp
             ],
             'status' => [
                 'title' => 'Status',
-                'html' => '<p class="column-help-intro">Tracks review and cancellation decisions for each vendor. Savings summaries count rows marked for cancellation or cancelled toward potential and confirmed savings.</p>'
+                'html' => '<p class="column-help-intro">Tracks review, cancellation, and renegotiation decisions for each vendor. Savings summaries count rows marked for cancellation or cancelled toward potential and confirmed savings. Renegotiated rows add the annual savings you enter to confirmed savings.</p>'
                     . '<dl class="column-help-dl">' . $statusDl . '</dl>',
             ],
             'purpose' => [

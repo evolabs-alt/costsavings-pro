@@ -55,14 +55,10 @@ function sessionProjectRole(): string
     return RoleContext::sessionProjectRole();
 }
 
-/** Project role for vendor grid load/save; org super admins always get full row access. */
+/** Org role drives vendor grid load/save (project roles removed). */
 function effectiveVendorGridRole(): string
 {
-    if (OrgRole::isSuperAdmin(sessionOrgRole())) {
-        return OrgRole::ROLE_SUPER_ADMIN;
-    }
-
-    return sessionProjectRole();
+    return sessionOrgRole();
 }
 
 /**
@@ -319,7 +315,7 @@ function ensureUserOrganizationId(PDO $pdo, int $userId): int {
             error_log('ensureUserOrganizationId: lastInsertId invalid for user ' . $userId);
             return 0;
         }
-        RoleContext::upsertOrgMembership($pdo, $userId, $newOrgId, OrgRole::ROLE_SUPER_ADMIN);
+        RoleContext::upsertOrgMembership($pdo, $userId, $newOrgId, OrgRole::ROLE_ORG_ADMIN);
         RoleContext::persistLastOrgId($pdo, $userId, $newOrgId);
         return $newOrgId;
     } catch (PDOException $e) {
@@ -439,9 +435,9 @@ function establishUserSession(PDO $pdo, array $row): void
         exit;
     }
     RoleContext::persistLastOrgId($pdo, $userId, $orgId);
-    $orgRole = RoleContext::orgRole($pdo, $userId, $orgId) ?? OrgRole::ROLE_MEMBER;
+    $orgRole = RoleContext::orgRole($pdo, $userId, $orgId) ?? OrgRole::ROLE_EXECUTIVE;
     $projectCount = ProjectService::orgProjectCount($pdo, $orgId);
-    $_SESSION['project_onboarding_required'] = OrgRole::isSuperAdmin($orgRole) && $projectCount === 0;
+    $_SESSION['project_onboarding_required'] = OrgRole::canCreateProject((string) $orgRole) && $projectCount === 0;
     $activeProjectId = ProjectService::resolveActiveProjectId($pdo, $orgId, $userId, $orgRole, null);
     RoleContext::syncSession($pdo, $userId, $orgId, $activeProjectId);
     $_SESSION['user_orgs'] = RoleContext::listUserOrganizations($pdo, $userId);
@@ -536,10 +532,16 @@ function handleInviteMember() {
     $pdo = getDBConnection();
     $orgId = (int) $_SESSION['org_id'];
 
-    $inviteRole = OrgRole::ROLE_MEMBER;
-    $rawInviteRole = strtolower(trim((string) ($_POST['invite_role'] ?? '')));
-    if ($rawInviteRole === OrgRole::ROLE_SUPER_ADMIN && OrgRole::canElevateOrgRoles(sessionOrgRole())) {
-        $inviteRole = OrgRole::ROLE_SUPER_ADMIN;
+    $actorRole = sessionOrgRole();
+    if (!OrgRole::canInvite($actorRole)) {
+        $_SESSION['error'] = 'You do not have permission to invite users.';
+        $redir();
+    }
+    $rawInviteRole = strtolower(trim((string) ($_POST['invite_role'] ?? OrgRole::ROLE_COST_OWNER)));
+    $inviteRole = OrgRole::normalize($rawInviteRole);
+    if (!OrgRole::canAssign($actorRole, $inviteRole)) {
+        $_SESSION['error'] = 'You cannot invite users with that role.';
+        $redir();
     }
 
     logInviteEvent('request_received', [
@@ -1141,6 +1143,10 @@ function handleAiAsk() {
         echo json_encode(['success' => false, 'error' => 'Not logged in']);
         exit;
     }
+    if (!OrgRole::canUseAi(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'You do not have permission to use the AI assistant.']);
+        exit;
+    }
     $pdo = getDBConnection();
     $activeProjectId = requireActiveProjectId($pdo);
     if ($activeProjectId === null) {
@@ -1231,6 +1237,10 @@ function handleAutoPopulatePurpose() {
     }
     if (empty($_SESSION['user_id'])) {
         echo json_encode(['success' => false, 'error' => 'Not logged in']);
+        exit;
+    }
+    if (!OrgRole::canUseAi(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'You do not have permission to generate vendor purposes.']);
         exit;
     }
     $rowsRaw = $_POST['rows'] ?? '[]';
@@ -1404,13 +1414,22 @@ function handleToggleMemberDisabled(): void
         exit;
     };
     if (empty($_SESSION['user_id']) || (int) ($_SESSION['org_id'] ?? 0) < 1) {
-        $_SESSION['error'] = 'You must be signed in to manage manager status.';
+        $_SESSION['error'] = 'You must be signed in to manage user status.';
+        $redir();
+    }
+    $actorRole = sessionOrgRole();
+    if (!OrgRole::canDisableUser($actorRole)) {
+        $_SESSION['error'] = 'You do not have permission to disable users.';
         $redir();
     }
     $memberId = (int) ($_POST['member_id'] ?? 0);
     $disable = (int) ($_POST['disable'] ?? 0) === 1 ? 1 : 0;
     if ($memberId <= 0) {
-        $_SESSION['error'] = 'Invalid manager selected.';
+        $_SESSION['error'] = 'Invalid user selected.';
+        $redir();
+    }
+    if ($memberId === (int) $_SESSION['user_id']) {
+        $_SESSION['error'] = 'You cannot disable your own account.';
         $redir();
     }
 
@@ -1420,17 +1439,28 @@ function handleToggleMemberDisabled(): void
     $lookup->execute([$memberId, $orgId]);
     $member = $lookup->fetch(PDO::FETCH_ASSOC);
     if (!$member) {
-        $_SESSION['error'] = 'Manager not found.';
+        $_SESSION['error'] = 'User not found.';
         $redir();
     }
-    if (($member['role'] ?? '') !== OrgRole::ROLE_MEMBER) {
-        $_SESSION['error'] = 'Only managers can be disabled or enabled.';
+    $targetRole = OrgRole::normalize((string) ($member['role'] ?? ''));
+    if (!OrgRole::canAssign($actorRole, $targetRole)) {
+        $_SESSION['error'] = 'You cannot disable a user with that role.';
         $redir();
+    }
+    if (OrgRole::isOrgAdmin($targetRole)) {
+        $countSt = $pdo->prepare(
+            'SELECT COUNT(*) FROM user_organizations WHERE org_id = ? AND role = ? AND is_disabled = 0'
+        );
+        $countSt->execute([$orgId, OrgRole::ROLE_ORG_ADMIN]);
+        if ((int) $countSt->fetchColumn() <= 1 && $disable === 1) {
+            $_SESSION['error'] = 'Cannot disable the last Org Admin.';
+            $redir();
+        }
     }
 
     $upd = $pdo->prepare('UPDATE user_organizations SET is_disabled = ? WHERE user_id = ? AND org_id = ?');
     $upd->execute([$disable, $memberId, $orgId]);
-    $_SESSION['message'] = $disable === 1 ? 'Manager disabled successfully.' : 'Manager enabled successfully.';
+    $_SESSION['message'] = $disable === 1 ? 'User disabled successfully.' : 'User enabled successfully.';
     $redir();
 }
 
@@ -1441,14 +1471,19 @@ function handleSaveOrgMemberRole(): void
         echo json_encode(['success' => false, 'error' => 'Not logged in']);
         exit;
     }
-    if (!OrgRole::canElevateOrgRoles(sessionOrgRole())) {
-        echo json_encode(['success' => false, 'error' => 'Only an Organization Admin can change organization roles.']);
+    $actorRole = sessionOrgRole();
+    if (!OrgRole::canChangeRole($actorRole)) {
+        echo json_encode(['success' => false, 'error' => 'You do not have permission to change user roles.']);
         exit;
     }
     $memberId = (int) ($_POST['member_id'] ?? 0);
-    $desiredRole = strtolower(trim((string) ($_POST['role'] ?? '')));
-    if ($memberId <= 0 || !in_array($desiredRole, [OrgRole::ROLE_SUPER_ADMIN, OrgRole::ROLE_MEMBER], true)) {
+    $desiredRole = OrgRole::normalize(strtolower(trim((string) ($_POST['role'] ?? ''))));
+    if ($memberId <= 0 || !OrgRole::isValid($desiredRole)) {
         echo json_encode(['success' => false, 'error' => 'Invalid member or role.']);
+        exit;
+    }
+    if (!OrgRole::canAssign($actorRole, $desiredRole)) {
+        echo json_encode(['success' => false, 'error' => 'You cannot assign that role.']);
         exit;
     }
     $actorId = (int) $_SESSION['user_id'];
@@ -1469,7 +1504,11 @@ function handleSaveOrgMemberRole(): void
         exit;
     }
 
-    $currentRole = (string) ($member['role'] ?? OrgRole::ROLE_MEMBER);
+    $currentRole = OrgRole::normalize((string) ($member['role'] ?? OrgRole::ROLE_EXECUTIVE));
+    if (!OrgRole::canAssign($actorRole, $currentRole)) {
+        echo json_encode(['success' => false, 'error' => 'You cannot change the role of this user.']);
+        exit;
+    }
     if ($currentRole === $desiredRole) {
         echo json_encode([
             'success' => true,
@@ -1480,14 +1519,14 @@ function handleSaveOrgMemberRole(): void
         exit;
     }
 
-    if ($desiredRole === OrgRole::ROLE_MEMBER && OrgRole::isSuperAdmin($currentRole)) {
+    if (OrgRole::isOrgAdmin($currentRole) && !OrgRole::isOrgAdmin($desiredRole)) {
         $countSt = $pdo->prepare(
             'SELECT COUNT(*) FROM user_organizations WHERE org_id = ? AND role = ? AND is_disabled = 0'
         );
-        $countSt->execute([$orgId, OrgRole::ROLE_SUPER_ADMIN]);
+        $countSt->execute([$orgId, OrgRole::ROLE_ORG_ADMIN]);
         $adminCount = (int) $countSt->fetchColumn();
         if ($adminCount <= 1) {
-            echo json_encode(['success' => false, 'error' => 'Cannot demote the last Organization Admin.']);
+            echo json_encode(['success' => false, 'error' => 'Cannot demote the last Org Admin.']);
             exit;
         }
     }
@@ -1538,7 +1577,7 @@ function handleSaveReminderSettings() {
     }
     $pdo = getDBConnection();
     $orgId = (int) ($_SESSION['org_id'] ?? 0);
-    $canEditOrgSettings = $orgId > 0;
+    $canEditOrgSettings = $orgId > 0 && OrgRole::canInvite(sessionOrgRole());
 
     if ($canEditOrgSettings) {
         $orgOn = isset($_POST['deadline_reminders_enabled']) && $_POST['deadline_reminders_enabled'] === '1';
@@ -1548,7 +1587,7 @@ function handleSaveReminderSettings() {
             header('Location: ' . $_SERVER['PHP_SELF']);
             exit;
         }
-        $promptQbo = !OrgRole::isSuperAdmin(sessionOrgRole())
+        $promptQbo = !OrgRole::canConnectQbo(sessionOrgRole())
             ? null
             : (isset($_POST['prompt_qbo_sync_on_revisit']) && $_POST['prompt_qbo_sync_on_revisit'] === '1' ? 1 : 0);
         if ($promptQbo === null) {
@@ -1594,8 +1633,8 @@ function handleQboDisconnect(): void
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
-        $_SESSION['error'] = 'Only a super admin can disconnect QuickBooks.';
+    if (!OrgRole::canConnectQbo(sessionOrgRole())) {
+        $_SESSION['error'] = 'Only an Org Admin or Finance Admin can disconnect QuickBooks.';
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
     }
@@ -1619,8 +1658,8 @@ function handlePreviewQboSync(): void
         echo json_encode(['success' => false, 'error' => 'Not authenticated']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
-        echo json_encode(['success' => false, 'error' => 'Only a super admin can sync QuickBooks.']);
+    if (!OrgRole::canConnectQbo(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only an Org Admin or Finance Admin can sync QuickBooks.']);
         exit;
     }
     $startDate = trim((string) ($_POST['start_date'] ?? ''));
@@ -1689,8 +1728,8 @@ function handleImportQboSync(): void
         echo json_encode(['success' => false, 'error' => 'Not authenticated']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
-        echo json_encode(['success' => false, 'error' => 'Only a super admin can import QuickBooks data.']);
+    if (!OrgRole::canConnectQbo(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only an Org Admin or Finance Admin can import QuickBooks data.']);
         exit;
     }
     $cacheKey = trim((string) ($_POST['cache_key'] ?? ($_SESSION['pending_qbo_sync_key'] ?? '')));
@@ -1746,8 +1785,8 @@ function handleQboWeeklyImportConsentStatus(): void
         echo json_encode(['success' => false, 'error' => 'Not authenticated']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
-        echo json_encode(['success' => false, 'error' => 'Only a super admin can manage QuickBooks consent.']);
+    if (!OrgRole::canConnectQbo(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only an Org Admin or Finance Admin can manage QuickBooks consent.']);
         exit;
     }
     try {
@@ -1777,8 +1816,8 @@ function handleSaveQboWeeklyImportConsent(): void
         echo json_encode(['success' => false, 'error' => 'Not authenticated']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
-        echo json_encode(['success' => false, 'error' => 'Only a super admin can save QuickBooks consent.']);
+    if (!OrgRole::canConnectQbo(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only an Org Admin or Finance Admin can save QuickBooks consent.']);
         exit;
     }
     $agreed = isset($_POST['agreed']) && (string) $_POST['agreed'] === '1';
@@ -1818,7 +1857,7 @@ function handleQboRevisitPromptStatus(): void
         echo json_encode(['success' => false, 'error' => 'Not authenticated']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
+    if (!OrgRole::canConnectQbo(sessionOrgRole())) {
         echo json_encode([
             'success' => true,
             'show' => false,
@@ -1831,7 +1870,7 @@ function handleQboRevisitPromptStatus(): void
         $pdo = getDBConnection();
         $orgId = (int) $_SESSION['org_id'];
         $activeProjectId = requireActiveProjectId($pdo);
-        $promptEnabled = true;
+        $promptEnabled = false;
         $st = $pdo->prepare('SELECT prompt_qbo_sync_on_revisit FROM organizations WHERE id = ? LIMIT 1');
         $st->execute([$orgId]);
         $row = $st->fetch(PDO::FETCH_ASSOC);
@@ -1866,8 +1905,8 @@ function handleSaveQboRevisitPromptPref(): void
         echo json_encode(['success' => false, 'error' => 'Not authenticated']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
-        echo json_encode(['success' => false, 'error' => 'Only a super admin can change this setting.']);
+    if (!OrgRole::canConnectQbo(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only an Org Admin or Finance Admin can change this setting.']);
         exit;
     }
     $enabled = isset($_POST['prompt_enabled']) && (string) $_POST['prompt_enabled'] === '1';
@@ -1890,8 +1929,8 @@ function handleQboIncrementalSync(): void
         echo json_encode(['success' => false, 'error' => 'Not authenticated']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
-        echo json_encode(['success' => false, 'error' => 'Only a super admin can sync QuickBooks.']);
+    if (!OrgRole::canConnectQbo(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only an Org Admin or Finance Admin can sync QuickBooks.']);
         exit;
     }
     $startDate = trim((string) ($_POST['start_date'] ?? ''));
@@ -2007,10 +2046,13 @@ function handleSaveCostCalculator() {
         }
     }
 
-    if (OrgRole::isSuperAdmin($gridRole)) {
+    if (OrgRole::canManageVendorStructure($gridRole)) {
         $result = VendorService::saveAdmin($pdo, $orgId, $activeProjectId, $uid, $gridRole, $items, $fullSync);
-    } else {
+    } elseif (OrgRole::canEditVendorFields($gridRole)) {
         $result = VendorService::saveMember($pdo, $orgId, $activeProjectId, $uid, $items, $fullSync);
+    } else {
+        echo json_encode(['success' => false, 'error' => 'You do not have permission to edit vendor rows.']);
+        exit;
     }
 
     if (($result['success'] ?? false) && $webhookUrl !== '') {
@@ -2436,8 +2478,8 @@ function handleProjectCreate() {
         echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
-        echo json_encode(['success' => false, 'error' => 'Only a super admin can create projects.']);
+    if (!OrgRole::canCreateProject(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'You do not have permission to create projects.']);
         exit;
     }
     $projectName = trim((string) ($_POST['project_name'] ?? ''));
@@ -2491,6 +2533,71 @@ function handleProjectCreate() {
     exit;
 }
 
+function handleProjectRename(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
+        exit;
+    }
+    if (!OrgRole::canRenameProject(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'You do not have permission to rename projects.']);
+        exit;
+    }
+    $projectId = (int) ($_POST['project_id'] ?? 0);
+    $projectName = trim((string) ($_POST['project_name'] ?? ''));
+    if ($projectId <= 0) {
+        echo json_encode(['success' => false, 'error' => 'Invalid project.']);
+        exit;
+    }
+    if ($projectName === '') {
+        echo json_encode(['success' => false, 'error' => 'Project name is required.']);
+        exit;
+    }
+    if (strlen($projectName) > 255) {
+        $projectName = substr($projectName, 0, 255);
+    }
+
+    $pdo = getDBConnection();
+    $orgId = (int) ($_SESSION['org_id'] ?? 0);
+    $userId = (int) $_SESSION['user_id'];
+    $role = sessionOrgRole();
+    if ($orgId < 1 || !ProjectService::canAccessProject($pdo, $projectId, $orgId, $userId, $role)) {
+        echo json_encode(['success' => false, 'error' => 'You do not have access to this project.']);
+        exit;
+    }
+
+    try {
+        $st = $pdo->prepare('UPDATE projects SET name = ? WHERE id = ? AND org_id = ?');
+        $st->execute([$projectName, $projectId, $orgId]);
+        if ($st->rowCount() < 1) {
+            // Name may be unchanged — verify the project still exists.
+            $chk = $pdo->prepare('SELECT name FROM projects WHERE id = ? AND org_id = ? LIMIT 1');
+            $chk->execute([$projectId, $orgId]);
+            $existing = $chk->fetchColumn();
+            if ($existing === false || $existing === null) {
+                echo json_encode(['success' => false, 'error' => 'Project not found.']);
+                exit;
+            }
+        }
+        echo json_encode([
+            'success' => true,
+            'project_id' => $projectId,
+            'project_name' => $projectName,
+        ]);
+    } catch (PDOException $e) {
+        error_log('handleProjectRename: ' . $e->getMessage());
+        $msg = $e->getMessage();
+        if (stripos($msg, 'uk_projects_org_name') !== false
+            || (stripos($msg, '1062') !== false && stripos($msg, 'Duplicate') !== false)) {
+            echo json_encode(['success' => false, 'error' => 'A project with this name already exists.']);
+            exit;
+        }
+        echo json_encode(['success' => false, 'error' => 'Could not rename project.']);
+    }
+    exit;
+}
+
 function handleListOrganizations(): void
 {
     header('Content-Type: application/json');
@@ -2525,7 +2632,7 @@ function handleOrgSetActive(): void
     }
     RoleContext::persistLastOrgId($pdo, $userId, $orgId);
     $projectCount = ProjectService::orgProjectCount($pdo, $orgId);
-    $_SESSION['project_onboarding_required'] = OrgRole::isSuperAdmin($orgRole) && $projectCount === 0;
+    $_SESSION['project_onboarding_required'] = OrgRole::canCreateProject((string) $orgRole) && $projectCount === 0;
     $activeProjectId = ProjectService::resolveActiveProjectId($pdo, $orgId, $userId, $orgRole, null);
     RoleContext::syncSession($pdo, $userId, $orgId, $activeProjectId);
     $_SESSION['user_orgs'] = RoleContext::listUserOrganizations($pdo, $userId);
@@ -2574,7 +2681,7 @@ function handleOrgCreate(): void
             echo json_encode(['success' => false, 'error' => 'Could not create organization.']);
             exit;
         }
-        RoleContext::upsertOrgMembership($pdo, $userId, $newOrgId, OrgRole::ROLE_SUPER_ADMIN);
+        RoleContext::upsertOrgMembership($pdo, $userId, $newOrgId, OrgRole::ROLE_ORG_ADMIN);
         RoleContext::persistLastOrgId($pdo, $userId, $newOrgId);
         $_SESSION['project_onboarding_required'] = true;
         RoleContext::syncSession($pdo, $userId, $newOrgId, null);
@@ -2582,7 +2689,7 @@ function handleOrgCreate(): void
         echo json_encode([
             'success' => true,
             'org_id' => $newOrgId,
-            'org_role' => OrgRole::ROLE_SUPER_ADMIN,
+            'org_role' => OrgRole::ROLE_ORG_ADMIN,
         ]);
     } catch (PDOException $e) {
         error_log('handleOrgCreate: ' . $e->getMessage());
@@ -2598,8 +2705,8 @@ function handleOrgRename(): void
         echo json_encode(['success' => false, 'error' => 'Not logged in']);
         exit;
     }
-    if (!OrgRole::canElevateOrgRoles(sessionOrgRole())) {
-        echo json_encode(['success' => false, 'error' => 'Only an Organization Admin can rename the organization.']);
+    if (!OrgRole::canRenameOrg(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'Only an Org Admin can rename the organization.']);
         exit;
     }
     $orgId = (int) $_SESSION['org_id'];
@@ -2628,99 +2735,14 @@ function handleOrgRename(): void
     exit;
 }
 
-function handleLoadProjectMembers(): void
-{
-    header('Content-Type: application/json');
-    if (empty($_SESSION['user_id'])) {
-        echo json_encode(['success' => false, 'members' => []]);
-        exit;
-    }
-    if ((int) ($_SESSION['org_id'] ?? 0) < 1) {
-        echo json_encode(['success' => false, 'error' => 'No active organization.']);
-        exit;
-    }
-    $projectId = (int) ($_POST['project_id'] ?? $_GET['project_id'] ?? 0);
-    if ($projectId <= 0) {
-        $projectId = (int) ($_SESSION['active_project_id'] ?? 0);
-    }
-    $pdo = getDBConnection();
-    $orgId = (int) $_SESSION['org_id'];
-    $userId = (int) $_SESSION['user_id'];
-    if (!ProjectService::canAccessProject($pdo, $projectId, $orgId, $userId, sessionProjectRole())) {
-        echo json_encode(['success' => false, 'error' => 'You do not have access to this project.']);
-        exit;
-    }
-    $members = ProjectService::listProjectMembers($pdo, $projectId, $orgId);
-    $orgMembers = $pdo->prepare(
-        'SELECT u.id, u.username, u.display_name, u.email
-         FROM user_organizations uo
-         INNER JOIN users u ON u.id = uo.user_id
-         WHERE uo.org_id = ? AND uo.is_disabled = 0
-         ORDER BY u.username, u.email'
-    );
-    $orgMembers->execute([$orgId]);
-    echo json_encode([
-        'success' => true,
-        'project_id' => $projectId,
-        'members' => $members,
-        'org_members' => $orgMembers->fetchAll(PDO::FETCH_ASSOC),
-    ]);
-    exit;
-}
-
-function handleSaveProjectMembers(): void
-{
-    header('Content-Type: application/json');
-    if (empty($_SESSION['user_id'])) {
-        echo json_encode(['success' => false, 'error' => 'Not logged in']);
-        exit;
-    }
-    if ((int) ($_SESSION['org_id'] ?? 0) < 1) {
-        echo json_encode(['success' => false, 'error' => 'No active organization.']);
-        exit;
-    }
-    $projectId = (int) ($_POST['project_id'] ?? 0);
-    $memberIds = parseMemberIds($_POST['member_ids'] ?? []);
-    $memberRoles = parseMemberRoles($_POST['member_roles'] ?? []);
-    $pdo = getDBConnection();
-    $orgId = (int) $_SESSION['org_id'];
-    $userId = (int) $_SESSION['user_id'];
-    if ($projectId <= 0 || !ProjectService::canAccessProject($pdo, $projectId, $orgId, $userId, sessionProjectRole())) {
-        echo json_encode(['success' => false, 'error' => 'Invalid project.']);
-        exit;
-    }
-    if (count($memberIds) === 0) {
-        echo json_encode(['success' => false, 'error' => 'Select at least one manager.']);
-        exit;
-    }
-    $filtered = ProjectService::filterOrgMemberUserIds($pdo, $orgId, $memberIds);
-    if (count($filtered) === 0) {
-        echo json_encode(['success' => false, 'error' => 'No valid organization managers selected.']);
-        exit;
-    }
-    ProjectService::assignMembers($pdo, $projectId, $userId, $filtered, $memberRoles);
-    if (count($filtered) > 0) {
-        $in = implode(',', array_fill(0, count($filtered), '?'));
-        $del = $pdo->prepare("DELETE FROM project_members WHERE project_id = ? AND user_id NOT IN ($in)");
-        $del->execute(array_merge([$projectId], $filtered));
-    } else {
-        $pdo->prepare('DELETE FROM project_members WHERE project_id = ?')->execute([$projectId]);
-    }
-    if ($projectId === (int) ($_SESSION['active_project_id'] ?? 0)) {
-        RoleContext::syncSession($pdo, $userId, $orgId, $projectId);
-    }
-    echo json_encode(['success' => true, 'members' => ProjectService::listProjectMembers($pdo, $projectId, $orgId)]);
-    exit;
-}
-
 function handleCopyProjectPurposes() {
     header('Content-Type: application/json');
     if (empty($_SESSION['user_id'])) {
         echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin(sessionProjectRole())) {
-        echo json_encode(['success' => false, 'error' => 'Only a super admin can copy project purposes.']);
+    if (!OrgRole::canManageVendorStructure(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'You do not have permission to copy project purposes.']);
         exit;
     }
     $fromProjectId = (int) ($_POST['from_project_id'] ?? 0);
@@ -2766,8 +2788,8 @@ function handleCopyProjectChats() {
         echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin(sessionProjectRole())) {
-        echo json_encode(['success' => false, 'error' => 'Only a super admin can copy project chats.']);
+    if (!OrgRole::canManageVendorStructure(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'You do not have permission to copy project chats.']);
         exit;
     }
     $fromProjectId = (int) ($_POST['from_project_id'] ?? 0);
@@ -2843,8 +2865,8 @@ function handleCopyProjectCategories() {
         echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin(sessionProjectRole())) {
-        echo json_encode(['success' => false, 'error' => 'Only a super admin can copy project categories.']);
+    if (!OrgRole::canManageVendorStructure(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'You do not have permission to copy project categories.']);
         exit;
     }
     $fromProjectId = (int) ($_POST['from_project_id'] ?? 0);
@@ -2888,8 +2910,8 @@ function handleProjectDelete() {
         echo json_encode(['success' => false, 'error' => 'Your session expired. Please sign in again.']);
         exit;
     }
-    if (!OrgRole::isSuperAdmin(sessionOrgRole())) {
-        echo json_encode(['success' => false, 'error' => 'Only a super admin can delete projects.']);
+    if (!OrgRole::canDeleteProject(sessionOrgRole())) {
+        echo json_encode(['success' => false, 'error' => 'You do not have permission to delete projects.']);
         exit;
     }
     $projectId = (int) ($_POST['project_id'] ?? 0);

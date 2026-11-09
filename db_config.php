@@ -207,9 +207,18 @@ function migrateRolesAdminIntoMember(PDO $pdo): void
                 continue;
             }
             $typeDisp = strtolower(trim((string) $col['Type']));
+            // Skip tables already on the unified five-role model.
+            if (strpos($typeDisp, "'org_admin'") !== false
+                || strpos($typeDisp, "'finance_admin'") !== false
+                || strpos($typeDisp, "'project_manager'") !== false
+                || strpos($typeDisp, "'cost_owner'") !== false
+                || strpos($typeDisp, "'executive'") !== false) {
+                continue;
+            }
             $hasAdmin = strpos($typeDisp, "'admin'") !== false;
             if (!$hasAdmin) {
-                // Already collapsed or never had admin — ensure final two-tier shape.
+                // Already collapsed or never had admin — ensure final two-tier shape
+                // (migrateUnifiedFiveRoles widens this next).
                 if (!preg_match('/enum\s*\(\s*\'super_admin\'\s*,\s*\'member\'\s*\)/', $typeDisp)) {
                     $pdo->exec(
                         "ALTER TABLE `{$table}` MODIFY COLUMN `{$column}` ENUM('super_admin','member') NOT NULL DEFAULT 'member'"
@@ -225,6 +234,128 @@ function migrateRolesAdminIntoMember(PDO $pdo): void
         }
     } catch (PDOException $e) {
         error_log('migrateRolesAdminIntoMember: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Unify to five org-scoped roles on user_organizations / invitations.
+ * Mapping: org super_admin → org_admin; project super_admin → project_manager;
+ * project member → cost_owner; otherwise → executive.
+ * Idempotent across repeated migrateSchema runs.
+ *
+ * @param PDO $pdo
+ */
+function migrateUnifiedFiveRoles(PDO $pdo): void
+{
+    $fiveEnum = "ENUM('org_admin','finance_admin','project_manager','cost_owner','executive')";
+
+    try {
+        $uoCol = $pdo->query("SHOW COLUMNS FROM `user_organizations` LIKE 'role'")->fetch(PDO::FETCH_ASSOC);
+        if ($uoCol && !empty($uoCol['Type'])) {
+            $typeDisp = strtolower(trim((string) $uoCol['Type']));
+            $alreadyFive = strpos($typeDisp, "'org_admin'") !== false
+                && strpos($typeDisp, "'finance_admin'") !== false
+                && strpos($typeDisp, "'project_manager'") !== false
+                && strpos($typeDisp, "'cost_owner'") !== false
+                && strpos($typeDisp, "'executive'") !== false
+                && strpos($typeDisp, "'super_admin'") === false
+                && strpos($typeDisp, "'member'") === false;
+
+            if (!$alreadyFive) {
+                // Widen to include legacy + new values so we can remap safely.
+                $pdo->exec(
+                    "ALTER TABLE `user_organizations` MODIFY COLUMN `role`
+                     ENUM('super_admin','member','org_admin','finance_admin','project_manager','cost_owner','executive')
+                     NOT NULL DEFAULT 'executive'"
+                );
+
+                // Org admins first.
+                $pdo->exec(
+                    "UPDATE `user_organizations` SET `role` = 'org_admin' WHERE `role` = 'super_admin'"
+                );
+
+                // Project super_admin anywhere in org → project_manager (skip already mapped org_admin).
+                $pdo->exec(
+                    "UPDATE `user_organizations` uo
+                     SET uo.`role` = 'project_manager'
+                     WHERE uo.`role` IN ('member')
+                       AND EXISTS (
+                         SELECT 1 FROM `project_members` pm
+                         INNER JOIN `projects` p ON p.id = pm.project_id
+                         WHERE pm.user_id = uo.user_id
+                           AND p.org_id = uo.org_id
+                           AND pm.role = 'super_admin'
+                       )"
+                );
+
+                // Project member anywhere in org → cost_owner.
+                $pdo->exec(
+                    "UPDATE `user_organizations` uo
+                     SET uo.`role` = 'cost_owner'
+                     WHERE uo.`role` IN ('member')
+                       AND EXISTS (
+                         SELECT 1 FROM `project_members` pm
+                         INNER JOIN `projects` p ON p.id = pm.project_id
+                         WHERE pm.user_id = uo.user_id
+                           AND p.org_id = uo.org_id
+                           AND pm.role = 'member'
+                       )"
+                );
+
+                // Remaining legacy member / unknown → executive.
+                $pdo->exec(
+                    "UPDATE `user_organizations`
+                     SET `role` = 'executive'
+                     WHERE `role` IN ('member')"
+                );
+
+                $pdo->exec(
+                    "ALTER TABLE `user_organizations` MODIFY COLUMN `role` {$fiveEnum} NOT NULL DEFAULT 'executive'"
+                );
+            }
+        }
+
+        $invCol = $pdo->query("SHOW COLUMNS FROM `invitations` LIKE 'invite_role'")->fetch(PDO::FETCH_ASSOC);
+        if ($invCol && !empty($invCol['Type'])) {
+            $typeDisp = strtolower(trim((string) $invCol['Type']));
+            $alreadyFive = strpos($typeDisp, "'org_admin'") !== false
+                && strpos($typeDisp, "'executive'") !== false
+                && strpos($typeDisp, "'super_admin'") === false
+                && strpos($typeDisp, "'member'") === false;
+
+            if (!$alreadyFive) {
+                $pdo->exec(
+                    "ALTER TABLE `invitations` MODIFY COLUMN `invite_role`
+                     ENUM('super_admin','member','org_admin','finance_admin','project_manager','cost_owner','executive')
+                     NOT NULL DEFAULT 'cost_owner'"
+                );
+                $pdo->exec("UPDATE `invitations` SET `invite_role` = 'org_admin' WHERE `invite_role` = 'super_admin'");
+                $pdo->exec("UPDATE `invitations` SET `invite_role` = 'cost_owner' WHERE `invite_role` = 'member'");
+                $pdo->exec(
+                    "ALTER TABLE `invitations` MODIFY COLUMN `invite_role` {$fiveEnum} NOT NULL DEFAULT 'cost_owner'"
+                );
+            }
+        }
+
+        // Legacy users.role column — keep writable shape for seed/backfill; map values.
+        $usersCol = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'role'")->fetch(PDO::FETCH_ASSOC);
+        if ($usersCol && !empty($usersCol['Type'])) {
+            $typeDisp = strtolower(trim((string) $usersCol['Type']));
+            if (strpos($typeDisp, "'org_admin'") === false || strpos($typeDisp, "'super_admin'") !== false) {
+                $pdo->exec(
+                    "ALTER TABLE `users` MODIFY COLUMN `role`
+                     ENUM('super_admin','member','org_admin','finance_admin','project_manager','cost_owner','executive')
+                     NOT NULL DEFAULT 'executive'"
+                );
+                $pdo->exec("UPDATE `users` SET `role` = 'org_admin' WHERE `role` = 'super_admin'");
+                $pdo->exec("UPDATE `users` SET `role` = 'executive' WHERE `role` = 'member'");
+                $pdo->exec(
+                    "ALTER TABLE `users` MODIFY COLUMN `role` {$fiveEnum} NOT NULL DEFAULT 'executive'"
+                );
+            }
+        }
+    } catch (PDOException $e) {
+        error_log('migrateUnifiedFiveRoles: ' . $e->getMessage());
     }
 }
 
@@ -246,7 +377,7 @@ function migrateSchema(PDO $pdo) {
             `max_users` TINYINT UNSIGNED NOT NULL DEFAULT 20,
             `deadline_reminders_enabled` TINYINT(1) NOT NULL DEFAULT 1,
             `notification_webhook_url` VARCHAR(1024) NULL,
-            `prompt_qbo_sync_on_revisit` TINYINT(1) NOT NULL DEFAULT 1,
+            `prompt_qbo_sync_on_revisit` TINYINT(1) NOT NULL DEFAULT 0,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
@@ -259,9 +390,14 @@ function migrateSchema(PDO $pdo) {
             $pdo->exec('ALTER TABLE `organizations` ADD COLUMN `notification_webhook_url` VARCHAR(1024) NULL AFTER `deadline_reminders_enabled`');
         }
 
-        $orgPromptQboCol = $pdo->query("SHOW COLUMNS FROM `organizations` LIKE 'prompt_qbo_sync_on_revisit'")->fetch();
+        $orgPromptQboCol = $pdo->query("SHOW COLUMNS FROM `organizations` LIKE 'prompt_qbo_sync_on_revisit'")->fetch(PDO::FETCH_ASSOC);
         if (!$orgPromptQboCol) {
-            $pdo->exec('ALTER TABLE `organizations` ADD COLUMN `prompt_qbo_sync_on_revisit` TINYINT(1) NOT NULL DEFAULT 1 AFTER `notification_webhook_url`');
+            $pdo->exec('ALTER TABLE `organizations` ADD COLUMN `prompt_qbo_sync_on_revisit` TINYINT(1) NOT NULL DEFAULT 0 AFTER `notification_webhook_url`');
+        } elseif ((string) ($orgPromptQboCol['Default'] ?? '') === '1') {
+            // One-time: the old column default was on. Flip stored rows off, then
+            // change the default so a later opt-in is not reset on the next request.
+            $pdo->exec('UPDATE `organizations` SET `prompt_qbo_sync_on_revisit` = 0');
+            $pdo->exec('ALTER TABLE `organizations` MODIFY COLUMN `prompt_qbo_sync_on_revisit` TINYINT(1) NOT NULL DEFAULT 0');
         }
 
         try {
@@ -369,7 +505,7 @@ function migrateSchema(PDO $pdo) {
             `token_hash` CHAR(64) NOT NULL,
             `invited_by_user_id` INT UNSIGNED NOT NULL,
             `expires_at` DATETIME NOT NULL,
-            `invite_role` ENUM('super_admin','member') NOT NULL DEFAULT 'member',
+            `invite_role` ENUM('org_admin','finance_admin','project_manager','cost_owner','executive') NOT NULL DEFAULT 'cost_owner',
             `consumed_at` DATETIME NULL,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             KEY `idx_inv_token` (`token_hash`),
@@ -380,7 +516,7 @@ function migrateSchema(PDO $pdo) {
 
         $invRoleCol = $pdo->query("SHOW COLUMNS FROM `invitations` LIKE 'invite_role'")->fetch();
         if (!$invRoleCol) {
-            $pdo->exec("ALTER TABLE `invitations` ADD COLUMN `invite_role` ENUM('super_admin','member') NOT NULL DEFAULT 'member' AFTER `expires_at`");
+            $pdo->exec("ALTER TABLE `invitations` ADD COLUMN `invite_role` ENUM('org_admin','finance_admin','project_manager','cost_owner','executive') NOT NULL DEFAULT 'cost_owner' AFTER `expires_at`");
         }
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS `reminder_sent` (
@@ -426,6 +562,7 @@ function migrateSchema(PDO $pdo) {
         migrateProjectSchema($pdo);
         migrateUserOrganizationsSchema($pdo);
         migrateRolesAdminIntoMember($pdo);
+        migrateUnifiedFiveRoles($pdo);
         migrateCostCalculatorSchema($pdo);
         migrateEmailReminderDigestSchema($pdo);
         seedInitialAdminIfNeeded($pdo);
@@ -537,7 +674,7 @@ function migrateUserOrganizationsSchema(PDO $pdo): void
         $pdo->exec("CREATE TABLE IF NOT EXISTS `user_organizations` (
             `user_id` INT UNSIGNED NOT NULL,
             `org_id` INT UNSIGNED NOT NULL,
-            `role` ENUM('super_admin','member') NOT NULL DEFAULT 'member',
+            `role` ENUM('org_admin','finance_admin','project_manager','cost_owner','executive') NOT NULL DEFAULT 'executive',
             `is_disabled` TINYINT(1) NOT NULL DEFAULT 0,
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (`user_id`, `org_id`),
@@ -652,10 +789,12 @@ function migrateCostCalculatorSchema(PDO $pdo) {
         `annual_cost` DECIMAL(12, 2) DEFAULT 0.00,
         `cancel_keep` VARCHAR(10) DEFAULT 'Keep',
         `cancelled_status` TINYINT(1) DEFAULT 0,
-        `status` ENUM('pending','question','unknown','keep','mark_for_cancellation','cancelled') NOT NULL DEFAULT 'pending',
+        `status` ENUM('pending','question','unknown','keep','mark_for_cancellation','cancelled','mark_for_renegotiation','renegotiated') NOT NULL DEFAULT 'pending',
         `visibility` ENUM('public','confidential') NOT NULL DEFAULT 'public',
         `purpose_of_subscription` TEXT NULL,
         `cancellation_deadline` DATE NULL,
+        `negotiation_target_date` DATE NULL,
+        `renegotiated_annual_savings` DECIMAL(12, 2) NULL,
         `last_payment_date` DATE NULL,
         `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -679,16 +818,20 @@ function migrateCostCalculatorSchema(PDO $pdo) {
         $addCol($pdo, 'visibility', "`visibility` ENUM('public','confidential') NOT NULL DEFAULT 'public'");
         $addCol($pdo, 'cancellation_deadline', '`cancellation_deadline` DATE NULL');
         $addCol($pdo, 'last_payment_date', '`last_payment_date` DATE NULL');
+        $statusEnum = "ENUM('pending','question','unknown','keep','mark_for_cancellation','cancelled','mark_for_renegotiation','renegotiated') NOT NULL DEFAULT 'pending'";
         $addCol(
             $pdo,
             'status',
-            "`status` ENUM('pending','question','unknown','keep','mark_for_cancellation','cancelled') NOT NULL DEFAULT 'pending'"
+            '`status` ' . $statusEnum
         );
 
         $statusCol = $pdo->query("SHOW COLUMNS FROM `cost_calculator_items` LIKE 'status'")->fetch(PDO::FETCH_ASSOC);
-        if ($statusCol && strpos(strtolower((string) ($statusCol['Type'] ?? '')), 'question') === false) {
-            $pdo->exec("ALTER TABLE `cost_calculator_items` MODIFY COLUMN `status` ENUM('pending','question','unknown','keep','mark_for_cancellation','cancelled') NOT NULL DEFAULT 'pending'");
+        $statusType = strtolower((string) ($statusCol['Type'] ?? ''));
+        if ($statusCol && (strpos($statusType, 'question') === false || strpos($statusType, 'renegotiated') === false)) {
+            $pdo->exec('ALTER TABLE `cost_calculator_items` MODIFY COLUMN `status` ' . $statusEnum);
         }
+        $addCol($pdo, 'negotiation_target_date', '`negotiation_target_date` DATE NULL');
+        $addCol($pdo, 'renegotiated_annual_savings', '`renegotiated_annual_savings` DECIMAL(12, 2) NULL');
 
         // Backfill status from legacy cancel_keep/cancelled_status for rows still marked pending
         // only when legacy fields imply cancel / cancelled — do NOT rewrite pending rows merely
@@ -1105,14 +1248,14 @@ function seedInitialAdminIfNeeded(PDO $pdo) {
         ':u' => $username,
         ':e' => $email,
         ':p' => $hash,
-        ':admin' => 'super_admin',
+        ':admin' => 'org_admin',
         ':dn' => 'Test Admin',
     ]);
     $newUserId = (int) $pdo->lastInsertId();
     if ($newUserId > 0) {
         try {
             $pdo->prepare('INSERT IGNORE INTO user_organizations (user_id, org_id, role) VALUES (?, 1, ?)')
-                ->execute([$newUserId, 'super_admin']);
+                ->execute([$newUserId, 'org_admin']);
         } catch (PDOException $e) {
             error_log('seedInitialAdmin user_organizations: ' . $e->getMessage());
         }

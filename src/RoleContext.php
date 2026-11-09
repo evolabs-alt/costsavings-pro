@@ -80,7 +80,7 @@ final class RoleContext
     {
         $role = self::orgRole($pdo, $userId, $orgId);
 
-        return $role !== null && OrgRole::isPrivileged($role);
+        return $role !== null && OrgRole::canElevateOrgRoles($role);
     }
 
     public static function requireProjectAccess(PDO $pdo, int $userId, int $projectId): ?string
@@ -134,37 +134,36 @@ final class RoleContext
     }
 
     /**
-     * Write org_role, project_role, and role (alias) into session.
+     * Write org_role (and legacy project_role/role aliases) into session.
+     * Project role is no longer separate — aliases mirror the org role.
      */
     public static function syncSession(PDO $pdo, int $userId, int $orgId, ?int $projectId): void
     {
-        $orgRole = self::orgRole($pdo, $userId, $orgId);
+        $orgRoleRaw = self::orgRole($pdo, $userId, $orgId);
+        $orgRole = $orgRoleRaw !== null ? OrgRole::normalize($orgRoleRaw) : OrgRole::ROLE_EXECUTIVE;
         $_SESSION['org_id'] = $orgId;
-        $_SESSION['org_role'] = $orgRole ?? 'member';
+        $_SESSION['org_role'] = $orgRole;
+        $_SESSION['role'] = $orgRole;
+        $_SESSION['project_role'] = $orgRole;
 
-        $projectRole = null;
         if ($projectId !== null && $projectId > 0) {
-            $projectRole = self::projectRole($pdo, $userId, $projectId);
-        }
-        if ($projectRole !== null) {
             $_SESSION['active_project_id'] = $projectId;
-            $_SESSION['project_role'] = $projectRole;
-            $_SESSION['role'] = $projectRole;
         } else {
-            unset($_SESSION['active_project_id'], $_SESSION['project_role']);
-            $_SESSION['role'] = $orgRole ?? 'member';
+            unset($_SESSION['active_project_id']);
         }
     }
 
     public static function sessionOrgRole(): string
     {
-        // Do not fall back to $_SESSION['role'] — that alias may be the project role.
-        return (string) ($_SESSION['org_role'] ?? OrgRole::ROLE_MEMBER);
+        return OrgRole::normalize((string) ($_SESSION['org_role'] ?? OrgRole::ROLE_EXECUTIVE));
     }
 
+    /**
+     * @deprecated Project roles removed; returns the org role.
+     */
     public static function sessionProjectRole(): string
     {
-        return (string) ($_SESSION['project_role'] ?? $_SESSION['role'] ?? 'member');
+        return self::sessionOrgRole();
     }
 
     /**
@@ -177,9 +176,9 @@ final class RoleContext
         string $role,
         int $isDisabled = 0
     ): void {
-        $role = strtolower(trim($role));
-        if (!in_array($role, [OrgRole::ROLE_SUPER_ADMIN, OrgRole::ROLE_MEMBER], true)) {
-            $role = OrgRole::ROLE_MEMBER;
+        $role = OrgRole::normalize($role);
+        if (!OrgRole::isValid($role)) {
+            $role = OrgRole::ROLE_COST_OWNER;
         }
         $st = $pdo->prepare(
             'INSERT INTO user_organizations (user_id, org_id, role, is_disabled)

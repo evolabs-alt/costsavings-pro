@@ -171,6 +171,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'project_delete':
                 handleProjectDelete();
                 break;
+            case 'project_rename':
+                handleProjectRename();
+                break;
             case 'copy_project_purposes':
                 handleCopyProjectPurposes();
                 break;
@@ -194,12 +197,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
             case 'org_rename':
                 handleOrgRename();
-                break;
-            case 'load_project_members':
-                handleLoadProjectMembers();
-                break;
-            case 'save_project_members':
-                handleSaveProjectMembers();
                 break;
             case 'save_org_member_role':
                 handleSaveOrgMemberRole();
@@ -242,17 +239,20 @@ if ($is_logged_in) {
 
 $org_role = ($is_logged_in && function_exists('sessionOrgRole'))
     ? sessionOrgRole()
-    : (string) ($_SESSION['org_role'] ?? $_SESSION['role'] ?? 'member');
-$project_role = ($is_logged_in && function_exists('sessionProjectRole'))
-    ? sessionProjectRole()
-    : (string) ($_SESSION['project_role'] ?? $_SESSION['role'] ?? 'member');
-// Any org member may invite/manage members and org settings (former admin powers).
-$is_org_admin = $is_logged_in;
-// Any project member may edit vendor spend/manager/visibility (former admin + member union).
-$is_admin = $is_logged_in;
-$can_create_projects = ($is_logged_in && \CostSavings\OrgRole::isSuperAdmin($org_role));
-$can_manage_qbo = ($is_logged_in && \CostSavings\OrgRole::isSuperAdmin($org_role));
+    : \CostSavings\OrgRole::normalize((string) ($_SESSION['org_role'] ?? $_SESSION['role'] ?? 'executive'));
+$project_role = $org_role;
+$can_invite_users = ($is_logged_in && \CostSavings\OrgRole::canInvite($org_role));
+$can_manage_users = $can_invite_users;
+$is_org_admin = $can_manage_users;
+$can_create_projects = ($is_logged_in && \CostSavings\OrgRole::canCreateProject($org_role));
+$can_manage_qbo = ($is_logged_in && \CostSavings\OrgRole::canConnectQbo($org_role));
 $can_elevate_org_roles = ($is_logged_in && \CostSavings\OrgRole::canElevateOrgRoles($org_role));
+$can_rename_org = ($is_logged_in && \CostSavings\OrgRole::canRenameOrg($org_role));
+$can_use_ai = ($is_logged_in && \CostSavings\OrgRole::canUseAi($org_role));
+$can_manage_vendors = ($is_logged_in && \CostSavings\OrgRole::canManageVendorStructure($org_role));
+$can_edit_grid = ($is_logged_in && \CostSavings\OrgRole::canEditVendorFields($org_role));
+$is_admin = $can_edit_grid;
+$assignable_roles = $is_logged_in ? \CostSavings\OrgRole::assignableRolesBy($org_role) : [];
 $session_user_id = $is_logged_in ? (int) ($_SESSION['user_id'] ?? 0) : 0;
 $user_orgs = ($is_logged_in && !empty($_SESSION['user_orgs']) && is_array($_SESSION['user_orgs']))
     ? $_SESSION['user_orgs']
@@ -291,7 +291,7 @@ if ($is_logged_in && empty($user_orgs) && !empty($_SESSION['user_id'])) {
 $deadline_reminders_org = true;
 $deadline_reminders_user = true;
 $notification_webhook_url = '';
-$prompt_qbo_sync_on_revisit = true;
+$prompt_qbo_sync_on_revisit = false;
 $qbo_status = [
     'connected' => false,
     'has_credentials' => \CostSavings\QboService::hasAppCredentials(),
@@ -361,7 +361,7 @@ if ($is_logged_in && $current_view === 'placeholder' && !empty($_SESSION['org_id
 }
 $org_admin_count = 0;
 foreach ($team_members_rows as $tmRow) {
-    if (\CostSavings\OrgRole::isSuperAdmin((string) ($tmRow['role'] ?? ''))) {
+    if (\CostSavings\OrgRole::isOrgAdmin((string) ($tmRow['role'] ?? ''))) {
         $org_admin_count++;
     }
 }
@@ -1187,14 +1187,18 @@ foreach ($team_members_rows as $tmRow) {
             color: #f59e0b;
         }
 
-        .cost-calculator-grid .row-status .cancel-deadline-input {
+        .cost-calculator-grid .row-status .cancel-deadline-input,
+        .cost-calculator-grid .row-status .negotiation-date-input,
+        .cost-calculator-grid .row-status .renegotiated-savings-input {
             display: block;
             width: 100%;
             margin-top: 4px;
             box-sizing: border-box;
         }
 
-        .cost-calculator-grid .row-status .cancel-deadline-input[hidden] {
+        .cost-calculator-grid .row-status .cancel-deadline-input[hidden],
+        .cost-calculator-grid .row-status .negotiation-date-input[hidden],
+        .cost-calculator-grid .row-status .renegotiated-savings-input[hidden] {
             display: none;
         }
 
@@ -4578,14 +4582,16 @@ foreach ($team_members_rows as $tmRow) {
                                         <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalCreateOrg">Create organization…</button>
                                     </li>
                                     <?php endif; ?>
-                                    <?php if ($is_org_admin): ?>
+                                    <?php if ($can_invite_users): ?>
                                     <li role="none">
-                                        <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersInvite">Invite member</button>
+                                        <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersInvite">Invite user</button>
                                     </li>
                                     <?php endif; ?>
+                                    <?php if ($can_manage_users): ?>
                                     <li role="none">
-                                        <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage Managers</button>
+                                        <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalMembersManage">Manage users</button>
                                     </li>
+                                    <?php endif; ?>
                                     <li role="none">
                                         <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings">Organization settings</button>
                                     </li>
@@ -4601,6 +4607,7 @@ foreach ($team_members_rows as $tmRow) {
                                     <ul class="app-submenu" id="appProjectSubmenu" role="menu" aria-label="Project actions">
                                         <?php if ($can_create_projects): ?>
                                         <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appCreateProjectBtn" data-open-modal="appModalProjectWizard">Create New Project</button></li>
+                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appRenameProjectBtn" data-open-modal="appModalRenameProject">Rename project…</button></li>
                                         <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appDeleteProjectBtn">Delete project…</button></li>
                                         <?php endif; ?>
                                         <li role="none">
@@ -4611,24 +4618,12 @@ foreach ($team_members_rows as $tmRow) {
                                         </li>
                                     </ul>
                                 </li>
-                                <li class="app-nav-item has-submenu" id="appMembersNavItem">
-                                    <button type="button" class="app-nav-link" id="appMembersMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appMembersSubmenu">Managers</button>
-                                    <ul class="app-submenu" id="appMembersSubmenu" role="menu" aria-label="Managers actions">
-                                        <?php if ($is_org_admin): ?>
-                                        <li role="none"><button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalProjectMembers">Project managers</button></li>
-                                        <?php endif; ?>
-                                    </ul>
-                                </li>
                                 <li class="app-nav-item has-submenu" id="appDataNavItem">
                                     <button type="button" class="app-nav-link" id="appDataMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appDataSubmenu">Data</button>
                                     <ul class="app-submenu" id="appDataSubmenu" role="menu" aria-label="Data actions">
                                         <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=xlsx">Download Excel</a></li>
                                         <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=pdf">Download PDF</a></li>
                                         <li role="none"><a role="menuitem" class="app-submenu-item" href="?action=export_vendors&amp;format=summary_pdf">Executive summary PDF</a></li>
-                                        <li role="none">
-                                            <button type="button" role="menuitem" class="app-submenu-item" id="appImportMappedCsvBtn">Custom CSV import</button>
-                                            <input type="file" id="mappedCsvImportInput" accept=".csv,text/csv" style="display:none;">
-                                        </li>
                                         <?php if ($can_manage_qbo): ?>
                                         <li role="none">
                                             <button type="button" role="menuitem" class="app-submenu-item" id="appSyncQboBtn">Sync with QBO</button>
@@ -4636,6 +4631,7 @@ foreach ($team_members_rows as $tmRow) {
                                         <?php endif; ?>
                                     </ul>
                                 </li>
+                                <?php if (!empty($can_use_ai)): ?>
                                 <li class="app-nav-item has-submenu" id="appAiNavItem">
                                     <button type="button" class="app-nav-link" id="appAiMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appAiSubmenu">AI</button>
                                     <ul class="app-submenu" id="appAiSubmenu" role="menu" aria-label="AI actions">
@@ -4643,6 +4639,7 @@ foreach ($team_members_rows as $tmRow) {
                                         <li role="none"><button type="button" role="menuitem" class="app-submenu-item" id="appAutoPopulatePurposeBtn">Auto populate purpose</button></li>
                                     </ul>
                                 </li>
+                                <?php endif; ?>
                             </ul>
                         </div>
                         <ul class="app-nav-cluster app-nav-cluster--account">
@@ -4913,7 +4910,9 @@ foreach ($team_members_rows as $tmRow) {
                 
                 <div class="cost-calculator-actions">
                     <?php if ($is_admin): ?>
+                    <?php if (!empty($can_manage_vendors)): ?>
                     <button type="button" class="add-row-btn" onclick="addCalculatorRow()">+ Add Row</button>
+                    <?php endif; ?>
                     <?php endif; ?>
                 </div>
             </div>
@@ -4926,6 +4925,8 @@ foreach ($team_members_rows as $tmRow) {
             const isAdminUser = <?php echo $is_admin ? 'true' : 'false'; ?>;
             const canCreateProjects = <?php echo $can_create_projects ? 'true' : 'false'; ?>;
             const canManageQbo = <?php echo $can_manage_qbo ? 'true' : 'false'; ?>;
+            const canManageVendors = <?php echo !empty($can_manage_vendors) ? 'true' : 'false'; ?>;
+            const canUseAi = <?php echo !empty($can_use_ai) ? 'true' : 'false'; ?>;
             const COLUMN_HELP = <?php echo json_encode(\CostSavings\ColumnHelp::entriesForJs(), JSON_UNESCAPED_UNICODE); ?>;
 
             function postJson(data) {
@@ -4955,19 +4956,6 @@ foreach ($team_members_rows as $tmRow) {
                         });
                         currentActiveProjectId = parseInt(d.active_project_id || 0, 10) || null;
                         updateActiveProjectHeader(sel);
-                        const projectMembersProjectSelect = document.getElementById('projectMembersProjectSelect');
-                        if (projectMembersProjectSelect) {
-                            projectMembersProjectSelect.innerHTML = '';
-                            (d.projects || []).forEach(function(p) {
-                                const opt = document.createElement('option');
-                                opt.value = String(p.id);
-                                opt.textContent = p.name;
-                                if (parseInt(p.id, 10) === parseInt(d.active_project_id || 0, 10)) {
-                                    opt.selected = true;
-                                }
-                                projectMembersProjectSelect.appendChild(opt);
-                            });
-                        }
                         const hasNoProjects = !Array.isArray(d.projects) || d.projects.length === 0;
                         if (canCreateProjects && (d.onboarding_required || hasNoProjects)) {
                             openAppModal('appModalProjectWizard');
@@ -4980,52 +4968,6 @@ foreach ($team_members_rows as $tmRow) {
                 const d = document.createElement('div');
                 d.textContent = text == null ? '' : String(text);
                 return d.innerHTML;
-            }
-
-            function renderProjectMembersTable(members, orgMembers) {
-                const tbody = document.getElementById('projectMembersTableBody');
-                if (!tbody) return;
-                tbody.innerHTML = '';
-                const assigned = {};
-                (members || []).forEach(function(m) {
-                    assigned[String(m.id || m.user_id)] = m.role || 'member';
-                });
-                (orgMembers || []).forEach(function(m) {
-                    const uid = String(m.id);
-                    const tr = document.createElement('tr');
-                    tr.setAttribute('data-user-id', uid);
-                    const isAssigned = Object.prototype.hasOwnProperty.call(assigned, uid);
-                    const role = assigned[uid] || 'member';
-                    tr.innerHTML =
-                        '<td><input type="checkbox" class="project-member-include"' + (isAssigned ? ' checked' : '') + ' data-user-id="' + uid + '"></td>' +
-                        '<td>' + escapeHtml(m.display_name || m.username || m.email || '—') + '</td>' +
-                        '<td>' + escapeHtml(m.email || '') + '</td>' +
-                        '<td><select class="project-member-role-select">' +
-                        '<option value="member"' + (role === 'member' ? ' selected' : '') + '>Project manager</option>' +
-                        '<option value="super_admin"' + (role === 'super_admin' ? ' selected' : '') + '>Project super admin</option>' +
-                        '</select></td>';
-                    tbody.appendChild(tr);
-                });
-            }
-
-            function loadProjectMembersModal() {
-                const projectSelect = document.getElementById('projectMembersProjectSelect');
-                const projectId = parseInt((projectSelect && projectSelect.value) || currentActiveProjectId || 0, 10) || 0;
-                if (!projectId) {
-                    showSnackbar('Select a project first.', 'error');
-                    return;
-                }
-                postJson({ action: 'load_project_members', project_id: projectId })
-                    .then(function(d) {
-                        if (!d || !d.success) {
-                            showSnackbar((d && d.error) || 'Could not load project managers.', 'error');
-                            return;
-                        }
-                        renderProjectMembersTable(d.members || [], d.org_members || []);
-                    })
-                    .catch(function() {
-                        showSnackbar('Could not load project managers.', 'error');
-                    });
             }
 
             function syncDeleteProjectConfirmState() {
@@ -7041,6 +6983,7 @@ foreach ($team_members_rows as $tmRow) {
             }
             const TEAM_MEMBERS = <?php echo $team_members_json; ?>;
             const IS_ADMIN = <?php echo $is_admin ? 'true' : 'false'; ?>;
+            const CAN_MANAGE_VENDORS = <?php echo !empty($can_manage_vendors) ? 'true' : 'false'; ?>;
             const CURRENT_USER_ID = <?php echo (int) ($_SESSION['user_id'] ?? 0); ?>;
             let pendingBulkActionData = null;
             let activeVendorChatItemId = 0;
@@ -7211,6 +7154,8 @@ foreach ($team_members_rows as $tmRow) {
                 keep: 'Keep',
                 mark_for_cancellation: 'Mark for Cancellation',
                 cancelled: 'Cancelled',
+                mark_for_renegotiation: 'Mark for Renegotiation',
+                renegotiated: 'Renegotiated',
             };
 
             function formatVendorsSelectedLabel(count) {
@@ -7442,11 +7387,18 @@ foreach ($team_members_rows as $tmRow) {
                         if (!statusSelect || statusSelect.disabled) return;
                         statusSelect.value = payload.value;
                         syncRowDeadlineVisibility(row);
+                        syncRowRenegotiationFields(row);
                         syncRowCancellationGuidanceVisibility(row);
                         if (payload.value === 'mark_for_cancellation') {
                             const dlIn = row.querySelector('.cancel-deadline-input');
                             if (dlIn && !dlIn.disabled && !dlIn.value) {
                                 dlIn.value = getEndOfCurrentMonthIsoDate();
+                            }
+                        }
+                        if (payload.value === 'mark_for_renegotiation') {
+                            const negIn = row.querySelector('.negotiation-date-input');
+                            if (negIn && !negIn.disabled && !negIn.value) {
+                                negIn.value = getEndOfCurrentMonthIsoDate();
                             }
                         }
                         markRowDirty(row);
@@ -7704,6 +7656,8 @@ foreach ($team_members_rows as $tmRow) {
                                 <option value="keep">Keep</option>
                                 <option value="mark_for_cancellation">Mark for Cancellation</option>
                                 <option value="cancelled">Cancelled</option>
+                                <option value="mark_for_renegotiation">Mark for Renegotiation</option>
+                                <option value="renegotiated">Renegotiated</option>
                             </select>
                             <button type="button" class="cancel-guidance-btn" aria-label="Show cancellation guidance" title="Show AI cancellation guidance for this vendor" hidden>
                                 <span class="material-symbols-outlined cancel-guidance-icon" aria-hidden="true">rule</span>
@@ -7714,6 +7668,19 @@ foreach ($team_members_rows as $tmRow) {
                                data-row="${rowCount}"
                                aria-label="Cancellation deadline"
                                title="Cancellation deadline"
+                               hidden />
+                        <input type="date"
+                               class="negotiation-date-input row-status-deadline"
+                               data-row="${rowCount}"
+                               aria-label="Negotiation target date"
+                               title="Date you intend to complete negotiations"
+                               hidden />
+                        <input type="text"
+                               class="renegotiated-savings-input"
+                               data-row="${rowCount}"
+                               placeholder="Annual savings"
+                               aria-label="Annual savings"
+                               title="Annual savings from renegotiation"
                                hidden />
                     </td>
                     <td class="notes">
@@ -7734,6 +7701,7 @@ foreach ($team_members_rows as $tmRow) {
                 attachRowListenersWithSave(row);
                 updateVendorDrilldownState(row);
                 syncRowDeadlineVisibility(row);
+                syncRowRenegotiationFields(row);
                 syncRowCancellationGuidanceVisibility(row);
                 syncMemberStatusEditability(row);
                 syncMemberSpendFieldEditability(row);
@@ -7874,10 +7842,17 @@ foreach ($team_members_rows as $tmRow) {
                 let totalConfirmedSavings = 0;
 
                 rows.forEach(row => {
+                    const status = getRowStatus(row);
+                    if (status === 'renegotiated') {
+                        const savingsIn = row.querySelector('.renegotiated-savings-input');
+                        const savings = savingsIn ? parseMoneyInput(savingsIn.value) : 0;
+                        if (savings > 0) {
+                            totalConfirmedSavings += savings;
+                        }
+                    }
                     if (!rowContributesToSavings(row)) {
                         return;
                     }
-                    const status = getRowStatus(row);
                     const annualCostText = row.querySelector('.annual-cost-display').textContent;
                     const annualCost = parseFloat(annualCostText.replace(/[^0-9.-]/g, '')) || 0;
 
@@ -8013,7 +7988,7 @@ foreach ($team_members_rows as $tmRow) {
                 return saveQueue;
             }
             
-            const VALID_ROW_STATUSES = ['pending', 'question', 'unknown', 'keep', 'mark_for_cancellation', 'cancelled'];
+            const VALID_ROW_STATUSES = ['pending', 'question', 'unknown', 'keep', 'mark_for_cancellation', 'cancelled', 'mark_for_renegotiation', 'renegotiated'];
 
             function getFilteredVendorRows() {
                 return Array.from(document.querySelectorAll('#calculatorRows tr')).filter(function(row) {
@@ -8576,6 +8551,15 @@ foreach ($team_members_rows as $tmRow) {
                 dl.hidden = (getRowStatus(row) !== 'mark_for_cancellation');
             }
 
+            function syncRowRenegotiationFields(row) {
+                if (!row) return;
+                const status = getRowStatus(row);
+                const dateIn = row.querySelector('.negotiation-date-input');
+                const savingsIn = row.querySelector('.renegotiated-savings-input');
+                if (dateIn) dateIn.hidden = (status !== 'mark_for_renegotiation');
+                if (savingsIn) savingsIn.hidden = (status !== 'renegotiated');
+            }
+
             function syncRowCancellationGuidanceVisibility(row) {
                 if (!row) return;
                 const btn = row.querySelector('.cancel-guidance-btn');
@@ -8583,19 +8567,26 @@ foreach ($team_members_rows as $tmRow) {
                 btn.hidden = (getRowStatus(row) !== 'mark_for_cancellation');
             }
 
-            const MEMBER_SPEND_LOCKED_TIP = 'Only administrators can change vendor, cost, or frequency';
+            const MEMBER_SPEND_LOCKED_TIP = 'Your role cannot change vendor, cost, or frequency';
+            const VENDOR_NAME_LOCKED_TIP = 'Your role cannot rename vendor rows';
 
             function syncMemberSpendFieldEditability(row) {
                 if (!row) return;
                 const vendorInput = row.querySelector('input[name="vendor[]"]');
                 const costInput = row.querySelector('.cost-input');
                 const frequencySelect = row.querySelector('.frequency-select');
-                if (IS_ADMIN) {
-                    if (vendorInput) {
+                if (vendorInput) {
+                    if (CAN_MANAGE_VENDORS) {
                         vendorInput.disabled = false;
                         vendorInput.readOnly = false;
                         vendorInput.removeAttribute('title');
+                    } else {
+                        vendorInput.disabled = true;
+                        vendorInput.readOnly = true;
+                        vendorInput.title = VENDOR_NAME_LOCKED_TIP;
                     }
+                }
+                if (IS_ADMIN) {
                     if (costInput) {
                         costInput.disabled = false;
                         costInput.readOnly = false;
@@ -8606,11 +8597,6 @@ foreach ($team_members_rows as $tmRow) {
                         frequencySelect.removeAttribute('title');
                     }
                     return;
-                }
-                if (vendorInput) {
-                    vendorInput.disabled = true;
-                    vendorInput.readOnly = true;
-                    vendorInput.title = MEMBER_SPEND_LOCKED_TIP;
                 }
                 if (costInput) {
                     costInput.disabled = true;
@@ -8628,6 +8614,8 @@ foreach ($team_members_rows as $tmRow) {
                 if (!row) return;
                 const statusSel = row.querySelector('.row-status-select');
                 const dl = row.querySelector('.cancel-deadline-input');
+                const negDate = row.querySelector('.negotiation-date-input');
+                const savingsIn = row.querySelector('.renegotiated-savings-input');
                 const guide = row.querySelector('.cancel-guidance-btn');
                 const lockedTip = 'Only the assigned manager can change status';
                 if (IS_ADMIN) {
@@ -8638,6 +8626,14 @@ foreach ($team_members_rows as $tmRow) {
                     if (dl) {
                         dl.disabled = false;
                         dl.removeAttribute('title');
+                    }
+                    if (negDate) {
+                        negDate.disabled = false;
+                        negDate.removeAttribute('title');
+                    }
+                    if (savingsIn) {
+                        savingsIn.disabled = false;
+                        savingsIn.removeAttribute('title');
                     }
                     if (guide) {
                         guide.disabled = false;
@@ -8668,6 +8664,22 @@ foreach ($team_members_rows as $tmRow) {
                         dl.title = lockedTip;
                     } else {
                         dl.removeAttribute('title');
+                    }
+                }
+                if (negDate) {
+                    negDate.disabled = locked;
+                    if (locked) {
+                        negDate.title = lockedTip;
+                    } else {
+                        negDate.removeAttribute('title');
+                    }
+                }
+                if (savingsIn) {
+                    savingsIn.disabled = locked;
+                    if (locked) {
+                        savingsIn.title = lockedTip;
+                    } else {
+                        savingsIn.removeAttribute('title');
                     }
                 }
                 if (guide) {
@@ -8709,6 +8721,8 @@ foreach ($team_members_rows as $tmRow) {
                 const catSel = row.querySelector('.category-select');
                 const visSel = row.querySelector('.visibility-select');
                 const deadlineIn = row.querySelector('.cancel-deadline-input');
+                const negotiationIn = row.querySelector('.negotiation-date-input');
+                const savingsIn = row.querySelector('.renegotiated-savings-input');
                 const lastPayIn = row.querySelector('.last-payment-input');
 
                 const vendorName = vendorInput ? vendorInput.value.trim() : '';
@@ -8728,6 +8742,8 @@ foreach ($team_members_rows as $tmRow) {
                 const categoryOk = categoryRaw !== '' && categoryRaw !== '__new__' && !isNaN(categoryParsed) && categoryParsed > 0;
                 const visibility = visSel ? visSel.value : 'public';
                 const cancelDl = deadlineIn && deadlineIn.value ? deadlineIn.value : '';
+                const negotiationDate = negotiationIn && negotiationIn.value ? negotiationIn.value : '';
+                const renegotiatedSavings = savingsIn ? parseMoneyInput(savingsIn.value) : 0;
                 const lastPay = lastPayIn && lastPayIn.value ? lastPayIn.value : '';
 
                 if (idVal && !vendorName && costPerPeriod === 0 && !notes && status === 'pending') {
@@ -8749,6 +8765,8 @@ foreach ($team_members_rows as $tmRow) {
                     purpose_of_subscription: notes,
                     visibility: visibility,
                     cancellation_deadline: cancelDl,
+                    negotiation_target_date: negotiationDate,
+                    renegotiated_annual_savings: renegotiatedSavings > 0 ? renegotiatedSavings : null,
                     last_payment_date: lastPay,
                     manager_user_id: managerOk ? managerParsed : null,
                     category_id: categoryOk ? categoryParsed : null
@@ -9054,6 +9072,15 @@ foreach ($team_members_rows as $tmRow) {
                                         const d = String(item.cancellation_deadline).substring(0, 10);
                                         dl.value = d;
                                     }
+                                    const neg = lastRow.querySelector('.negotiation-date-input');
+                                    if (neg && item.negotiation_target_date) {
+                                        neg.value = String(item.negotiation_target_date).substring(0, 10);
+                                    }
+                                    const savingsIn = lastRow.querySelector('.renegotiated-savings-input');
+                                    if (savingsIn && item.renegotiated_annual_savings) {
+                                        const savingsN = Number(item.renegotiated_annual_savings);
+                                        savingsIn.value = savingsN !== 0 ? formatCostInputValue(savingsN) : '';
+                                    }
                                     if (lp && item.last_payment_date) {
                                         const d = String(item.last_payment_date).substring(0, 10);
                                         lp.value = d;
@@ -9081,6 +9108,7 @@ foreach ($team_members_rows as $tmRow) {
                                         }
                                     }
                                     syncRowDeadlineVisibility(lastRow);
+                                    syncRowRenegotiationFields(lastRow);
                                     syncRowCancellationGuidanceVisibility(lastRow);
                                     syncMemberStatusEditability(lastRow);
                                     syncMemberSpendFieldEditability(lastRow);
@@ -9149,6 +9177,8 @@ foreach ($team_members_rows as $tmRow) {
                 const catSel = row.querySelector('.category-select');
                 const visSel = row.querySelector('.visibility-select');
                 const dlIn = row.querySelector('.cancel-deadline-input');
+                const negIn = row.querySelector('.negotiation-date-input');
+                const savingsIn = row.querySelector('.renegotiated-savings-input');
                 const lpIn = row.querySelector('.last-payment-input');
 
                 if (costInput) {
@@ -9177,10 +9207,14 @@ foreach ($team_members_rows as $tmRow) {
                 if (statusSelect) {
                     statusSelect.addEventListener('change', function() {
                         syncRowDeadlineVisibility(row);
+                        syncRowRenegotiationFields(row);
                         syncRowCancellationGuidanceVisibility(row);
                         const newStatus = getRowStatus(row);
                         if (newStatus === 'mark_for_cancellation' && dlIn && !dlIn.value) {
                             dlIn.value = getEndOfCurrentMonthIsoDate();
+                        }
+                        if (newStatus === 'mark_for_renegotiation' && negIn && !negIn.value) {
+                            negIn.value = getEndOfCurrentMonthIsoDate();
                         }
                         calculateAnnualSavings();
                         calculateConfirmedSavings();
@@ -9242,12 +9276,28 @@ foreach ($team_members_rows as $tmRow) {
                         handleCategorySelectChange(row, catSel);
                     });
                 }
-                [dlIn, lpIn].forEach(function(el) {
+                [dlIn, lpIn, negIn].forEach(function(el) {
                     if (el) el.addEventListener('change', function() {
                         markRowDirty(row);
                         autoSave();
                     });
                 });
+                if (savingsIn) {
+                    savingsIn.addEventListener('input', function() {
+                        calculateConfirmedSavings();
+                        markRowDirty(row);
+                        autoSave();
+                    });
+                    savingsIn.addEventListener('blur', function() {
+                        const raw = String(savingsIn.value || '').trim();
+                        if (raw !== '') {
+                            savingsIn.value = formatCostInputValue(parseMoneyInput(raw));
+                        }
+                        calculateConfirmedSavings();
+                        markRowDirty(row);
+                        autoSave();
+                    });
+                }
             }
 
             function updateVendorDrilldownState(row) {
@@ -9517,51 +9567,18 @@ foreach ($team_members_rows as $tmRow) {
                             });
                     });
                 }
-                const projectMembersSaveBtn = document.getElementById('projectMembersSaveBtn');
-                if (projectMembersSaveBtn) {
-                    projectMembersSaveBtn.addEventListener('click', function() {
-                        const projectId = parseInt((document.getElementById('projectMembersProjectSelect') || {}).value, 10) || 0;
-                        const tbody = document.getElementById('projectMembersTableBody');
-                        if (!tbody || !projectId) return;
-                        const memberIds = [];
-                        const memberRoles = {};
-                        tbody.querySelectorAll('tr').forEach(function(row) {
-                            const includeCb = row.querySelector('.project-member-include');
-                            if (!includeCb || !includeCb.checked) return;
-                            const uid = parseInt(row.getAttribute('data-user-id'), 10) || 0;
-                            const roleSel = row.querySelector('.project-member-role-select');
-                            if (uid > 0) {
-                                memberIds.push(uid);
-                                memberRoles[uid] = roleSel ? roleSel.value : 'member';
-                            }
-                        });
-                        postJson({
-                            action: 'save_project_members',
-                            project_id: projectId,
-                            member_ids: memberIds,
-                            member_roles: memberRoles
-                        }).then(function(d) {
-                            if (!d || !d.success) {
-                                showSnackbar((d && d.error) || 'Could not save project managers.', 'error');
-                                return;
-                            }
-                            showSnackbar('Project managers saved. Organization role is unchanged.', 'success');
-                        }).catch(function() {
-                            showSnackbar('Could not save project managers.', 'error');
-                        });
-                    });
-                }
                 document.querySelectorAll('.org-role-save-btn').forEach(function(btn) {
                     btn.addEventListener('click', function() {
                         const memberId = parseInt(btn.getAttribute('data-member-id'), 10) || 0;
                         const row = btn.closest('tr');
                         const roleSel = row ? row.querySelector('.org-member-role-select') : null;
                         const role = roleSel ? roleSel.value : '';
-                        if (!memberId || (role !== 'super_admin' && role !== 'member')) {
+                        const allowedRoles = ['org_admin','finance_admin','project_manager','cost_owner','executive'];
+                        if (!memberId || allowedRoles.indexOf(role) === -1) {
                             return;
                         }
                         if (roleSel && roleSel.options[roleSel.selectedIndex] && roleSel.options[roleSel.selectedIndex].disabled) {
-                            showSnackbar('Cannot demote the last Organization Admin.', 'error');
+                            showSnackbar('Cannot demote the last Org Admin.', 'error');
                             return;
                         }
                         btn.disabled = true;
@@ -9583,15 +9600,6 @@ foreach ($team_members_rows as $tmRow) {
                         });
                     });
                 });
-                document.querySelectorAll('[data-open-modal="appModalProjectMembers"]').forEach(function(btn) {
-                    btn.addEventListener('click', function() {
-                        loadProjectMembersModal();
-                    });
-                });
-                const projectMembersProjectSelect = document.getElementById('projectMembersProjectSelect');
-                if (projectMembersProjectSelect) {
-                    projectMembersProjectSelect.addEventListener('change', loadProjectMembersModal);
-                }
                 const projectWizardForm = document.getElementById('projectWizardForm');
                 if (projectWizardForm) {
                     const startDateInput = document.getElementById('projectWizardStartDate');
@@ -9601,6 +9609,50 @@ foreach ($team_members_rows as $tmRow) {
                     projectWizardForm.addEventListener('submit', function(e) {
                         e.preventDefault();
                         submitProjectWizardForm();
+                    });
+                }
+                const renameProjectBtn = document.getElementById('appRenameProjectBtn');
+                if (renameProjectBtn) {
+                    renameProjectBtn.addEventListener('click', function() {
+                        const sel = document.getElementById('projectSwitcherSelect');
+                        const nameEl = document.getElementById('renameProjectName');
+                        if (nameEl) {
+                            const opt = sel && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex] : null;
+                            nameEl.value = opt ? String(opt.text || '').trim() : '';
+                        }
+                    });
+                }
+                const renameProjectForm = document.getElementById('renameProjectForm');
+                if (renameProjectForm) {
+                    renameProjectForm.addEventListener('submit', function(e) {
+                        e.preventDefault();
+                        const nameEl = document.getElementById('renameProjectName');
+                        const projectName = nameEl ? String(nameEl.value || '').trim() : '';
+                        const projectId = parseInt(currentActiveProjectId || (document.getElementById('projectSwitcherSelect') || {}).value || 0, 10) || 0;
+                        const saveBtn = document.getElementById('renameProjectSaveBtn');
+                        if (!projectId) {
+                            showSnackbar('No active project selected.', 'error');
+                            return;
+                        }
+                        if (!projectName) {
+                            showSnackbar('Project name is required.', 'error');
+                            return;
+                        }
+                        if (saveBtn) saveBtn.disabled = true;
+                        postJson({ action: 'project_rename', project_id: projectId, project_name: projectName })
+                            .then(function(d) {
+                                if (!d || !d.success) {
+                                    showSnackbar((d && d.error) || 'Could not rename project.', 'error');
+                                    if (saveBtn) saveBtn.disabled = false;
+                                    return;
+                                }
+                                showSnackbar('Project renamed.', 'success');
+                                window.location.reload();
+                            })
+                            .catch(function() {
+                                showSnackbar('Could not rename project.', 'error');
+                                if (saveBtn) saveBtn.disabled = false;
+                            });
                     });
                 }
                 const deleteProjectBtn = document.getElementById('appDeleteProjectBtn');
@@ -10771,6 +10823,7 @@ foreach ($team_members_rows as $tmRow) {
     <?php
     $expense_visibility_notice = 'Please note that upon linking QBO to Savvy Saver, expenses will be visible to users. Review and remove any sensitive records before inviting managers to the project.';
     ?>
+    <?php if ($can_invite_users): ?>
     <div class="app-modal-overlay" id="appModalMembersInvite" role="dialog" aria-modal="true" aria-labelledby="appModalMembersInviteTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
@@ -10779,7 +10832,7 @@ foreach ($team_members_rows as $tmRow) {
             </div>
             <div class="app-modal-body">
                 <p style="margin:0 0 10px;color:#4b5563;font-size:14px;">
-                    Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> managers
+                    Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> users
                 </p>
                 <p class="privacy-notice"><?php echo htmlspecialchars($expense_visibility_notice); ?></p>
                 <div class="invite-block">
@@ -10790,12 +10843,16 @@ foreach ($team_members_rows as $tmRow) {
                             <input type="email" name="email" required placeholder="user@company.com" style="min-width:200px;">
                         </label>
                         <label style="display:grid;gap:6px;font-size:14px;">
-                            <span>Organization role</span>
+                            <span>Role</span>
                             <select name="invite_role" class="app-submenu-select">
-                                <option value="member" selected><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel('member')); ?></option>
-                                <?php if (!empty($can_elevate_org_roles)): ?>
-                                <option value="super_admin"><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel('super_admin')); ?></option>
-                                <?php endif; ?>
+                                <?php
+                                $inviteDefault = in_array(\CostSavings\OrgRole::ROLE_COST_OWNER, $assignable_roles, true)
+                                    ? \CostSavings\OrgRole::ROLE_COST_OWNER
+                                    : ($assignable_roles[0] ?? \CostSavings\OrgRole::ROLE_COST_OWNER);
+                                foreach ($assignable_roles as $ar):
+                                ?>
+                                <option value="<?php echo htmlspecialchars($ar); ?>"<?php echo $ar === $inviteDefault ? ' selected' : ''; ?>><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel($ar)); ?></option>
+                                <?php endforeach; ?>
                             </select>
                         </label>
                         <div>
@@ -10806,64 +10863,22 @@ foreach ($team_members_rows as $tmRow) {
             </div>
         </div>
     </div>
-
-    <?php if ($is_org_admin): ?>
-    <div class="app-modal-overlay" id="appModalProjectMembers" role="dialog" aria-modal="true" aria-labelledby="appModalProjectMembersTitle" aria-hidden="true">
-        <div class="app-modal" tabindex="-1" style="max-width:720px;">
-            <div class="app-modal-header">
-                <h2 id="appModalProjectMembersTitle">Project managers &amp; roles</h2>
-                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
-            </div>
-            <div class="app-modal-body">
-                <p style="margin:0 0 12px;color:#4b5563;font-size:14px;line-height:1.5;">
-                    Assign organization members to the selected project with a <strong>project</strong> role only.
-                    These roles do not change the organization role shown in Manage Managers.
-                    Project super admins see all vendors (including confidential); project managers see public rows plus confidential rows they manage.
-                </p>
-                <label style="display:grid;gap:6px;font-size:14px;max-width:360px;margin-bottom:12px;">
-                    <span>Project</span>
-                    <select id="projectMembersProjectSelect" class="app-submenu-select"></select>
-                </label>
-                <div class="members-table-wrap">
-                    <table class="members-table">
-                        <thead>
-                            <tr>
-                                <th>Include</th>
-                                <th>Name</th>
-                                <th>Email</th>
-                                <th>Project role</th>
-                            </tr>
-                        </thead>
-                        <tbody id="projectMembersTableBody">
-                            <tr><td colspan="4">Loading…</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-                <div style="margin-top:14px;">
-                    <button type="button" id="projectMembersSaveBtn">Save project managers</button>
-                </div>
-            </div>
-        </div>
-    </div>
     <?php endif; ?>
 
+    <?php if ($can_manage_users): ?>
     <div class="app-modal-overlay" id="appModalMembersManage" role="dialog" aria-modal="true" aria-labelledby="appModalMembersManageTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1" style="max-width:960px;">
             <div class="app-modal-header">
-                <h2 id="appModalMembersManageTitle">Manage Managers</h2>
+                <h2 id="appModalMembersManageTitle">Manage users</h2>
                 <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
             </div>
             <div class="app-modal-body">
                 <p style="margin:0 0 10px;color:#4b5563;font-size:14px;line-height:1.5;">
-                    Organization membership and <strong>organization</strong> role only. Project access and project roles are set under Managers → Project managers.
-                    <?php if (!empty($can_elevate_org_roles)): ?>
-                    As an Organization Admin, change another member’s role with the dropdown in the Organization role column, then click <strong>Save</strong>.
-                    <?php else: ?>
-                    Only an Organization Admin can change organization roles.
-                    <?php endif; ?>
+                    Each user has one organization role that controls access across all projects.
+                    Change another user’s role with the dropdown, then click <strong>Save</strong>.
                 </p>
                 <p style="margin:0 0 10px;color:#4b5563;font-size:14px;">
-                    Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> managers
+                    Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> users
                 </p>
                 <div class="members-table-wrap">
                     <table class="members-table">
@@ -10871,43 +10886,45 @@ foreach ($team_members_rows as $tmRow) {
                             <tr>
                                 <th>Name</th>
                                 <th>Email</th>
-                                <th>Organization role</th>
+                                <th>Role</th>
                                 <th>Status</th>
-                                <?php if ($is_org_admin): ?>
                                 <th>Action</th>
-                                <?php endif; ?>
                             </tr>
                         </thead>
                         <tbody>
-                            <?php $members_colspan = $is_org_admin ? 5 : 4; ?>
                             <?php if (empty($team_members_rows)): ?>
-                            <tr><td colspan="<?php echo (int) $members_colspan; ?>">No managers in this organization yet.</td></tr>
+                            <tr><td colspan="5">No users in this organization yet.</td></tr>
                             <?php else: ?>
                             <?php foreach ($team_members_rows as $tm): ?>
                             <?php
                                 $member_is_disabled = !empty($tm['is_disabled']);
-                                $member_role = (string) ($tm['role'] ?? 'member');
+                                $member_role = \CostSavings\OrgRole::normalize((string) ($tm['role'] ?? 'executive'));
                                 $member_id = (int) ($tm['id'] ?? 0);
-                                $member_is_org_admin = \CostSavings\OrgRole::isSuperAdmin($member_role);
+                                $member_is_org_admin = \CostSavings\OrgRole::isOrgAdmin($member_role);
                                 $is_self = $session_user_id > 0 && $member_id === $session_user_id;
-                                $can_edit_org_role = $can_elevate_org_roles && !$is_self && !$member_is_disabled;
+                                $can_edit_this_role = !$is_self && !$member_is_disabled
+                                    && \CostSavings\OrgRole::canAssign($org_role, $member_role);
                                 $block_demote_last_admin = $member_is_org_admin && $org_admin_count <= 1;
+                                $can_disable_this = !$is_self
+                                    && \CostSavings\OrgRole::canAssign($org_role, $member_role)
+                                    && !($member_is_org_admin && $org_admin_count <= 1 && !$member_is_disabled);
                             ?>
                             <tr data-member-id="<?php echo $member_id; ?>">
                                 <td><?php echo htmlspecialchars($tm['display_name'] ?? $tm['username'] ?? '—'); ?></td>
                                 <td><?php echo htmlspecialchars($tm['email'] ?? ''); ?></td>
                                 <td class="org-member-role-cell">
-                                    <?php if ($can_edit_org_role): ?>
+                                    <?php if ($can_edit_this_role): ?>
                                     <div class="org-member-role-edit">
-                                        <select class="org-member-role-select" data-member-id="<?php echo $member_id; ?>" data-initial-role="<?php echo htmlspecialchars($member_role); ?>" aria-label="Organization role"<?php echo $block_demote_last_admin ? ' title="Cannot demote the last Organization Admin"' : ''; ?>>
-                                            <option value="member"<?php echo !$member_is_org_admin ? ' selected' : ''; ?><?php echo $block_demote_last_admin ? ' disabled' : ''; ?>><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel('member')); ?></option>
-                                            <option value="super_admin"<?php echo $member_is_org_admin ? ' selected' : ''; ?>><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel('super_admin')); ?></option>
+                                        <select class="org-member-role-select" data-member-id="<?php echo $member_id; ?>" data-initial-role="<?php echo htmlspecialchars($member_role); ?>" aria-label="Role"<?php echo $block_demote_last_admin ? ' title="Cannot demote the last Org Admin"' : ''; ?>>
+                                            <?php foreach ($assignable_roles as $ar): ?>
+                                            <option value="<?php echo htmlspecialchars($ar); ?>"<?php echo $member_role === $ar ? ' selected' : ''; ?><?php echo ($block_demote_last_admin && $ar !== \CostSavings\OrgRole::ROLE_ORG_ADMIN) ? ' disabled' : ''; ?>><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel($ar)); ?></option>
+                                            <?php endforeach; ?>
                                         </select>
                                         <button type="button" class="member-action-btn org-role-save-btn" data-member-id="<?php echo $member_id; ?>">Save role</button>
                                     </div>
                                     <?php else: ?>
                                     <span class="org-member-role-label"><?php echo htmlspecialchars(\CostSavings\OrgRole::orgLabel($member_role)); ?></span>
-                                    <?php if ($can_elevate_org_roles && $is_self): ?>
+                                    <?php if ($is_self): ?>
                                     <div style="font-size:12px;color:#6b7280;margin-top:4px;">Your role (cannot change here)</div>
                                     <?php endif; ?>
                                     <?php endif; ?>
@@ -10919,9 +10936,8 @@ foreach ($team_members_rows as $tmRow) {
                                     <span class="member-status-pill member-status-pill--active">Active</span>
                                     <?php endif; ?>
                                 </td>
-                                <?php if ($is_org_admin): ?>
                                 <td>
-                                    <?php if (!$member_is_org_admin): ?>
+                                    <?php if ($can_disable_this): ?>
                                     <form method="post" style="margin:0;">
                                         <input type="hidden" name="action" value="toggle_member_disabled">
                                         <input type="hidden" name="member_id" value="<?php echo $member_id; ?>">
@@ -10932,7 +10948,6 @@ foreach ($team_members_rows as $tmRow) {
                                     <span>—</span>
                                     <?php endif; ?>
                                 </td>
-                                <?php endif; ?>
                             </tr>
                             <?php endforeach; ?>
                             <?php endif; ?>
@@ -10942,6 +10957,7 @@ foreach ($team_members_rows as $tmRow) {
             </div>
         </div>
     </div>
+    <?php endif; ?>
 
     <?php if ($can_create_projects): ?>
     <div class="app-modal-overlay" id="appModalProjectWizard" role="dialog" aria-modal="true" aria-labelledby="appModalProjectWizardTitle" aria-hidden="true">
@@ -10968,6 +10984,26 @@ foreach ($team_members_rows as $tmRow) {
                     <div style="display:flex;gap:8px;justify-content:flex-end;">
                         <button type="button" class="btn-secondary app-modal-close project-wizard-cancel-btn">Cancel</button>
                         <button type="submit">Create</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="app-modal-overlay" id="appModalRenameProject" role="dialog" aria-modal="true" aria-labelledby="appModalRenameProjectTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalRenameProjectTitle">Rename project</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <form id="renameProjectForm" style="display:grid;gap:12px;">
+                    <label style="display:grid;gap:6px;font-size:14px;">
+                        <span>Project name</span>
+                        <input type="text" id="renameProjectName" required maxlength="255" placeholder="Project name" style="min-width:280px;">
+                    </label>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                        <button type="button" class="btn-secondary app-modal-close">Cancel</button>
+                        <button type="submit" id="renameProjectSaveBtn">Save</button>
                     </div>
                 </form>
             </div>
@@ -11215,7 +11251,7 @@ foreach ($team_members_rows as $tmRow) {
                     These settings apply to <strong><?php echo htmlspecialchars($active_org_name); ?></strong>, including QuickBooks connection.
                     To import vendors into the current project, use <strong>Data → Sync with QBO</strong>.
                 </p>
-                <?php if (!empty($can_elevate_org_roles)): ?>
+                <?php if (!empty($can_rename_org)): ?>
                 <div class="settings-block" style="margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid #e5e7eb;">
                     <label style="display:grid;gap:6px;font-size:14px;max-width:420px;">
                         <span>Organization name</span>
@@ -11229,7 +11265,7 @@ foreach ($team_members_rows as $tmRow) {
                 <div class="settings-block">
                     <form method="POST" style="display:grid;gap:10px;">
                         <input type="hidden" name="action" value="save_reminder_settings">
-                        <?php if ($is_org_admin): ?>
+                        <?php if ($can_manage_users): ?>
                         <label><input type="checkbox" name="deadline_reminders_enabled" value="1" <?php echo $deadline_reminders_org ? 'checked' : ''; ?>> Email monthly executive summary</label>
                         <label style="display:grid;gap:6px;font-size:14px;">
                             <span>Webhook for notifications</span>
@@ -11257,7 +11293,7 @@ foreach ($team_members_rows as $tmRow) {
                 <div class="settings-block" id="qboSettingsBlock" style="margin-top:18px;padding-top:16px;border-top:1px solid #e5e7eb;">
                     <h3 style="margin:0 0 8px;font-size:16px;">QuickBooks Online</h3>
                     <p style="margin:0 0 12px;font-size:13px;color:#6b7280;line-height:1.45;">
-                        Connect this organization’s QuickBooks company. Only organization super admins can link or sync QBO.
+                        Connect this organization’s QuickBooks company. Only Org Admins and Finance Admins can link or sync QBO.
                         App credentials are configured by Savvy on the server (same developer app for all customers).
                     </p>
                     <p class="privacy-notice"><?php echo htmlspecialchars($expense_visibility_notice); ?></p>
@@ -11459,14 +11495,14 @@ foreach ($team_members_rows as $tmRow) {
                         <option value="">Select action</option>
                         <?php if ($is_admin): ?>
                         <option value="frequency">Update Frequency</option>
-                        <?php endif; ?>
                         <option value="status">Update Status</option>
                         <option value="category">Update Category</option>
-                        <?php if ($is_admin): ?>
                         <option value="visibility">Update Visibility</option>
                         <option value="manager">Update Manager</option>
                         <?php endif; ?>
+                        <?php if (!empty($can_manage_vendors)): ?>
                         <option value="delete">Delete Selected Rows</option>
+                        <?php endif; ?>
                     </select>
                     <div class="bulk-action-controls">
                         <div id="bulkFrequencyWrap" style="display:none;">
@@ -11492,6 +11528,8 @@ foreach ($team_members_rows as $tmRow) {
                                 <option value="keep">Keep</option>
                                 <option value="mark_for_cancellation">Mark for Cancellation</option>
                                 <option value="cancelled">Cancelled</option>
+                                <option value="mark_for_renegotiation">Mark for Renegotiation</option>
+                                <option value="renegotiated">Renegotiated</option>
                             </select>
                         </div>
                         <div id="bulkVisibilityWrap" style="display:none;">

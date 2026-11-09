@@ -15,8 +15,8 @@ function csQboRequireAdminSession(): void
         exit;
     }
     $role = function_exists('sessionOrgRole') ? sessionOrgRole() : (string) ($_SESSION['org_role'] ?? $_SESSION['role'] ?? '');
-    if (!OrgRole::isSuperAdmin($role)) {
-        $_SESSION['error'] = 'Only a super admin can connect QuickBooks.';
+    if (!OrgRole::canConnectQbo($role)) {
+        $_SESSION['error'] = 'Only an Org Admin or Finance Admin can connect QuickBooks.';
         header('Location: ' . (function_exists('publicAppBaseUrl') ? publicAppBaseUrl() : '/') . 'index.php');
         exit;
     }
@@ -99,7 +99,7 @@ function csQboCallback(): void
         if (!empty($_SESSION['user_id']) && $orgId > 0) {
             $uid = (int) $_SESSION['user_id'];
             RoleContext::persistLastOrgId($pdo, $uid, $orgId);
-            $orgRole = RoleContext::orgRole($pdo, $uid, $orgId) ?? OrgRole::ROLE_MEMBER;
+            $orgRole = RoleContext::orgRole($pdo, $uid, $orgId) ?? OrgRole::ROLE_EXECUTIVE;
             $activeProjectId = null;
             if ($projectId > 0 && ProjectService::canAccessProject($pdo, $projectId, $orgId, $uid, $orgRole)) {
                 $activeProjectId = $projectId;

@@ -9,18 +9,25 @@ use PDOException;
 class ProjectService
 {
     /**
+     * All org projects are accessible to any active org member (role is informational only).
+     *
      * @return array<int, array<string,mixed>>
      */
     public static function listForUser(PDO $pdo, int $orgId, int $userId, string $role): array
     {
+        if ($orgId <= 0 || $userId <= 0) {
+            return [];
+        }
+        if (!self::isActiveOrgMember($pdo, $orgId, $userId)) {
+            return [];
+        }
         $st = $pdo->prepare(
-            'SELECT p.id, p.name, p.start_date, p.end_date, p.created_at, pm.role AS member_role
+            'SELECT p.id, p.name, p.start_date, p.end_date, p.created_at
              FROM projects p
-             INNER JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = ?
              WHERE p.org_id = ?
              ORDER BY p.created_at ASC, p.id ASC'
         );
-        $st->execute([$userId, $orgId]);
+        $st->execute([$orgId]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
         return is_array($rows) ? $rows : [];
@@ -35,17 +42,31 @@ class ProjectService
 
     public static function canAccessProject(PDO $pdo, int $projectId, int $orgId, int $userId, string $role): bool
     {
-        if ($projectId <= 0 || $userId <= 0) {
+        if ($projectId <= 0 || $userId <= 0 || $orgId <= 0) {
+            return false;
+        }
+        if (!self::isActiveOrgMember($pdo, $orgId, $userId)) {
             return false;
         }
         $st = $pdo->prepare(
             'SELECT 1
              FROM projects p
-             INNER JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = ?
              WHERE p.id = ? AND p.org_id = ?
              LIMIT 1'
         );
-        $st->execute([$userId, $projectId, $orgId]);
+        $st->execute([$projectId, $orgId]);
+
+        return (bool) $st->fetchColumn();
+    }
+
+    private static function isActiveOrgMember(PDO $pdo, int $orgId, int $userId): bool
+    {
+        $st = $pdo->prepare(
+            'SELECT 1 FROM user_organizations
+             WHERE org_id = ? AND user_id = ? AND is_disabled = 0
+             LIMIT 1'
+        );
+        $st->execute([$orgId, $userId]);
 
         return (bool) $st->fetchColumn();
     }
@@ -78,12 +99,6 @@ class ProjectService
         if ($endDate !== null && $endDate !== '' && $endDate < $startDate) {
             return ['success' => false, 'error' => 'End date cannot be before start date.'];
         }
-        $memberIds = self::filterOrgUsers($pdo, $orgId, $memberIds);
-        if (!in_array($createdByUserId, $memberIds, true)) {
-            $memberIds[] = $createdByUserId;
-        }
-        $memberRoles[$createdByUserId] = OrgRole::ROLE_SUPER_ADMIN;
-
         $pdo->beginTransaction();
         try {
             $st = $pdo->prepare(
@@ -98,7 +113,6 @@ class ProjectService
                 ':created_by' => $createdByUserId,
             ]);
             $projectId = (int) $pdo->lastInsertId();
-            self::assignMembers($pdo, $projectId, $createdByUserId, $memberIds, $memberRoles);
             $pdo->commit();
             return ['success' => true, 'project_id' => $projectId];
         } catch (PDOException $e) {
@@ -145,15 +159,17 @@ class ProjectService
         if ($sessionProjectId !== null && self::canAccessProject($pdo, $sessionProjectId, $orgId, $userId, $role)) {
             return $sessionProjectId;
         }
+        if (!self::isActiveOrgMember($pdo, $orgId, $userId)) {
+            return null;
+        }
         $st = $pdo->prepare(
             'SELECT p.id
              FROM projects p
-             INNER JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = ?
              WHERE p.org_id = ?
              ORDER BY p.created_at ASC, p.id ASC
              LIMIT 1'
         );
-        $st->execute([$userId, $orgId]);
+        $st->execute([$orgId]);
         $id = (int) $st->fetchColumn();
 
         return $id > 0 ? $id : null;
@@ -280,10 +296,10 @@ class ProjectService
             return ['success' => false, 'error' => 'Invalid source or target project.'];
         }
         $email = self::userEmail($pdo, $actingUserId);
-        $visibilityFilter = OrgRole::isSuperAdmin($actingRole) ? '' : ' AND visibility = \'public\'';
+        $visibilityFilter = OrgRole::canViewFullGrid($actingRole) ? '' : ' AND visibility = \'public\'';
         $sql = 'INSERT INTO cost_calculator_items
-            (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
-            SELECT org_id, :to_project_id, :acting_user_id, :acting_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date
+            (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date, negotiation_target_date, renegotiated_annual_savings)
+            SELECT org_id, :to_project_id, :acting_user_id, :acting_email, manager_user_id, vendor_name, cost_per_period, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date, negotiation_target_date, renegotiated_annual_savings
             FROM cost_calculator_items
             WHERE org_id = :org_id AND project_id = :from_project_id' . $visibilityFilter;
         try {

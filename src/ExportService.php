@@ -20,7 +20,8 @@ class ExportService
         $sh->setTitle('Vendors');
         $rows = [[
             'Vendor', 'Cost per period', 'Frequency', 'Annual cost', 'Status',
-            'Category', 'Visibility', 'Manager ID', 'Purpose', 'Cancel deadline', 'Last payment',
+            'Category', 'Visibility', 'Manager ID', 'Purpose', 'Cancel deadline',
+            'Negotiation target date', 'Renegotiated annual savings', 'Last payment',
         ]];
         foreach ($items as $it) {
             $status = isset($it['status']) && $it['status'] !== ''
@@ -37,6 +38,8 @@ class ExportService
                 $it['manager_user_id'] ?? '',
                 VendorPurposeService::stripAiPurposeUiPrefix((string) ($it['purpose_of_subscription'] ?? $it['notes'] ?? '')),
                 $it['cancellation_deadline'] ?? '',
+                $it['negotiation_target_date'] ?? '',
+                $it['renegotiated_annual_savings'] ?? '',
                 $it['last_payment_date'] ?? '',
             ];
         }
@@ -87,6 +90,15 @@ class ExportService
         $pendingCancel = 0.0;
         $confirmed = 0.0;
         foreach ($items as $it) {
+            $status = isset($it['status']) && $it['status'] !== ''
+                ? VendorService::normalizeStatus($it['status'])
+                : VendorService::resolveStatusFromItem(is_array($it) ? $it : []);
+            if ($status === VendorService::STATUS_RENEGOTIATED) {
+                $savings = (float) ($it['renegotiated_annual_savings'] ?? 0);
+                if ($savings > 0) {
+                    $confirmed += $savings;
+                }
+            }
             $freq = VendorService::normalizeFrequencyValue($it['frequency'] ?? '');
             if ($freq === 'irregular') {
                 continue;
@@ -97,9 +109,6 @@ class ExportService
                 continue;
             }
             $totalAnnual += $a;
-            $status = isset($it['status']) && $it['status'] !== ''
-                ? VendorService::normalizeStatus($it['status'])
-                : VendorService::resolveStatusFromItem(is_array($it) ? $it : []);
             if ($status === VendorService::STATUS_MARK) {
                 $pendingCancel += $a;
             } elseif ($status === VendorService::STATUS_CANCELLED) {

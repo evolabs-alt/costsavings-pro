@@ -131,7 +131,7 @@ class CategoryService
         if ($projectId <= 0) {
             return [];
         }
-        $visibilityFilter = OrgRole::isSuperAdmin($role) ? '' : ' AND cci.visibility = \'public\'';
+        $visibilityFilter = OrgRole::canViewFullGrid($role) ? '' : ' AND cci.visibility = \'public\'';
         $sql = 'SELECT cci.vendor_name, pc.name AS category_name
                 FROM cost_calculator_items cci
                 INNER JOIN project_categories pc ON pc.id = cci.category_id AND pc.project_id = cci.project_id

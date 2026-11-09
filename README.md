@@ -4,7 +4,7 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
 
 ## Features
 
-- **Username + password login** — Sessions store `user_id`, `org_id`, and roles (`super_admin` / `member` at org and project scope). Invitation email via Gmail API OAuth ([includes/mail.php](includes/mail.php) → `sendInviteEmail`).
+- **Username + password login** — Sessions store `user_id`, `org_id`, and a single org role (`org_admin` / `finance_admin` / `project_manager` / `cost_owner` / `executive`). Invitation email via Gmail API OAuth ([includes/mail.php](includes/mail.php) → `sendInviteEmail`).
 - **Organizations** — Members invite teammates by email; registration completes at [public/register.php](public/register.php). Super admins create/delete projects and manage QuickBooks.
 - **Vendor grid** — Manager assignment, public/confidential visibility, purpose of subscription, cancellation deadline, last payment date; auto-save to `cost_calculator_items` (PDO / [src/VendorService.php](src/VendorService.php)). Members edit public rows and confidential rows they manage; project super admins see all rows.
 - **CSV import** — QuickBooks “Transaction Detail by Account” exports (primary): upload shows a checklist of GL account sections; only payees (Name column) under selected accounts are imported, with account stored on raw transactions ([src/CsvImport.php](src/CsvImport.php)). Legacy “Transaction List by Vendor” CSVs still import in one step without the account picker. Custom column-mapped CSV is also supported.

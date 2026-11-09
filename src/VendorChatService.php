@@ -752,7 +752,7 @@ class VendorChatService
      */
     private static function vendorItemIdsByNormalizedName(PDO $pdo, int $orgId, int $projectId, string $role): array
     {
-        $visibilityFilter = OrgRole::isSuperAdmin($role) ? '' : ' AND visibility = \'public\'';
+        $visibilityFilter = OrgRole::canViewFullGrid($role) ? '' : ' AND visibility = \'public\'';
         $st = $pdo->prepare(
             'SELECT id, vendor_name FROM cost_calculator_items
              WHERE org_id = ? AND project_id = ?' . $visibilityFilter
@@ -785,7 +785,7 @@ class VendorChatService
             return null;
         }
 
-        if (OrgRole::isSuperAdmin($role)) {
+        if (!OrgRole::usesAssignedVisibilityFilter($role)) {
             $sql = 'SELECT id, vendor_name, visibility, manager_user_id
                     FROM cost_calculator_items
                     WHERE id = :id AND org_id = :oid AND project_id = :pid

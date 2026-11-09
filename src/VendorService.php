@@ -13,6 +13,8 @@ class VendorService
     public const STATUS_KEEP = 'keep';
     public const STATUS_MARK = 'mark_for_cancellation';
     public const STATUS_CANCELLED = 'cancelled';
+    public const STATUS_RENEGOTIATE = 'mark_for_renegotiation';
+    public const STATUS_RENEGOTIATED = 'renegotiated';
 
     /**
      * @return array<int, string>
@@ -26,6 +28,8 @@ class VendorService
             self::STATUS_KEEP,
             self::STATUS_MARK,
             self::STATUS_CANCELLED,
+            self::STATUS_RENEGOTIATE,
+            self::STATUS_RENEGOTIATED,
         ];
     }
 
@@ -63,6 +67,12 @@ class VendorService
             case 'cancelled_confirmed':
             case 'confirmed_cancelled':
                 return self::STATUS_CANCELLED;
+            case self::STATUS_RENEGOTIATE:
+            case 'mark_renegotiation':
+            case 'renegotiate':
+                return self::STATUS_RENEGOTIATE;
+            case self::STATUS_RENEGOTIATED:
+                return self::STATUS_RENEGOTIATED;
         }
         return self::STATUS_PENDING;
     }
@@ -150,6 +160,10 @@ class VendorService
                 return 'Mark for Cancellation';
             case self::STATUS_CANCELLED:
                 return 'Cancelled';
+            case self::STATUS_RENEGOTIATE:
+                return 'Mark for Renegotiation';
+            case self::STATUS_RENEGOTIATED:
+                return 'Renegotiated';
         }
         return 'Pending';
     }
@@ -176,7 +190,7 @@ class VendorService
      */
     public static function loadVisibleItems(PDO $pdo, int $userId, int $orgId, int $projectId, string $role): array
     {
-        if (OrgRole::isSuperAdmin($role)) {
+        if (!OrgRole::usesAssignedVisibilityFilter($role)) {
             $sql = 'SELECT cci.*, pc.name AS category_name
                 FROM cost_calculator_items cci
                 LEFT JOIN project_categories pc ON pc.id = cci.category_id AND pc.project_id = cci.project_id
@@ -184,7 +198,7 @@ class VendorService
             $stmt = $pdo->prepare($sql);
             $stmt->execute([':oid' => $orgId, ':pid' => $projectId]);
         } else {
-            // Member: public rows plus confidential rows they manage.
+            // Cost Owner: public rows plus confidential rows they manage.
             $sql = 'SELECT cci.*, pc.name AS category_name
                 FROM cost_calculator_items cci
                 LEFT JOIN project_categories pc ON pc.id = cci.category_id AND pc.project_id = cci.project_id
@@ -260,6 +274,10 @@ class VendorService
             'account' => isset($row['account']) && $row['account'] !== null && trim((string) $row['account']) !== ''
                 ? trim((string) $row['account']) : null,
             'cancellation_deadline' => $row['cancellation_deadline'] ?? null,
+            'negotiation_target_date' => $row['negotiation_target_date'] ?? null,
+            'renegotiated_annual_savings' => isset($row['renegotiated_annual_savings']) && $row['renegotiated_annual_savings'] !== null && $row['renegotiated_annual_savings'] !== ''
+                ? self::jsonSafeFloat($row['renegotiated_annual_savings'])
+                : null,
             'last_payment_date' => $row['last_payment_date'] ?? null,
         ];
     }
@@ -368,7 +386,7 @@ class VendorService
 
         $pdo->beginTransaction();
         try {
-            if (!OrgRole::isSuperAdmin($actingRole)) {
+            if (!OrgRole::canManageVendorStructure($actingRole)) {
                 $pdo->rollBack();
 
                 return ['success' => false, 'error' => 'Save failed'];
@@ -392,11 +410,11 @@ class VendorService
             $savedIds = [];
 
             $ins = $pdo->prepare(
-                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, category_id, vendor_name, cost_per_period, amount_min, amount_max, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, category_id, vendor_name, cost_per_period, amount_min, amount_max, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date, negotiation_target_date, renegotiated_annual_savings)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $upd = $pdo->prepare(
-                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, category_id=?, vendor_name=?, cost_per_period=?, amount_min=?, amount_max=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?
+                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, category_id=?, vendor_name=?, cost_per_period=?, amount_min=?, amount_max=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?, negotiation_target_date=?, renegotiated_annual_savings=?
                  WHERE id=? AND org_id=? AND project_id=?'
             );
 
@@ -421,6 +439,7 @@ class VendorService
                 $categoryId = CategoryService::resolveCategoryIdFromItem($pdo, $orgId, $projectId, $item);
                 $deadline = self::normDate($item['cancellation_deadline'] ?? null);
                 $lastPay = self::normDate($item['last_payment_date'] ?? null);
+                [$negotiationDate, $renegotiatedSavings] = self::resolveRenegotiationFields($item);
                 [$amountMin, $amountMax] = self::resolveAmountRangeFromItem($item);
                 $frequency = self::normalizeFrequencyValue($item['frequency'] ?? '');
 
@@ -454,6 +473,8 @@ class VendorService
                         $purpose,
                         $deadline,
                         $lastPay,
+                        $negotiationDate,
+                        $renegotiatedSavings,
                         $rowId,
                         $orgId,
                         $projectId,
@@ -480,6 +501,8 @@ class VendorService
                         $purpose,
                         $deadline,
                         $lastPay,
+                        $negotiationDate,
+                        $renegotiatedSavings,
                     ]);
                     $newId = (int) $pdo->lastInsertId();
                     if ($newId > 0) {
@@ -514,8 +537,8 @@ class VendorService
     }
 
     /**
-     * Member save: union of former admin + member powers — create rows; edit spend/manager/visibility
-     * on public rows and confidential rows they manage.
+     * Cost Owner save: edit spend/manager/visibility/status/frequency on public rows and
+     * confidential rows they manage. Cannot add, delete, or rename vendor rows.
      *
      * @param array<int, array<string, mixed>> $items
      * @return array{success:bool, error?:string, cancelKeep?:string, saved_ids?:array<int, int>}
@@ -553,16 +576,11 @@ class VendorService
                 $existingManagers[$id] = $existingMgr > 0 ? $existingMgr : null;
             }
 
-            $payloadIds = [];
             $savedIds = [];
             $cc = '';
 
-            $ins = $pdo->prepare(
-                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, category_id, vendor_name, cost_per_period, amount_min, amount_max, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
-            );
             $upd = $pdo->prepare(
-                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, category_id=?, vendor_name=?, cost_per_period=?, amount_min=?, amount_max=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?
+                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, category_id=?, vendor_name=?, cost_per_period=?, amount_min=?, amount_max=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?, negotiation_target_date=?, renegotiated_annual_savings=?
                  WHERE id=? AND org_id=? AND project_id=?'
             );
 
@@ -577,91 +595,49 @@ class VendorService
                 $purpose = $item['purpose_of_subscription'] ?? $item['notes'] ?? '';
                 $vis = ($item['visibility'] ?? 'public') === 'confidential' ? 'confidential' : 'public';
                 $rowId = isset($item['id']) ? (int) $item['id'] : 0;
-                $existingMgr = ($rowId > 0 && array_key_exists($rowId, $existingManagers))
+                if ($rowId <= 0 || !isset($allowedIds[$rowId])) {
+                    $savedIds[] = 0;
+                    continue;
+                }
+                $existingMgr = array_key_exists($rowId, $existingManagers)
                     ? $existingManagers[$rowId]
                     : null;
                 $mgr = self::resolveManagerUserIdForAdminSave($pdo, $orgId, $item, $userId, $existingMgr);
                 $categoryId = CategoryService::resolveCategoryIdFromItem($pdo, $orgId, $projectId, $item);
                 $deadline = self::normDate($item['cancellation_deadline'] ?? null);
                 $lastPay = self::normDate($item['last_payment_date'] ?? null);
+                [$negotiationDate, $renegotiatedSavings] = self::resolveRenegotiationFields($item);
                 [$amountMin, $amountMax] = self::resolveAmountRangeFromItem($item);
                 $frequency = self::normalizeFrequencyValue($item['frequency'] ?? '');
-
-                if ($rowId > 0) {
-                    if (!isset($allowedIds[$rowId])) {
-                        $savedIds[] = 0;
-                        continue;
-                    }
-                    $payloadIds[$rowId] = true;
-                    $vendorName = trim((string) ($item['vendor_name'] ?? ''));
-                    if ($vendorName === ''
-                        && isset($existingVendorNames[$rowId])
-                        && $existingVendorNames[$rowId] !== '') {
-                        $vendorName = $existingVendorNames[$rowId];
-                    }
-                    $upd->execute([
-                        $userId,
-                        $email,
-                        $mgr,
-                        $categoryId,
-                        $vendorName,
-                        (float) ($item['cost_per_period'] ?? 0),
-                        $amountMin,
-                        $amountMax,
-                        $frequency,
-                        (float) ($item['annual_cost'] ?? 0),
-                        $status,
-                        self::cancelKeepToDb($legacy['cancel_keep']),
-                        $legacy['cancelled_status'],
-                        $vis,
-                        $purpose,
-                        $deadline,
-                        $lastPay,
-                        $rowId,
-                        $orgId,
-                        $projectId,
-                    ]);
-                    $savedIds[] = $rowId;
-                } else {
-                    $ins->execute([
-                        $orgId,
-                        $projectId,
-                        $userId,
-                        $email,
-                        $mgr,
-                        $categoryId,
-                        $item['vendor_name'] ?? '',
-                        (float) ($item['cost_per_period'] ?? 0),
-                        $amountMin,
-                        $amountMax,
-                        $frequency,
-                        (float) ($item['annual_cost'] ?? 0),
-                        $status,
-                        self::cancelKeepToDb($legacy['cancel_keep']),
-                        $legacy['cancelled_status'],
-                        $vis,
-                        $purpose,
-                        $deadline,
-                        $lastPay,
-                    ]);
-                    $newId = (int) $pdo->lastInsertId();
-                    if ($newId > 0) {
-                        $payloadIds[$newId] = true;
-                        $savedIds[] = $newId;
-                    } else {
-                        $savedIds[] = 0;
-                    }
-                }
-            }
-
-            // Only delete missing rows on explicit full_sync (e.g. bulk delete).
-            if ($fullSync && count($allowedIds) > 0) {
-                $del = $pdo->prepare('DELETE FROM cost_calculator_items WHERE id = ? AND org_id = ? AND project_id = ?');
-                foreach ($allowedIds as $id => $_unused) {
-                    if (!isset($payloadIds[$id])) {
-                        $del->execute([(int) $id, $orgId, $projectId]);
-                    }
-                }
+                // Cost Owner cannot rename vendors — keep existing name.
+                $vendorName = isset($existingVendorNames[$rowId]) && $existingVendorNames[$rowId] !== ''
+                    ? $existingVendorNames[$rowId]
+                    : trim((string) ($item['vendor_name'] ?? ''));
+                $upd->execute([
+                    $userId,
+                    $email,
+                    $mgr,
+                    $categoryId,
+                    $vendorName,
+                    (float) ($item['cost_per_period'] ?? 0),
+                    $amountMin,
+                    $amountMax,
+                    $frequency,
+                    (float) ($item['annual_cost'] ?? 0),
+                    $status,
+                    self::cancelKeepToDb($legacy['cancel_keep']),
+                    $legacy['cancelled_status'],
+                    $vis,
+                    $purpose,
+                    $deadline,
+                    $lastPay,
+                    $negotiationDate,
+                    $renegotiatedSavings,
+                    $rowId,
+                    $orgId,
+                    $projectId,
+                ]);
+                $savedIds[] = $rowId;
             }
 
             $pdo->commit();
@@ -689,6 +665,37 @@ class VendorService
     }
 
     /**
+     * @param array<string, mixed> $item
+     * @return array{0:?string,1:?float}
+     */
+    private static function resolveRenegotiationFields(array $item): array
+    {
+        return [
+            self::normDate($item['negotiation_target_date'] ?? null),
+            self::normSavingsAmount($item['renegotiated_annual_savings'] ?? null),
+        ];
+    }
+
+    /**
+     * @param mixed $v
+     */
+    private static function normSavingsAmount($v): ?float
+    {
+        if ($v === null || $v === '') {
+            return null;
+        }
+        if (is_string($v)) {
+            $v = str_replace([',', '$', ' '], '', $v);
+        }
+        if (!is_numeric($v)) {
+            return null;
+        }
+        $n = round((float) $v, 2);
+
+        return $n < 0 ? 0.0 : $n;
+    }
+
+    /**
      * @param array<int, array<string, mixed>> $items
      * @return array<int, array<string, mixed>>
      */
@@ -703,6 +710,10 @@ class VendorService
             $deadline = trim((string) ($item['cancellation_deadline'] ?? ''));
             if ($status === self::STATUS_MARK && $deadline === '') {
                 $items[$i]['cancellation_deadline'] = $defaultDeadline;
+            }
+            $negotiationDate = trim((string) ($item['negotiation_target_date'] ?? ''));
+            if ($status === self::STATUS_RENEGOTIATE && $negotiationDate === '') {
+                $items[$i]['negotiation_target_date'] = $defaultDeadline;
             }
         }
         return $items;
@@ -735,8 +746,8 @@ class VendorService
     {
         $email = self::getUserEmail($pdo, $userId);
         $ins = $pdo->prepare(
-            'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, amount_min, amount_max, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date, account)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+            'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, vendor_name, cost_per_period, amount_min, amount_max, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date, negotiation_target_date, renegotiated_annual_savings, account)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         $n = 0;
         $insertedIds = [];
@@ -762,6 +773,7 @@ class VendorService
                 }
                 $deadline = self::normDate($item['cancellation_deadline'] ?? null);
                 $lastPay = self::normDate($item['last_payment_date'] ?? null);
+                [$negotiationDate, $renegotiatedSavings] = self::resolveRenegotiationFields($item);
                 $account = trim((string) ($item['account'] ?? ''));
                 if ($account === '(No account)') {
                     $account = '';
@@ -789,6 +801,8 @@ class VendorService
                     $purpose,
                     $deadline,
                     $lastPay,
+                    $negotiationDate,
+                    $renegotiatedSavings,
                     $account !== '' ? $account : null,
                 ]);
                 $newId = (int) $pdo->lastInsertId();
@@ -840,7 +854,7 @@ class VendorService
         $updated = 0;
         $applied = 0;
         $appliedIds = [];
-        if (OrgRole::isSuperAdmin($role)) {
+        if (!OrgRole::usesAssignedVisibilityFilter($role)) {
             $stmt = $pdo->prepare(
                 'UPDATE cost_calculator_items
                  SET purpose_of_subscription = ?
@@ -1101,7 +1115,7 @@ class VendorService
         if ($vendorNorm === '') {
             return [];
         }
-        if (!OrgRole::isSuperAdmin($role)) {
+        if (OrgRole::usesAssignedVisibilityFilter($role)) {
             $check = $pdo->prepare(
                 'SELECT 1
                  FROM cost_calculator_items

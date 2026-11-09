@@ -467,13 +467,21 @@ class ReminderService
                 $confirmedSum = 0.0;
                 foreach ($bundle['rows'] as $row) {
                     $status = VendorService::resolveStatusFromRow($row);
+                    $vendor = (string) ($row['vendor_name'] ?? 'Vendor');
+                    if ($status === VendorService::STATUS_RENEGOTIATED) {
+                        $savings = (float) ($row['renegotiated_annual_savings'] ?? 0);
+                        if ($savings > 0) {
+                            $confirmed[] = ['vendor_name' => $vendor, 'annual_cost' => $savings];
+                            $confirmedSum += $savings;
+                        }
+                        continue;
+                    }
                     $freq = VendorService::normalizeFrequencyValue($row['frequency'] ?? '');
                     $cost = (float) ($row['cost_per_period'] ?? 0);
                     $annual = (float) ($row['annual_cost'] ?? 0);
                     if ($freq === 'irregular' || $cost <= 0 || $annual <= 0) {
                         continue;
                     }
-                    $vendor = (string) ($row['vendor_name'] ?? 'Vendor');
                     if ($status === VendorService::STATUS_MARK) {
                         $pending[] = ['vendor_name' => $vendor, 'annual_cost' => $annual];
                         $pendingSum += $annual;
@@ -588,32 +596,39 @@ class ReminderService
     private static function visibleProjectItemsForUser(PDO $pdo, int $userId): array
     {
         $memberships = $pdo->prepare(
-            'SELECT pm.project_id, pm.role, p.org_id, p.name AS project_name,
+            'SELECT uo.org_id, uo.role, p.id AS project_id, p.name AS project_name,
                     o.deadline_reminders_enabled AS org_reminders
-             FROM project_members pm
-             INNER JOIN projects p ON p.id = pm.project_id
-             INNER JOIN organizations o ON o.id = p.org_id
-             WHERE pm.user_id = ?'
+             FROM user_organizations uo
+             INNER JOIN organizations o ON o.id = uo.org_id
+             INNER JOIN projects p ON p.org_id = uo.org_id
+             WHERE uo.user_id = ? AND uo.is_disabled = 0'
         );
         $memberships->execute([$userId]);
         $out = [];
         while ($mem = $memberships->fetch(PDO::FETCH_ASSOC)) {
             $projectId = (int) ($mem['project_id'] ?? 0);
             $orgId = (int) ($mem['org_id'] ?? 0);
-            $role = (string) ($mem['role'] ?? OrgRole::ROLE_MEMBER);
+            $role = OrgRole::normalize((string) ($mem['role'] ?? OrgRole::ROLE_EXECUTIVE));
             if ($projectId <= 0 || $orgId <= 0) {
                 continue;
             }
-            if (OrgRole::isSuperAdmin($role)) {
-                $q = $pdo->prepare('SELECT * FROM cost_calculator_items WHERE org_id = ? AND project_id = ?');
-                $q->execute([$orgId, $projectId]);
-            } else {
+            // Executive: no project emails. Cost Owner: assigned-visibility rows only.
+            // Org Admin / Finance Admin / Project Manager: all rows.
+            if (OrgRole::isExecutive($role)) {
+                continue;
+            }
+            if (OrgRole::isCostOwner($role)) {
                 $q = $pdo->prepare(
                     'SELECT * FROM cost_calculator_items WHERE org_id = ? AND project_id = ? AND (
                         visibility = \'public\' OR (visibility = \'confidential\' AND manager_user_id = ?)
                     )'
                 );
                 $q->execute([$orgId, $projectId, $userId]);
+            } elseif (OrgRole::canReceiveAllProjectEmails($role)) {
+                $q = $pdo->prepare('SELECT * FROM cost_calculator_items WHERE org_id = ? AND project_id = ?');
+                $q->execute([$orgId, $projectId]);
+            } else {
+                continue;
             }
             $projectRows = $q->fetchAll(PDO::FETCH_ASSOC);
             $out[] = [
@@ -923,7 +938,7 @@ class ReminderService
         $body .= '<p><strong>Across your projects:</strong> '
             . $grandPendingCount . ' pending ($' . number_format($grandPendingSum, 2) . ' potential annual)'
             . '; '
-            . $grandConfirmedCount . ' cancelled ($' . number_format($grandConfirmedSum, 2) . ' confirmed annual)'
+            . $grandConfirmedCount . ' confirmed ($' . number_format($grandConfirmedSum, 2) . ' confirmed annual)'
             . '.</p>';
 
         foreach ($projectSections as $section) {
@@ -936,7 +951,7 @@ class ReminderService
                 . count($pending) . '</strong> — $'
                 . number_format((float) $section['pending_sum'], 2) . ' annual</p>';
             $body .= self::buildCappedVendorList($pending);
-            $body .= '<p>Confirmed cancelled: <strong>'
+            $body .= '<p>Confirmed savings: <strong>'
                 . count($confirmed) . '</strong> — $'
                 . number_format((float) $section['confirmed_sum'], 2) . ' annual</p>';
             $body .= self::buildCappedVendorList($confirmed);
