@@ -3543,8 +3543,49 @@ foreach ($team_members_rows as $tmRow) {
         }
 
         .app-inline-name-row.is-editing .app-submenu-current-name,
-        .app-inline-name-row.is-editing .app-inline-icon-btn:not(.app-inline-icon-btn--ok):not(.app-inline-icon-btn--cancel) {
+        .app-inline-name-row.is-editing .app-inline-icon-btn:not(.app-inline-icon-btn--ok):not(.app-inline-icon-btn--cancel),
+        .app-inline-name-row.is-editing .app-switch-btn {
+            display: none !important;
+        }
+
+        .app-inline-rename-input,
+        .app-inline-icon-btn--ok,
+        .app-inline-icon-btn--cancel {
+            display: none !important;
+        }
+
+        .app-current-switch {
+            position: relative;
+            width: 100%;
+        }
+
+        .app-switch-btn {
+            margin-left: auto;
+        }
+
+        .app-switch-btn[hidden] {
+            display: none !important;
+        }
+
+        .app-switch-btn.app-submenu-parent::after {
+            content: none;
             display: none;
+        }
+
+        .app-current-switch.has-nested.is-open > .app-submenu--nested {
+            display: block;
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .app-inline-name-row.is-editing .app-inline-rename-input {
+            display: block !important;
+            flex: 1 1 auto;
+        }
+
+        .app-inline-name-row.is-editing .app-inline-icon-btn--ok,
+        .app-inline-name-row.is-editing .app-inline-icon-btn--cancel {
+            display: inline-flex !important;
         }
 
         .app-inline-rename-input {
@@ -3696,11 +3737,11 @@ foreach ($team_members_rows as $tmRow) {
             list-style: none;
         }
 
-        .app-submenu-parent {
+        .app-submenu-parent:not(.app-switch-btn) {
             width: 100%;
         }
 
-        .app-submenu-parent::after {
+        .app-submenu-parent:not(.app-switch-btn)::after {
             content: '›';
             margin-left: auto;
             font-size: 16px;
@@ -4345,7 +4386,8 @@ foreach ($team_members_rows as $tmRow) {
 
             .app-submenu > .has-nested.is-open > .app-submenu--nested,
             .app-submenu > .has-nested:hover > .app-submenu--nested,
-            .app-submenu > .has-nested:focus-within > .app-submenu--nested {
+            .app-submenu > .has-nested:focus-within > .app-submenu--nested,
+            .app-current-switch.has-nested.is-open > .app-submenu--nested {
                 transform: none;
             }
         }
@@ -4829,31 +4871,52 @@ foreach ($team_members_rows as $tmRow) {
                                 <li role="none">
                                     <div class="app-submenu-item app-submenu-current">
                                         <span class="app-submenu-kicker">Current</span>
-                                        <div class="app-inline-name-row" id="appOrgNameRow">
-                                            <span class="app-submenu-current-name" id="appOrgCurrentName"><?php echo htmlspecialchars($active_org_name); ?></span>
-                                            <input type="text" id="appOrgRenameInput" class="app-inline-rename-input" maxlength="255" hidden aria-label="Organization name">
-                                            <?php if (!empty($can_rename_org)): ?>
-                                            <button type="button" class="app-inline-icon-btn" id="appOrgRenameEditBtn" aria-label="Rename organization" title="Rename organization">
-                                                <span class="material-symbols-outlined" aria-hidden="true">edit</span>
-                                            </button>
-                                            <button type="button" class="app-inline-icon-btn app-inline-icon-btn--ok" id="appOrgRenameSaveBtn" hidden aria-label="Save name" title="Save">
-                                                <span class="material-symbols-outlined" aria-hidden="true">check</span>
-                                            </button>
-                                            <button type="button" class="app-inline-icon-btn app-inline-icon-btn--cancel" id="appOrgRenameCancelBtn" hidden aria-label="Cancel rename" title="Cancel">
-                                                <span class="material-symbols-outlined" aria-hidden="true">close</span>
-                                            </button>
+                                        <div class="app-current-switch has-nested" id="appOrgSwitchNest">
+                                            <div class="app-inline-name-row" id="appOrgNameRow">
+                                                <span class="app-submenu-current-name" id="appOrgCurrentName"><?php echo htmlspecialchars($active_org_name); ?></span>
+                                                <input type="text" id="appOrgRenameInput" class="app-inline-rename-input" maxlength="255" hidden aria-label="Organization name">
+                                                <?php if (!empty($can_rename_org)): ?>
+                                                <button type="button" class="app-inline-icon-btn" id="appOrgRenameEditBtn" aria-label="Rename organization" title="Rename organization">
+                                                    <span class="material-symbols-outlined" aria-hidden="true">edit</span>
+                                                </button>
+                                                <button type="button" class="app-inline-icon-btn app-inline-icon-btn--ok" id="appOrgRenameSaveBtn" hidden aria-label="Save name" title="Save">
+                                                    <span class="material-symbols-outlined" aria-hidden="true">check</span>
+                                                </button>
+                                                <button type="button" class="app-inline-icon-btn app-inline-icon-btn--cancel" id="appOrgRenameCancelBtn" hidden aria-label="Cancel rename" title="Cancel">
+                                                    <span class="material-symbols-outlined" aria-hidden="true">close</span>
+                                                </button>
+                                                <?php endif; ?>
+                                                <?php if ($show_org_switcher): ?>
+                                                <button type="button" class="app-inline-icon-btn app-switch-btn app-submenu-parent" id="appOrgSwitchBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appOrgSwitchSubmenu" aria-label="Switch organization" title="Switch organization">
+                                                    <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
+                                                </button>
+                                                <?php endif; ?>
+                                            </div>
+                                            <?php if ($show_org_switcher): ?>
+                                            <ul class="app-submenu app-submenu--nested" id="appOrgSwitchSubmenu" role="menu" aria-label="Switch organization">
+                                                <?php foreach ($user_orgs as $uo): ?>
+                                                    <?php
+                                                    $uoId = (int) ($uo['id'] ?? 0);
+                                                    if ($uoId < 1 || $uoId === $active_org_id) {
+                                                        continue;
+                                                    }
+                                                    ?>
+                                                <li role="none">
+                                                    <button type="button" role="menuitem" class="app-submenu-item app-switch-option" data-org-id="<?php echo $uoId; ?>">
+                                                        <?php echo htmlspecialchars((string) ($uo['name'] ?? 'Organization')); ?>
+                                                    </button>
+                                                </li>
+                                                <?php endforeach; ?>
+                                            </ul>
+                                            <select id="orgSwitcherSelect" class="app-submenu-select" hidden aria-hidden="true" tabindex="-1">
+                                                <?php foreach ($user_orgs as $uo): ?>
+                                                <option value="<?php echo (int) ($uo['id'] ?? 0); ?>"<?php echo ((int) ($uo['id'] ?? 0) === $active_org_id) ? ' selected' : ''; ?>>
+                                                    <?php echo htmlspecialchars((string) ($uo['name'] ?? 'Organization')); ?>
+                                                </option>
+                                                <?php endforeach; ?>
+                                            </select>
                                             <?php endif; ?>
                                         </div>
-                                        <?php if ($show_org_switcher): ?>
-                                        <label class="app-submenu-label" for="orgSwitcherSelect">Switch</label>
-                                        <select id="orgSwitcherSelect" class="app-submenu-select" aria-label="Switch organization">
-                                            <?php foreach ($user_orgs as $uo): ?>
-                                            <option value="<?php echo (int) ($uo['id'] ?? 0); ?>"<?php echo ((int) ($uo['id'] ?? 0) === $active_org_id) ? ' selected' : ''; ?>>
-                                                <?php echo htmlspecialchars((string) ($uo['name'] ?? 'Organization')); ?>
-                                            </option>
-                                            <?php endforeach; ?>
-                                        </select>
-                                        <?php endif; ?>
                                     </div>
                                 </li>
                                 <li class="app-submenu-divider" role="separator"></li>
@@ -4892,23 +4955,28 @@ foreach ($team_members_rows as $tmRow) {
                                 <li role="none">
                                     <div class="app-submenu-item app-submenu-current">
                                         <span class="app-submenu-kicker">Current</span>
-                                        <div class="app-inline-name-row" id="appProjectNameRow">
-                                            <span class="app-submenu-current-name" id="appProjectCurrentName">Project</span>
-                                            <input type="text" id="appProjectRenameInput" class="app-inline-rename-input" maxlength="255" hidden aria-label="Project name">
-                                            <?php if ($can_create_projects): ?>
-                                            <button type="button" class="app-inline-icon-btn" id="appProjectRenameEditBtn" aria-label="Rename project" title="Rename project">
-                                                <span class="material-symbols-outlined" aria-hidden="true">edit</span>
-                                            </button>
-                                            <button type="button" class="app-inline-icon-btn app-inline-icon-btn--ok" id="appProjectRenameSaveBtn" hidden aria-label="Save name" title="Save">
-                                                <span class="material-symbols-outlined" aria-hidden="true">check</span>
-                                            </button>
-                                            <button type="button" class="app-inline-icon-btn app-inline-icon-btn--cancel" id="appProjectRenameCancelBtn" hidden aria-label="Cancel rename" title="Cancel">
-                                                <span class="material-symbols-outlined" aria-hidden="true">close</span>
-                                            </button>
-                                            <?php endif; ?>
+                                        <div class="app-current-switch has-nested" id="appProjectSwitchNest">
+                                            <div class="app-inline-name-row" id="appProjectNameRow">
+                                                <span class="app-submenu-current-name" id="appProjectCurrentName">Project</span>
+                                                <input type="text" id="appProjectRenameInput" class="app-inline-rename-input" maxlength="255" hidden aria-label="Project name">
+                                                <?php if ($can_create_projects): ?>
+                                                <button type="button" class="app-inline-icon-btn" id="appProjectRenameEditBtn" aria-label="Rename project" title="Rename project">
+                                                    <span class="material-symbols-outlined" aria-hidden="true">edit</span>
+                                                </button>
+                                                <button type="button" class="app-inline-icon-btn app-inline-icon-btn--ok" id="appProjectRenameSaveBtn" hidden aria-label="Save name" title="Save">
+                                                    <span class="material-symbols-outlined" aria-hidden="true">check</span>
+                                                </button>
+                                                <button type="button" class="app-inline-icon-btn app-inline-icon-btn--cancel" id="appProjectRenameCancelBtn" hidden aria-label="Cancel rename" title="Cancel">
+                                                    <span class="material-symbols-outlined" aria-hidden="true">close</span>
+                                                </button>
+                                                <?php endif; ?>
+                                                <button type="button" class="app-inline-icon-btn app-switch-btn app-submenu-parent" id="appProjectSwitchBtn" hidden aria-haspopup="true" aria-expanded="false" aria-controls="appProjectSwitchSubmenu" aria-label="Switch project" title="Switch project">
+                                                    <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
+                                                </button>
+                                            </div>
+                                            <ul class="app-submenu app-submenu--nested" id="appProjectSwitchSubmenu" role="menu" aria-label="Switch project"></ul>
+                                            <select id="projectSwitcherSelect" class="app-submenu-select" hidden aria-hidden="true" tabindex="-1" aria-label="Switch project"></select>
                                         </div>
-                                        <label class="app-submenu-label" for="projectSwitcherSelect">Switch</label>
-                                        <select id="projectSwitcherSelect" class="app-submenu-select" aria-label="Switch project"></select>
                                     </div>
                                 </li>
                                 <?php if ($can_create_projects): ?>
@@ -5234,6 +5302,41 @@ foreach ($team_members_rows as $tmRow) {
                 }).then(function(r) { return r.json(); });
             }
 
+            function rebuildProjectSwitchSubmenu(projects, activeProjectId) {
+                var submenu = document.getElementById('appProjectSwitchSubmenu');
+                var switchBtn = document.getElementById('appProjectSwitchBtn');
+                var nest = document.getElementById('appProjectSwitchNest');
+                var list = Array.isArray(projects) ? projects : [];
+                var activeId = parseInt(activeProjectId || 0, 10) || 0;
+                if (submenu) {
+                    submenu.innerHTML = '';
+                    list.forEach(function(p) {
+                        var pid = parseInt(p.id, 10) || 0;
+                        if (pid < 1 || pid === activeId) return;
+                        var li = document.createElement('li');
+                        li.setAttribute('role', 'none');
+                        var btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.setAttribute('role', 'menuitem');
+                        btn.className = 'app-submenu-item app-switch-option';
+                        btn.setAttribute('data-project-id', String(pid));
+                        btn.textContent = p.name == null ? 'Project' : String(p.name);
+                        li.appendChild(btn);
+                        submenu.appendChild(li);
+                    });
+                }
+                var canSwitch = list.length > 1;
+                if (switchBtn) {
+                    switchBtn.hidden = !canSwitch;
+                    if (!canSwitch) {
+                        switchBtn.setAttribute('aria-expanded', 'false');
+                    }
+                }
+                if (nest && !canSwitch) {
+                    nest.classList.remove('is-open');
+                }
+            }
+
             function loadProjectsIntoMenu() {
                 return postJson({ action: 'project_list' })
                     .then(function(d) {
@@ -5252,12 +5355,108 @@ foreach ($team_members_rows as $tmRow) {
                         });
                         currentActiveProjectId = parseInt(d.active_project_id || 0, 10) || null;
                         updateActiveProjectHeader(sel);
+                        rebuildProjectSwitchSubmenu(d.projects || [], currentActiveProjectId);
                         const hasNoProjects = !Array.isArray(d.projects) || d.projects.length === 0;
                         if (canCreateProjects && (d.onboarding_required || hasNoProjects)) {
                             openAppModal('appModalProjectWizard');
                         }
                     })
                     .catch(function() {});
+            }
+
+            function switchToOrganization(orgId) {
+                var nextOrgId = parseInt(orgId, 10) || 0;
+                if (!nextOrgId) return;
+                var sel = document.getElementById('orgSwitcherSelect');
+                if (sel) sel.value = String(nextOrgId);
+                postJson({ action: 'org_set_active', org_id: nextOrgId })
+                    .then(function(d) {
+                        if (!d || !d.success) {
+                            showSnackbar((d && d.error) || 'Could not switch organization.', 'error');
+                            return;
+                        }
+                        window.location.reload();
+                    })
+                    .catch(function() {
+                        showSnackbar('Could not switch organization.', 'error');
+                    });
+            }
+
+            function switchToProject(projectId, projectName) {
+                var nextProjectId = parseInt(projectId, 10) || 0;
+                if (!nextProjectId) return;
+                if (currentActiveProjectId && nextProjectId === currentActiveProjectId) return;
+                var selectedName = projectName != null && String(projectName).trim() !== ''
+                    ? String(projectName).trim()
+                    : 'project';
+                var sel = document.getElementById('projectSwitcherSelect');
+                if (sel) {
+                    sel.value = String(nextProjectId);
+                    if (sel.selectedIndex >= 0 && sel.options[sel.selectedIndex]) {
+                        selectedName = String(sel.options[sel.selectedIndex].text || selectedName).trim() || selectedName;
+                    }
+                }
+                postJson({ action: 'project_set_active', project_id: nextProjectId })
+                    .then(function(d) {
+                        if (!d || !d.success) {
+                            showSnackbar((d && d.error) || 'Could not switch project.', 'error');
+                            return;
+                        }
+                        currentActiveProjectId = nextProjectId;
+                        updateActiveProjectHeader(selectedName);
+                        rebuildProjectSwitchSubmenu(
+                            Array.prototype.map.call(sel ? sel.options : [], function(opt) {
+                                return { id: opt.value, name: opt.textContent };
+                            }),
+                            currentActiveProjectId
+                        );
+                        loadCalculatorData();
+                        showSnackbar('Switched to ' + selectedName, 'success');
+                        maybePromptQboRevisitSync();
+                    })
+                    .catch(function() {
+                        showSnackbar('Could not switch project.', 'error');
+                    });
+            }
+
+            function closeSwitchNest(fromEl) {
+                var nest = fromEl ? fromEl.closest('.has-nested') : null;
+                if (nest) {
+                    nest.classList.remove('is-open');
+                    var trigger = nest.querySelector('.app-submenu-parent');
+                    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+                }
+                var navItem = fromEl ? fromEl.closest('.app-nav-item.has-submenu') : null;
+                if (navItem) {
+                    navItem.classList.remove('is-open');
+                    var navTrigger = navItem.querySelector('.app-nav-link[aria-controls]');
+                    if (navTrigger) navTrigger.setAttribute('aria-expanded', 'false');
+                }
+            }
+
+            function initSwitchSubmenus() {
+                var orgSub = document.getElementById('appOrgSwitchSubmenu');
+                if (orgSub) {
+                    orgSub.addEventListener('click', function(e) {
+                        var btn = e.target.closest('.app-switch-option[data-org-id]');
+                        if (!btn || !orgSub.contains(btn)) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        closeSwitchNest(btn);
+                        switchToOrganization(btn.getAttribute('data-org-id'));
+                    });
+                }
+                var projectSub = document.getElementById('appProjectSwitchSubmenu');
+                if (projectSub) {
+                    projectSub.addEventListener('click', function(e) {
+                        var btn = e.target.closest('.app-switch-option[data-project-id]');
+                        if (!btn || !projectSub.contains(btn)) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        closeSwitchNest(btn);
+                        switchToProject(btn.getAttribute('data-project-id'), btn.textContent);
+                    });
+                }
             }
 
             function escapeHtml(text) {
@@ -7281,6 +7480,12 @@ foreach ($team_members_rows as $tmRow) {
                         e.stopPropagation();
                     }
                     if (saving) return;
+                    var nest = row.closest('.has-nested');
+                    if (nest) {
+                        nest.classList.remove('is-open');
+                        var switchTrigger = nest.querySelector('.app-switch-btn.app-submenu-parent');
+                        if (switchTrigger) switchTrigger.setAttribute('aria-expanded', 'false');
+                    }
                     priorName = String(nameEl.textContent || '').trim();
                     input.value = priorName;
                     setEditing(true);
@@ -9960,6 +10165,7 @@ foreach ($team_members_rows as $tmRow) {
                 resumePostCreateQboSyncFromOAuth();
                 initNavSubmenus();
                 initInlineNameEditors();
+                initSwitchSubmenus();
                 initPurposeColumnToggle();
                 initStickyToolbarOffset();
                 initVendorPageSizeSelect();
@@ -9971,53 +10177,6 @@ foreach ($team_members_rows as $tmRow) {
                 });
                 syncBulkManagerOptions();
                 syncBulkCategoryOptions();
-                const projectSwitcher = document.getElementById('projectSwitcherSelect');
-                if (projectSwitcher) {
-                    const handleProjectSwitch = function() {
-                        const nextProjectId = parseInt(this.value, 10) || 0;
-                        if (!nextProjectId) return;
-                        if (currentActiveProjectId && nextProjectId === currentActiveProjectId) return;
-                        const selectedName = this.options[this.selectedIndex] ? this.options[this.selectedIndex].text : 'project';
-                        postJson({ action: 'project_set_active', project_id: nextProjectId })
-                            .then(function(d) {
-                                if (!d || !d.success) {
-                                    showSnackbar((d && d.error) || 'Could not switch project.', 'error');
-                                    return;
-                                }
-                                currentActiveProjectId = nextProjectId;
-                                updateActiveProjectHeader(selectedName);
-                                loadCalculatorData();
-                                showSnackbar('Switched to ' + selectedName, 'success');
-                                maybePromptQboRevisitSync();
-                            })
-                            .catch(function() {
-                                showSnackbar('Could not switch project.', 'error');
-                            });
-                    };
-                    // Some browsers commit selection on input; others on change.
-                    projectSwitcher.addEventListener('input', handleProjectSwitch);
-                    projectSwitcher.addEventListener('change', handleProjectSwitch);
-                }
-                const orgSwitcher = document.getElementById('orgSwitcherSelect');
-                if (orgSwitcher) {
-                    const handleOrgSwitch = function() {
-                        const nextOrgId = parseInt(this.value, 10) || 0;
-                        if (!nextOrgId) return;
-                        postJson({ action: 'org_set_active', org_id: nextOrgId })
-                            .then(function(d) {
-                                if (!d || !d.success) {
-                                    showSnackbar((d && d.error) || 'Could not switch organization.', 'error');
-                                    return;
-                                }
-                                window.location.reload();
-                            })
-                            .catch(function() {
-                                showSnackbar('Could not switch organization.', 'error');
-                            });
-                    };
-                    orgSwitcher.addEventListener('input', handleOrgSwitch);
-                    orgSwitcher.addEventListener('change', handleOrgSwitch);
-                }
                 const createOrgForm = document.getElementById('createOrgForm');
                 if (createOrgForm) {
                     createOrgForm.addEventListener('submit', function(e) {
