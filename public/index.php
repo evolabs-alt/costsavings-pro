@@ -5143,8 +5143,8 @@ foreach ($team_members_rows as $tmRow) {
                                     <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalEmailSettings">Email settings</button>
                                 </li>
                                 <li role="none">
-                                    <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings" aria-label="QBO Status: <?php echo $qbo_linked ? 'Linked' : 'Unlinked'; ?>">
-                                        <span>QBO Status</span>
+                                    <button type="button" role="menuitem" class="app-submenu-item" data-open-modal="appModalSettings" aria-label="Connect Organization to QBO: <?php echo $qbo_linked ? 'Linked' : 'Unlinked'; ?>">
+                                        <span>Connect Organization to QBO</span>
                                         <span class="app-status-pill <?php echo $qbo_linked ? 'app-status-pill--linked' : 'app-status-pill--unlinked'; ?>">
                                             <?php echo $qbo_linked ? 'Linked' : 'Unlinked'; ?>
                                         </span>
@@ -5199,7 +5199,7 @@ foreach ($team_members_rows as $tmRow) {
                                 <?php endif; ?>
                                 <?php if ($can_manage_qbo): ?>
                                 <li role="none">
-                                    <button type="button" role="menuitem" class="app-submenu-item" id="appSyncQboBtn">Sync with QBO…</button>
+                                    <button type="button" role="menuitem" class="app-submenu-item" id="appSyncQboBtn">Import QBO Transactions…</button>
                                 </li>
                                 <?php endif; ?>
                                 <li role="none" class="has-nested" id="appExportNavItem">
@@ -12276,7 +12276,7 @@ foreach ($team_members_rows as $tmRow) {
             <div class="app-modal-body">
                 <p style="margin:0 0 14px;font-size:14px;color:#4b5563;line-height:1.5;">
                     QuickBooks settings for <strong><?php echo htmlspecialchars($active_org_name); ?></strong>.
-                    To import vendors into the current project, use <strong>Projects → Sync with QBO</strong>.
+                    To import vendors into the current project, use <strong>Projects → Import QBO Transactions</strong>.
                 </p>
                 <?php if ($can_manage_qbo): ?>
                 <div class="settings-block" style="margin-bottom:18px;">

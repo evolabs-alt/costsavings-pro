@@ -8,7 +8,7 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
 - **Organizations** — Members invite teammates by email; registration completes at [public/register.php](public/register.php). Super admins create/delete projects and manage QuickBooks.
 - **Vendor grid** — Manager assignment, public/confidential visibility, purpose of subscription, cancellation deadline, last payment date; auto-save to `cost_calculator_items` (PDO / [src/VendorService.php](src/VendorService.php)). Members edit public rows and confidential rows they manage; project super admins see all rows.
 - **CSV import** — QuickBooks “Transaction Detail by Account” exports (primary): upload shows a checklist of GL account sections; only payees (Name column) under selected accounts are imported, with account stored on raw transactions ([src/CsvImport.php](src/CsvImport.php)). Legacy “Transaction List by Vendor” CSVs still import in one step without the account picker. Custom column-mapped CSV is also supported.
-- **QuickBooks Online sync** — Super admin connects the company in Settings, then uses Data → **Sync with QBO** to pull a date range via the General Ledger / Transaction List reports (GL account picker, same flow as CSV) ([src/QboService.php](src/QboService.php)).
+- **QuickBooks Online sync** — Super admin connects the company in Settings, then uses Projects → **Import QBO Transactions** to pull a date range via the General Ledger / Transaction List reports (GL account picker, same flow as CSV) ([src/QboService.php](src/QboService.php)).
 - **Exports** — Excel (PhpSpreadsheet) and PDF (Dompdf) for vendor list and executive summary ([src/ExportService.php](src/ExportService.php)).
 - **Email reminders** — Daily cron [public/cron_reminders.php](public/cron_reminders.php) sends branded HTML (Savvy CFO logo + Members login CTA) via **GoHighLevel Conversations API** / LeadConnector:
   - Cancellation deadlines (T−7, day-of, T+7) — one batched email per manager per reminder type (`Savvy Saver | Cancellation deadline…`)
@@ -65,7 +65,7 @@ PHP application for teams to track vendor costs, cancellation intent, and saving
    - Register the redirect URI on the Intuit app.
    - Super admin → Settings → **Connect to QuickBooks** (each customer company authorizes once). App Client ID/Secret are not entered in the UI.
    - Per org: company `realmId` + encrypted refresh token. No Intuit user IDs. Access tokens: process memory only.
-   - Data → **Sync with QBO** → date range → select accounts → import.
+   - Projects → **Import QBO Transactions** → date range → select accounts → import.
 7. **GoHighLevel (reminders):**
    - Set `GHL_API_KEY` (Private Integration Token with Contacts + Conversations scopes).
    - Set `GHL_LOCATION_ID` to the **same location** used by Scorecard Pro.
