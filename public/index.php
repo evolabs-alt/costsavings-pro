@@ -1128,6 +1128,13 @@ foreach ($team_members_rows as $tmRow) {
             background: #f8fafc;
         }
 
+        .vendor-col-filter-option--select-all {
+            font-weight: 600;
+            border-bottom: 1px solid #e9edf4;
+            margin-bottom: 4px;
+            padding-bottom: 8px;
+        }
+
         .vendor-col-filter-option input {
             margin-top: 2px;
             flex-shrink: 0;
@@ -1508,6 +1515,13 @@ foreach ($team_members_rows as $tmRow) {
         .bulk-actions-form {
             display: grid;
             gap: 12px;
+        }
+
+        .bulk-selected-count {
+            margin: 0;
+            font-size: 14px;
+            color: #4b5563;
+            font-weight: 500;
         }
 
         .bulk-actions-form label {
@@ -5263,7 +5277,7 @@ foreach ($team_members_rows as $tmRow) {
                                     <div class="vendor-col-filter-dropdown" data-vendor-filter="category" hidden>
                                         <div class="vendor-col-filter-list"></div>
                                         <div class="vendor-col-filter-actions">
-                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="category">Clear</button>
+                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="category">Clear filter</button>
                                         </div>
                                     </div>
                                 </div>
@@ -5283,7 +5297,7 @@ foreach ($team_members_rows as $tmRow) {
                                     <div class="vendor-col-filter-dropdown" data-vendor-filter="account" hidden>
                                         <div class="vendor-col-filter-list"></div>
                                         <div class="vendor-col-filter-actions">
-                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="account">Clear</button>
+                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="account">Clear filter</button>
                                         </div>
                                     </div>
                                 </div>
@@ -5326,7 +5340,7 @@ foreach ($team_members_rows as $tmRow) {
                                     <div class="vendor-col-filter-dropdown" data-vendor-filter="frequency" hidden>
                                         <div class="vendor-col-filter-list"></div>
                                         <div class="vendor-col-filter-actions">
-                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="frequency">Clear</button>
+                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="frequency">Clear filter</button>
                                         </div>
                                     </div>
                                 </div>
@@ -5355,7 +5369,7 @@ foreach ($team_members_rows as $tmRow) {
                                     <div class="vendor-col-filter-dropdown" data-vendor-filter="manager" hidden>
                                         <div class="vendor-col-filter-list"></div>
                                         <div class="vendor-col-filter-actions">
-                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="manager">Clear</button>
+                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="manager">Clear filter</button>
                                         </div>
                                     </div>
                                 </div>
@@ -5375,7 +5389,7 @@ foreach ($team_members_rows as $tmRow) {
                                     <div class="vendor-col-filter-dropdown" data-vendor-filter="visibility" hidden>
                                         <div class="vendor-col-filter-list"></div>
                                         <div class="vendor-col-filter-actions">
-                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="visibility">Clear</button>
+                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="visibility">Clear filter</button>
                                         </div>
                                     </div>
                                 </div>
@@ -5395,7 +5409,7 @@ foreach ($team_members_rows as $tmRow) {
                                     <div class="vendor-col-filter-dropdown" data-vendor-filter="status" hidden>
                                         <div class="vendor-col-filter-list"></div>
                                         <div class="vendor-col-filter-actions">
-                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="status">Clear</button>
+                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="status">Clear filter</button>
                                         </div>
                                     </div>
                                 </div>
@@ -5418,7 +5432,7 @@ foreach ($team_members_rows as $tmRow) {
                                     <div class="vendor-col-filter-dropdown" data-vendor-filter="chat_unread" hidden>
                                         <div class="vendor-col-filter-list"></div>
                                         <div class="vendor-col-filter-actions">
-                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="chat_unread">Clear</button>
+                                            <button type="button" class="vendor-col-filter-clear" data-vendor-filter="chat_unread">Clear filter</button>
                                         </div>
                                     </div>
                                 </div>
@@ -6372,6 +6386,9 @@ foreach ($team_members_rows as $tmRow) {
                 appModalZCounter += 1;
                 overlay.style.zIndex = String(appModalZCounter);
                 document.body.style.overflow = 'hidden';
+                if (overlay.id === 'appModalBulkActions') {
+                    updateBulkActionsModalSelectedCount();
+                }
                 var focusable = overlay.querySelector('button, [href], input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])');
                 if (focusable) focusable.focus();
             }
@@ -7996,14 +8013,15 @@ foreach ($team_members_rows as $tmRow) {
             let vendorSortDirection = 'asc';
 
             const VENDOR_FILTER_COLS = ['frequency', 'category', 'account', 'manager', 'visibility', 'status', 'chat_unread'];
+            // null = inactive (show all); Set = active allow-list (empty Set = show none)
             let vendorColumnFilters = {
-                frequency: new Set(),
-                category: new Set(),
-                account: new Set(),
-                manager: new Set(),
-                visibility: new Set(),
-                status: new Set(),
-                chat_unread: new Set(),
+                frequency: null,
+                category: null,
+                account: null,
+                manager: null,
+                visibility: null,
+                status: null,
+                chat_unread: null,
             };
             let PROJECT_CATEGORIES = [];
             let pendingCategoryCreateRow = null;
@@ -8012,7 +8030,7 @@ foreach ($team_members_rows as $tmRow) {
 
             let vendorChatUnreadFilterReflowScheduled = false;
             function scheduleVendorTablePaginationIfChatUnreadFilter() {
-                if (!vendorColumnFilters.chat_unread || vendorColumnFilters.chat_unread.size === 0) return;
+                if (vendorColumnFilters.chat_unread === null) return;
                 if (vendorChatUnreadFilterReflowScheduled) return;
                 vendorChatUnreadFilterReflowScheduled = true;
                 window.requestAnimationFrame(function() {
@@ -8048,6 +8066,12 @@ foreach ($team_members_rows as $tmRow) {
             function formatVendorsSelectedLabel(count) {
                 const n = Number(count) || 0;
                 return n === 1 ? '1 vendor selected' : (n + ' vendors selected');
+            }
+
+            function updateBulkActionsModalSelectedCount() {
+                const el = document.getElementById('bulkSelectedCount');
+                if (!el) return;
+                el.textContent = formatVendorsSelectedLabel(getSelectedVendorRows().length);
             }
 
             function getSelectedVendorRows() {
@@ -8175,6 +8199,10 @@ foreach ($team_members_rows as $tmRow) {
                 const body = document.getElementById('bulkConfirmDetails');
                 if (!overlay || !body) return;
                 const isDelete = payload.action === 'delete';
+                const n = Number(selectedCount) || 0;
+                const deleteCountLabel = n === 1
+                    ? 'You are about to permanently delete 1 vendor row.'
+                    : ('You are about to permanently delete ' + n + ' vendor rows.');
                 const dangerIcon = '<svg class="bulk-confirm-danger-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">'
                     + '<circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>'
                     + '<path d="M12 7v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'
@@ -8187,7 +8215,7 @@ foreach ($team_members_rows as $tmRow) {
                         + dangerIcon
                         + '<div class="bulk-confirm-summary-content">'
                         + '<div><strong>Action:</strong> ' + payload.label + '</div>'
-                        + '<div><strong>' + formatVendorsSelectedLabel(selectedCount) + '</strong></div>'
+                        + '<div><strong>' + deleteCountLabel + '</strong></div>'
                         + '<div>This cannot be undone.</div>'
                         + '</div>'
                         + '</div>'
@@ -9178,7 +9206,7 @@ foreach ($team_members_rows as $tmRow) {
 
             function rowMatchesAccountFilter(row) {
                 const selected = vendorColumnFilters.account;
-                if (!selected || !selected.size) return true;
+                if (selected === null) return true;
                 const list = getRowAccountList(row);
                 if (list.length === 0) {
                     return selected.has('__none__');
@@ -9206,27 +9234,27 @@ foreach ($team_members_rows as $tmRow) {
                     const name = (vendorInput ? vendorInput.value : '').trim().toLowerCase();
                     if (name.indexOf(vendorNameSearchQuery) === -1) return false;
                 }
-                if (vendorColumnFilters.frequency.size) {
+                if (vendorColumnFilters.frequency !== null) {
                     if (!vendorColumnFilters.frequency.has(getRowFrequencyValue(row))) return false;
                 }
-                if (vendorColumnFilters.category.size) {
+                if (vendorColumnFilters.category !== null) {
                     if (!vendorColumnFilters.category.has(getRowCategoryFilterKey(row))) return false;
                 }
-                if (vendorColumnFilters.account.size) {
+                if (vendorColumnFilters.account !== null) {
                     if (!rowMatchesAccountFilter(row)) return false;
                 }
-                if (vendorColumnFilters.manager.size) {
+                if (vendorColumnFilters.manager !== null) {
                     if (!vendorColumnFilters.manager.has(getRowManagerFilterKey(row))) return false;
                 }
-                if (vendorColumnFilters.visibility.size) {
+                if (vendorColumnFilters.visibility !== null) {
                     const visSel = row.querySelector('.visibility-select');
                     const vis = visSel ? visSel.value : 'public';
                     if (!vendorColumnFilters.visibility.has(vis)) return false;
                 }
-                if (vendorColumnFilters.status.size) {
+                if (vendorColumnFilters.status !== null) {
                     if (!vendorColumnFilters.status.has(getRowStatus(row))) return false;
                 }
-                if (vendorColumnFilters.chat_unread.size) {
+                if (vendorColumnFilters.chat_unread !== null) {
                     const chatBtn = row.querySelector('.vendor-chat-btn');
                     const unreadRaw = chatBtn ? Number(chatBtn.getAttribute('data-chat-unread')) : 0;
                     const taggedRaw = chatBtn ? Number(chatBtn.getAttribute('data-chat-tagged')) : 0;
@@ -9256,7 +9284,7 @@ foreach ($team_members_rows as $tmRow) {
                     btn.classList.toggle('is-active', vendorNameSearchQuery.length > 0);
                     return;
                 }
-                btn.classList.toggle('is-active', vendorColumnFilters[col].size > 0);
+                btn.classList.toggle('is-active', vendorColumnFilters[col] !== null);
             }
 
             function applyVendorNameSearchFromInput(inputEl) {
@@ -9370,17 +9398,38 @@ foreach ($team_members_rows as $tmRow) {
                     opts.push({ value: 'unread', label: 'Unread' });
                     opts.push({ value: 'tagged', label: 'Tagged' });
                 }
+
+                const filterSet = vendorColumnFilters[col];
+                const inactive = filterSet === null;
+
+                const selectAllLab = document.createElement('label');
+                selectAllLab.className = 'vendor-col-filter-option vendor-col-filter-option--select-all';
+                const selectAllCb = document.createElement('input');
+                selectAllCb.type = 'checkbox';
+                selectAllCb.className = 'vendor-col-filter-select-all';
+                selectAllCb.setAttribute('aria-label', 'Select all');
+                selectAllLab.appendChild(selectAllCb);
+                selectAllLab.appendChild(document.createTextNode('Select all'));
+                listEl.appendChild(selectAllLab);
+
+                let checkedCount = 0;
                 opts.forEach(function(opt) {
                     const labEl = document.createElement('label');
                     labEl.className = 'vendor-col-filter-option';
                     const cb = document.createElement('input');
                     cb.type = 'checkbox';
                     cb.value = opt.value;
-                    cb.checked = vendorColumnFilters[col].has(opt.value);
+                    cb.setAttribute('data-vendor-filter-value', '1');
+                    cb.checked = inactive || filterSet.has(opt.value);
+                    if (cb.checked) checkedCount++;
                     labEl.appendChild(cb);
                     labEl.appendChild(document.createTextNode(opt.label));
                     listEl.appendChild(labEl);
                 });
+
+                const total = opts.length;
+                selectAllCb.checked = inactive || (total > 0 && checkedCount === total);
+                selectAllCb.indeterminate = !inactive && checkedCount > 0 && checkedCount < total;
             }
 
             function initVendorColumnHeaderFilters() {
@@ -9407,21 +9456,43 @@ foreach ($team_members_rows as $tmRow) {
                             btn.setAttribute('aria-expanded', 'true');
                         }
                     });
-                    listEl.addEventListener('change', function() {
-                        vendorColumnFilters[col].clear();
-                        listEl.querySelectorAll('input[type=checkbox]').forEach(function(c) {
-                            if (c.checked) vendorColumnFilters[col].add(c.value);
-                        });
+                    listEl.addEventListener('change', function(e) {
+                        const selectAllCb = listEl.querySelector('input.vendor-col-filter-select-all');
+                        const valueCbs = listEl.querySelectorAll('input[type=checkbox][data-vendor-filter-value]');
+                        if (e.target && e.target.classList.contains('vendor-col-filter-select-all')) {
+                            if (e.target.checked) {
+                                vendorColumnFilters[col] = null;
+                                valueCbs.forEach(function(c) { c.checked = true; });
+                            } else {
+                                vendorColumnFilters[col] = new Set();
+                                valueCbs.forEach(function(c) { c.checked = false; });
+                            }
+                            e.target.indeterminate = false;
+                        } else {
+                            const selected = new Set();
+                            let total = 0;
+                            valueCbs.forEach(function(c) {
+                                total++;
+                                if (c.checked) selected.add(c.value);
+                            });
+                            if (total > 0 && selected.size === total) {
+                                vendorColumnFilters[col] = null;
+                            } else {
+                                vendorColumnFilters[col] = selected;
+                            }
+                            if (selectAllCb) {
+                                selectAllCb.checked = total > 0 && selected.size === total;
+                                selectAllCb.indeterminate = selected.size > 0 && selected.size < total;
+                            }
+                        }
                         applyVendorTablePagination(vendorCurrentPage);
                         updateVendorFilterButtonActive(col);
                     });
                     if (clearBtn) {
                         clearBtn.addEventListener('click', function(e) {
                             e.stopPropagation();
-                            vendorColumnFilters[col].clear();
-                            listEl.querySelectorAll('input[type=checkbox]').forEach(function(c) {
-                                c.checked = false;
-                            });
+                            vendorColumnFilters[col] = null;
+                            populateVendorColumnFilterList(col);
                             applyVendorTablePagination(vendorCurrentPage);
                             updateVendorFilterButtonActive(col);
                         });
@@ -12394,6 +12465,7 @@ foreach ($team_members_rows as $tmRow) {
             </div>
             <div class="app-modal-body">
                 <div class="bulk-actions-form">
+                    <p id="bulkSelectedCount" class="bulk-selected-count" aria-live="polite"></p>
                     <label for="bulkActionType">Choose action</label>
                     <select id="bulkActionType">
                         <option value="">Select action</option>
