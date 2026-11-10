@@ -22,6 +22,14 @@ class QboService
 
     private const ENC_PREFIX = 'qboenc:v1:';
 
+    /** QBO Account classifications omitted from the import account picker. */
+    private const EXCLUDED_ACCOUNT_CLASSIFICATIONS = [
+        'revenue',
+        'asset',
+        'equity',
+        'liability',
+    ];
+
     /**
      * Access tokens live only in request/process memory (volatile). Never persisted.
      * @var array<int, array{access_token:string, expires_at:int, token_type:string, scope:string}>
@@ -747,11 +755,17 @@ class QboService
         $out = [];
         foreach ($counts as $name => $count) {
             $meta = self::resolveAccountMeta($name, $accountTypeMap);
+            $classification = $meta['classification'];
+            if ($classification !== ''
+                && in_array(strtolower($classification), self::EXCLUDED_ACCOUNT_CLASSIFICATIONS, true)
+            ) {
+                continue;
+            }
             $out[] = [
                 'name' => $name,
                 'transaction_count' => $count,
                 'account_type' => $meta['account_type'],
-                'classification' => $meta['classification'],
+                'classification' => $classification,
             ];
         }
 
