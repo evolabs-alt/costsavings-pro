@@ -4194,6 +4194,20 @@ foreach ($team_members_rows as $tmRow) {
             white-space: nowrap;
         }
 
+        .csv-account-meta {
+            flex-shrink: 0;
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            color: var(--color-text-secondary);
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
+        .csv-account-classification {
+            color: var(--color-text-secondary);
+        }
+
         .csv-mapping-form {
             display: flex;
             flex-direction: column;
@@ -6536,6 +6550,7 @@ foreach ($team_members_rows as $tmRow) {
                     var name = (acct && acct.name) ? String(acct.name) : '';
                     var count = parseInt((acct && acct.transaction_count) || 0, 10) || 0;
                     var type = (acct && acct.account_type) ? String(acct.account_type) : '';
+                    var classification = (acct && acct.classification) ? String(acct.classification) : '';
                     if (hasTypes && type !== lastType) {
                         lastType = type;
                         var heading = document.createElement('div');
@@ -6546,15 +6561,22 @@ foreach ($team_members_rows as $tmRow) {
                     var row = document.createElement('div');
                     row.className = 'csv-account-row';
                     var id = 'csvAcct_' + idx;
-                    var typeHtml = type
-                        ? '<span class="csv-account-type">' + aiEscapeHtml(type) + '</span>'
+                    var metaParts = [];
+                    if (classification) {
+                        metaParts.push('<span class="csv-account-classification">' + aiEscapeHtml(classification) + '</span>');
+                    }
+                    if (type) {
+                        metaParts.push('<span class="csv-account-type">' + aiEscapeHtml(type) + '</span>');
+                    }
+                    var metaHtml = metaParts.length
+                        ? '<span class="csv-account-meta">' + metaParts.join('') + '</span>'
                         : '';
                     row.innerHTML =
                         '<input type="checkbox" id="' + id + '" value="" data-txn-count="0">' +
                         '<label for="' + id + '" class="csv-account-row-main">' +
                         '<span class="csv-account-name">' + aiEscapeHtml(name) +
                         ' <span class="csv-account-count">(' + count + ')</span></span>' +
-                        typeHtml + '</label>';
+                        metaHtml + '</label>';
                     var cb = row.querySelector('input');
                     cb.value = name;
                     cb.setAttribute('data-txn-count', String(count));

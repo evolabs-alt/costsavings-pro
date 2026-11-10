@@ -582,9 +582,9 @@ class QboService
     }
 
     /**
-     * Chart of Accounts lookup: lowercase name / number variants → QBO AccountType.
+     * Chart of Accounts lookup: lowercase name / number variants → AccountType + Classification.
      *
-     * @return array<string, string>
+     * @return array<string, array{account_type:string, classification:string}>
      */
     public function fetchAccountTypeMap(int $orgId): array
     {
@@ -607,7 +607,7 @@ class QboService
         $pageSize = 1000;
         $safety = 0;
         do {
-            $sql = 'select Name, FullyQualifiedName, AccountType, AcctNum from Account where Active in (true, false) startposition '
+            $sql = 'select Name, FullyQualifiedName, AccountType, Classification, AcctNum from Account where Active in (true, false) startposition '
                 . $start . ' maxresults ' . $pageSize;
             $url = $apiBase . '/v3/company/' . $realm . '/query?query=' . rawurlencode($sql)
                 . '&minorversion=65';
@@ -675,7 +675,7 @@ class QboService
     }
 
     /**
-     * @param array<string, string> $map
+     * @param array<string, array{account_type:string, classification:string}> $map
      * @param array<string, mixed> $acct
      */
     private function indexAccountType(array &$map, array $acct): void
@@ -684,12 +684,16 @@ class QboService
         if ($type === '') {
             return;
         }
+        $meta = [
+            'account_type' => $type,
+            'classification' => trim((string) ($acct['Classification'] ?? '')),
+        ];
         $name = trim((string) ($acct['Name'] ?? ''));
         $fqn = trim((string) ($acct['FullyQualifiedName'] ?? ''));
         $num = trim((string) ($acct['AcctNum'] ?? ''));
         foreach (self::accountTypeLookupKeys($name, $fqn, $num) as $key) {
             if (!isset($map[$key])) {
-                $map[$key] = $type;
+                $map[$key] = $meta;
             }
         }
     }
@@ -723,8 +727,8 @@ class QboService
 
     /**
      * @param array<int, array{vendor_name:string,transaction_date:string,amount:float,transaction_type:string,account:string,memo:string}> $rows
-     * @param array<string, string> $accountTypeMap lowercase name variants → AccountType
-     * @return array<int, array{name:string, transaction_count:int, account_type:string}>
+     * @param array<string, array{account_type:string, classification:string}|string> $accountTypeMap lowercase name variants → meta
+     * @return array<int, array{name:string, transaction_count:int, account_type:string, classification:string}>
      */
     public static function listAccountsFromRows(array $rows, array $accountTypeMap = []): array
     {
@@ -742,10 +746,12 @@ class QboService
         ksort($counts, SORT_NATURAL | SORT_FLAG_CASE);
         $out = [];
         foreach ($counts as $name => $count) {
+            $meta = self::resolveAccountMeta($name, $accountTypeMap);
             $out[] = [
                 'name' => $name,
                 'transaction_count' => $count,
-                'account_type' => self::resolveAccountType($name, $accountTypeMap),
+                'account_type' => $meta['account_type'],
+                'classification' => $meta['classification'],
             ];
         }
 
@@ -753,16 +759,18 @@ class QboService
     }
 
     /**
-     * @param array<string, string> $typeMap
+     * @param array<string, array{account_type:string, classification:string}|string> $typeMap
+     * @return array{account_type:string, classification:string}
      */
-    public static function resolveAccountType(string $accountName, array $typeMap): string
+    public static function resolveAccountMeta(string $accountName, array $typeMap): array
     {
+        $empty = ['account_type' => '', 'classification' => ''];
         if ($typeMap === []) {
-            return '';
+            return $empty;
         }
         $raw = trim($accountName);
         if ($raw === '' || $raw === '(No account)') {
-            return '';
+            return $empty;
         }
 
         $candidates = [$raw];
@@ -784,12 +792,36 @@ class QboService
 
         foreach ($candidates as $candidate) {
             $key = strtolower($candidate);
-            if (isset($typeMap[$key]) && $typeMap[$key] !== '') {
-                return $typeMap[$key];
+            if (!isset($typeMap[$key])) {
+                continue;
+            }
+            $entry = $typeMap[$key];
+            if (is_array($entry)) {
+                $type = trim((string) ($entry['account_type'] ?? ''));
+                if ($type === '') {
+                    continue;
+                }
+
+                return [
+                    'account_type' => $type,
+                    'classification' => trim((string) ($entry['classification'] ?? '')),
+                ];
+            }
+            $type = trim((string) $entry);
+            if ($type !== '') {
+                return ['account_type' => $type, 'classification' => ''];
             }
         }
 
-        return '';
+        return $empty;
+    }
+
+    /**
+     * @param array<string, array{account_type:string, classification:string}|string> $typeMap
+     */
+    public static function resolveAccountType(string $accountName, array $typeMap): string
+    {
+        return self::resolveAccountMeta($accountName, $typeMap)['account_type'];
     }
 
     /**
