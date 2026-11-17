@@ -152,7 +152,7 @@ function csUpsertGhlContact(array $contact, array $extraTags = []): ?string
  *
  * @param array{email:string, first_name?:string, last_name?:string, display_name?:string} $contact
  */
-function csTagScorecardProMember(array $contact): void
+function csTagSavvySaverMember(array $contact): void
 {
     $email = trim((string) ($contact['email'] ?? ''));
     $first = trim((string) ($contact['first_name'] ?? ''));
@@ -171,16 +171,16 @@ function csTagScorecardProMember(array $contact): void
             'email' => $email,
             'first_name' => $first,
             'last_name' => $last,
-        ], ['scorecard-pro-member']);
+        ], ['member_saver']);
         if ($id === null && function_exists('proLog')) {
-            proLog('ghl_scorecard_pro_member_fail', ['email' => $email]);
+            proLog('ghl_savvy_saver_member_fail', ['email' => $email]);
         } elseif ($id !== null && function_exists('proLog')) {
-            proLog('ghl_scorecard_pro_member_ok', ['email' => $email, 'contact_id' => $id]);
+            proLog('ghl_savvy_saver_member_ok', ['email' => $email, 'contact_id' => $id]);
         }
     } catch (Throwable $e) {
-        error_log('csTagScorecardProMember: ' . $e->getMessage());
+        error_log('csTagSavvySaverMember: ' . $e->getMessage());
         if (function_exists('proLog')) {
-            proLog('ghl_scorecard_pro_member_fail', ['email' => $email, 'error' => $e->getMessage()]);
+            proLog('ghl_savvy_saver_member_fail', ['email' => $email, 'error' => $e->getMessage()]);
         }
     }
 }

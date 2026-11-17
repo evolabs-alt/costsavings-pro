@@ -705,29 +705,9 @@ foreach ($team_members_rows as $tmRow) {
             max-width: 180px;
         }
 
-        .cost-calculator-grid .account-col .account-display,
         .cost-calculator-grid .account-col .account-input {
-            display: block;
             width: 100%;
-            max-width: 170px;
-            font-size: 13px;
-            line-height: 1.3;
-            color: #374151;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            border: 1px solid transparent;
-            background: transparent;
-            padding: 4px 6px;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-
-        .cost-calculator-grid .account-col .account-input:hover,
-        .cost-calculator-grid .account-col .account-input:focus {
-            border-color: #d1d5db;
-            background: #fff;
-            outline: none;
+            min-width: 0;
         }
 
         .cost-calculator-grid .category-col select {
@@ -1882,12 +1862,6 @@ foreach ($team_members_rows as $tmRow) {
 
             .cost-calculator-grid .category-col {
                 display: none;
-            }
-
-            .cost-calculator-grid .account-col .account-display,
-            .cost-calculator-grid .account-col .account-input {
-                font-size: 11px;
-                max-width: 110px;
             }
 
             .cost-calculator-grid .row-status {
@@ -8016,10 +7990,10 @@ foreach ($team_members_rows as $tmRow) {
             function renderVendorRawDataTable(vendorName, rows) {
                 var canAdd = canAddVendorRawTransaction();
                 var html = '<div class="vendor-raw-results" data-vendor-name="' + aiEscapeHtml(vendorName) + '"><table><thead><tr>'
-                    + '<th>Date</th><th class="amount-col">Amount</th><th>Transaction Type</th><th>Account</th><th>Memo/Description</th><th>Imported</th>'
+                    + '<th>Date</th><th class="amount-col">Amount</th><th>Transaction Type</th><th>Memo/Description</th><th>Imported</th>'
                     + '</tr></thead><tbody>';
                 if (!rows.length) {
-                    html += '<tr class="vendor-raw-empty-row"><td colspan="6">No raw transactions found for this vendor yet.</td></tr>';
+                    html += '<tr class="vendor-raw-empty-row"><td colspan="5">No raw transactions found for this vendor yet.</td></tr>';
                 } else {
                     rows.forEach(function(row) {
                         var date = aiEscapeHtml(String(row.transaction_date || ''));
@@ -8029,10 +8003,9 @@ foreach ($team_members_rows as $tmRow) {
                         }
                         var amount = aiEscapeHtml(formatMoneyInteger(amountNum));
                         var type = aiEscapeHtml(String(row.transaction_type || ''));
-                        var account = aiEscapeHtml(String(row.account || ''));
                         var memo = aiEscapeHtml(String(row.memo || ''));
                         var imported = aiEscapeHtml(formatImportTimestamp(row.created_at));
-                        html += '<tr><td>' + date + '</td><td class="amount-col">' + amount + '</td><td>' + type + '</td><td>' + account + '</td><td>' + memo + '</td><td>' + imported + '</td></tr>';
+                        html += '<tr><td>' + date + '</td><td class="amount-col">' + amount + '</td><td>' + type + '</td><td>' + memo + '</td><td>' + imported + '</td></tr>';
                     });
                 }
                 html += '</tbody></table>';
@@ -8070,7 +8043,7 @@ foreach ($team_members_rows as $tmRow) {
                     if (draft) draft.remove();
                     var empty = tbody.querySelector('.vendor-raw-empty-row');
                     if (!empty && !tbody.querySelector('tr')) {
-                        tbody.innerHTML = '<tr class="vendor-raw-empty-row"><td colspan="6">No raw transactions found for this vendor yet.</td></tr>';
+                        tbody.innerHTML = '<tr class="vendor-raw-empty-row"><td colspan="5">No raw transactions found for this vendor yet.</td></tr>';
                     }
                     addBtn.disabled = false;
                     showAddError('');
@@ -8086,7 +8059,6 @@ foreach ($team_members_rows as $tmRow) {
                         + '<td><input type="date" class="vendor-raw-date" required></td>'
                         + '<td class="amount-col"><input type="text" class="vendor-raw-amount" inputmode="decimal" placeholder="0"></td>'
                         + '<td><input type="text" class="vendor-raw-type" placeholder="Type"></td>'
-                        + '<td><input type="text" class="vendor-raw-account" placeholder="Account"></td>'
                         + '<td><input type="text" class="vendor-raw-memo" placeholder="Memo / description"></td>'
                         + '<td><div class="vendor-raw-draft-actions">'
                         + '<span class="vendor-raw-imported-placeholder">—</span>'
@@ -8117,7 +8089,7 @@ foreach ($team_members_rows as $tmRow) {
                         fd.append('transaction_date', dateVal);
                         fd.append('amount', (draft.querySelector('.vendor-raw-amount').value || '').trim());
                         fd.append('transaction_type', (draft.querySelector('.vendor-raw-type').value || '').trim());
-                        fd.append('account', (draft.querySelector('.vendor-raw-account').value || '').trim());
+                        fd.append('account', '');
                         fd.append('memo', (draft.querySelector('.vendor-raw-memo').value || '').trim());
                         fetch(window.location.href, { method: 'POST', body: fd })
                             .then(function(r) { return r.json(); })
@@ -10848,11 +10820,6 @@ foreach ($team_members_rows as $tmRow) {
                     };
                     accountInput.addEventListener('input', function() {
                         accountInput.setAttribute('data-account', String(accountInput.value || '').trim());
-                        markRowDirty(row);
-                        autoSave();
-                        if (!calculatorLoadInProgress) {
-                            applyVendorTablePagination(vendorCurrentPage, { keepRowVisible: row });
-                        }
                     });
                     accountInput.addEventListener('blur', function() {
                         syncAccount();

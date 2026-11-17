@@ -612,8 +612,8 @@ function handleInviteMember() {
     logInviteEvent('invite_saved', ['invitation_id' => $invId, 'org_id' => $orgId, 'email' => $email, 'invite_role' => $inviteRole]);
 
     // Tag immediately so Members login unlocks Savvy Saver before they open Saver.
-    if (function_exists('csTagScorecardProMember')) {
-        csTagScorecardProMember(['email' => $email]);
+    if (function_exists('csTagSavvySaverMember')) {
+        csTagSavvySaverMember(['email' => $email]);
     }
 
     $link = membersAppUrl() . '/register?email=' . rawurlencode($email);
