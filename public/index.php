@@ -921,6 +921,16 @@ foreach ($team_members_rows as $tmRow) {
             font-size: 13px;
         }
 
+        .vendor-raw-results th:first-child,
+        .vendor-raw-results td:first-child {
+            min-width: 12em;
+        }
+
+        .vendor-raw-results .vendor-raw-date {
+            min-width: 12em;
+            width: 12em;
+        }
+
         .vendor-raw-results .vendor-raw-draft-actions {
             display: flex;
             flex-wrap: wrap;
