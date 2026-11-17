@@ -6,6 +6,7 @@ use CostSavings\AiService;
 use CostSavings\CategoryService;
 use CostSavings\CsvImport;
 use CostSavings\ExportService;
+use CostSavings\ImportSnapshotService;
 use CostSavings\MappedCsvImport;
 use CostSavings\OrgRole;
 use CostSavings\ProjectService;
@@ -1151,6 +1152,101 @@ function handleExportVendors() {
     exit;
 }
 
+function handleLoadQboImportCompare(): void
+{
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id']) || empty($_SESSION['org_id'])) {
+        echo json_encode(['success' => false, 'error' => 'Not authenticated']);
+        exit;
+    }
+    $pdo = getDBConnection();
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        echo json_encode(['success' => false, 'error' => 'No active project selected']);
+        exit;
+    }
+    $snapshotIdRaw = $_POST['snapshot_id'] ?? $_GET['snapshot_id'] ?? null;
+    $snapshotId = null;
+    if ($snapshotIdRaw !== null && $snapshotIdRaw !== '' && (int) $snapshotIdRaw > 0) {
+        $snapshotId = (int) $snapshotIdRaw;
+    }
+    try {
+        $compare = ImportSnapshotService::buildCompare(
+            $pdo,
+            (int) $_SESSION['org_id'],
+            $activeProjectId,
+            (int) $_SESSION['user_id'],
+            sessionProjectRole(),
+            $snapshotId
+        );
+        echo json_encode([
+            'success' => true,
+            'batches' => $compare['batches'],
+            'rows' => $compare['rows'],
+            'counts' => $compare['counts'],
+            'has_snapshots' => count($compare['batches']) > 0,
+        ]);
+    } catch (Throwable $e) {
+        error_log('handleLoadQboImportCompare: ' . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => 'Failed to load comparison']);
+    }
+    exit;
+}
+
+function handleExportQboImportCompare(): void
+{
+    if (empty($_SESSION['user_id']) || empty($_SESSION['org_id'])) {
+        header('HTTP/1.0 403 Forbidden');
+        exit;
+    }
+    $pdo = getDBConnection();
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        header('HTTP/1.0 400 Bad Request');
+        echo 'No active project selected.';
+        exit;
+    }
+    if (!class_exists(\PhpOffice\PhpSpreadsheet\Spreadsheet::class)) {
+        header('Content-Type: text/plain');
+        echo 'PhpSpreadsheet not installed. Run composer install in the project root.';
+        exit;
+    }
+    $snapshotIdRaw = $_GET['snapshot_id'] ?? $_POST['snapshot_id'] ?? null;
+    $snapshotId = null;
+    if ($snapshotIdRaw !== null && $snapshotIdRaw !== '' && (int) $snapshotIdRaw > 0) {
+        $snapshotId = (int) $snapshotIdRaw;
+    }
+    $changedOnly = !empty($_GET['changed_only']) || !empty($_POST['changed_only']);
+    try {
+        $compare = ImportSnapshotService::buildCompare(
+            $pdo,
+            (int) $_SESSION['org_id'],
+            $activeProjectId,
+            (int) $_SESSION['user_id'],
+            sessionProjectRole(),
+            $snapshotId
+        );
+        $rows = $compare['rows'];
+        if ($changedOnly) {
+            $rows = array_values(array_filter($rows, static function ($r) {
+                $s = (string) ($r['status'] ?? '');
+
+                return $s === ImportSnapshotService::STATUS_ADDED
+                    || $s === ImportSnapshotService::STATUS_UPDATED
+                    || $s === ImportSnapshotService::STATUS_DELETED;
+            }));
+        }
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="qbo-import-compare.xlsx"');
+        echo ImportSnapshotService::compareSpreadsheetBytes($rows);
+    } catch (Throwable $e) {
+        error_log('handleExportQboImportCompare: ' . $e->getMessage());
+        header('HTTP/1.0 500 Internal Server Error');
+        echo 'Export failed.';
+    }
+    exit;
+}
+
 function handleAiAsk() {
     header('Content-Type: application/json');
     if (empty($_SESSION['user_id'])) {
@@ -1790,6 +1886,29 @@ function handleImportQboSync(): void
         if (!empty($result['success'])) {
             QboService::deleteSyncCache($cacheKey);
             unset($_SESSION['pending_qbo_sync_key']);
+            $insertedIds = is_array($result['inserted_ids'] ?? null) ? $result['inserted_ids'] : [];
+            if (count($insertedIds) > 0) {
+                $pdo = getDBConnection();
+                $activeProjectId = requireActiveProjectId($pdo);
+                if ($activeProjectId !== null) {
+                    $snap = ImportSnapshotService::createFromItemIds(
+                        $pdo,
+                        (int) $_SESSION['org_id'],
+                        $activeProjectId,
+                        (int) $_SESSION['user_id'],
+                        $insertedIds,
+                        isset($result['upload_batch_id']) ? (string) $result['upload_batch_id'] : null,
+                        isset($cached['start_date']) ? (string) $cached['start_date'] : null,
+                        isset($cached['end_date']) ? (string) $cached['end_date'] : null
+                    );
+                    if (!empty($snap['success'])) {
+                        $result['snapshot_id'] = (int) ($snap['snapshot_id'] ?? 0);
+                        $result['snapshot_item_count'] = (int) ($snap['item_count'] ?? 0);
+                    } else {
+                        error_log('handleImportQboSync snapshot: ' . ($snap['error'] ?? 'unknown'));
+                    }
+                }
+            }
         }
         echo json_encode($result);
     } catch (Throwable $e) {
@@ -2001,6 +2120,27 @@ function handleQboIncrementalSync(): void
             $rawRows = [];
         }
         $result = importIncrementalVendorData($summaryRows, $rawRows);
+        if (!empty($result['success'])) {
+            $insertedIds = is_array($result['inserted_ids'] ?? null) ? $result['inserted_ids'] : [];
+            if (count($insertedIds) > 0) {
+                $snap = ImportSnapshotService::createFromItemIds(
+                    $pdo,
+                    (int) $_SESSION['org_id'],
+                    $activeProjectId,
+                    (int) $_SESSION['user_id'],
+                    $insertedIds,
+                    isset($result['upload_batch_id']) ? (string) $result['upload_batch_id'] : null,
+                    $startDate,
+                    $endDate
+                );
+                if (!empty($snap['success'])) {
+                    $result['snapshot_id'] = (int) ($snap['snapshot_id'] ?? 0);
+                    $result['snapshot_item_count'] = (int) ($snap['item_count'] ?? 0);
+                } else {
+                    error_log('handleQboIncrementalSync snapshot: ' . ($snap['error'] ?? 'unknown'));
+                }
+            }
+        }
         echo json_encode($result);
     } catch (InvalidArgumentException $e) {
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
@@ -2045,6 +2185,7 @@ function handleSaveCostCalculator() {
     $previousStatusById = [];
     $previousStatusByVendor = [];
     $previousPurposeById = [];
+    $previousAccountById = [];
     $gridRole = effectiveVendorGridRole();
     $beforeItems = VendorService::loadVisibleItems($pdo, $uid, $orgId, $activeProjectId, $gridRole);
     foreach ($beforeItems as $it) {
@@ -2056,6 +2197,7 @@ function handleSaveCostCalculator() {
         if ($oldId > 0) {
             $previousStatusById[$oldId] = $oldStatus;
             $previousPurposeById[$oldId] = trim((string) ($it['purpose_of_subscription'] ?? $it['notes'] ?? ''));
+            $previousAccountById[$oldId] = VendorService::normalizeAccountValue($it['account'] ?? '');
         }
         if ($webhookUrl !== '') {
             $oldVendorKey = strtolower(trim((string) ($it['vendor_name'] ?? '')));
@@ -2160,6 +2302,20 @@ function handleSaveCostCalculator() {
                     $uid,
                     $actorName,
                     VendorChatService::formatPurposeChangeMessage($oldPurpose, $newPurpose)
+                );
+            }
+
+            $newAccount = VendorService::normalizeAccountValue($item['account'] ?? '');
+            $oldAccount = $previousAccountById[$rowId] ?? '';
+            if ($newAccount !== $oldAccount) {
+                VendorChatService::appendActionLogEntry(
+                    $pdo,
+                    $orgId,
+                    $activeProjectId,
+                    $rowId,
+                    $uid,
+                    $actorName,
+                    VendorChatService::formatAccountChangeMessage($oldAccount, $newAccount)
                 );
             }
         }
@@ -2277,6 +2433,46 @@ function handleLoadVendorRawData() {
         'vendor_name' => $vendorName,
         'transactions' => $rows,
     ]);
+    exit;
+}
+
+function handleAddVendorRawTransaction() {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => 'User not logged in']);
+        exit;
+    }
+    if (!OrgRole::canManageVendorStructure(sessionProjectRole())) {
+        echo json_encode(['success' => false, 'error' => 'You do not have permission to add transactions']);
+        exit;
+    }
+    $vendorName = trim((string) ($_POST['vendor_name'] ?? ''));
+    if ($vendorName === '') {
+        echo json_encode(['success' => false, 'error' => 'Vendor name is required']);
+        exit;
+    }
+    $pdo = getDBConnection();
+    $activeProjectId = requireActiveProjectId($pdo);
+    if ($activeProjectId === null) {
+        echo json_encode(['success' => false, 'error' => 'No active project selected']);
+        exit;
+    }
+    $amountRaw = trim((string) ($_POST['amount'] ?? ''));
+    $amount = $amountRaw === '' ? 0.0 : (float) str_replace([',', '$'], '', $amountRaw);
+    $result = VendorService::addRawTransactionForVisibleVendor(
+        $pdo,
+        (int) $_SESSION['org_id'],
+        $activeProjectId,
+        (int) $_SESSION['user_id'],
+        sessionProjectRole(),
+        $vendorName,
+        trim((string) ($_POST['transaction_date'] ?? '')),
+        $amount,
+        trim((string) ($_POST['transaction_type'] ?? '')),
+        trim((string) ($_POST['account'] ?? '')),
+        trim((string) ($_POST['memo'] ?? ''))
+    );
+    echo json_encode($result);
     exit;
 }
 

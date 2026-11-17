@@ -892,6 +892,7 @@ function migrateCostCalculatorSchema(PDO $pdo) {
     migrateVendorChatEditSchema($pdo);
     migrateVendorChatReadStateSchema($pdo);
     migrateVendorChatMentionsSchema($pdo);
+    migrateQboImportSnapshotSchema($pdo);
 }
 
 /**
@@ -1036,7 +1037,8 @@ function backfillCostCalculatorAccountsFromRaw(PDO $pdo): void
              SET account = ?
              WHERE org_id = ?
                AND ((? IS NULL AND project_id IS NULL) OR project_id = ?)
-               AND LOWER(TRIM(vendor_name)) = ?'
+               AND LOWER(TRIM(vendor_name)) = ?
+               AND (account IS NULL OR TRIM(account) = \'\' OR TRIM(account) = \'(No account)\')'
         );
         foreach ($uniqueByKey as $key => $unique) {
             $account = $joinAccounts($unique);
@@ -1125,6 +1127,50 @@ function migrateVendorRawTransactionSchema(PDO $pdo): void
         }
     } catch (PDOException $e) {
         error_log('migrateVendorRawTransactionSchema: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Durable QBO import snapshots for Compare-with-imported.
+ *
+ * @param PDO $pdo
+ */
+function migrateQboImportSnapshotSchema(PDO $pdo): void
+{
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `project_qbo_import_snapshots` (
+            `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `org_id` INT UNSIGNED NOT NULL,
+            `project_id` INT UNSIGNED NOT NULL,
+            `imported_by_user_id` INT UNSIGNED NULL,
+            `upload_batch_id` VARCHAR(64) NULL,
+            `imported_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `source` VARCHAR(32) NOT NULL DEFAULT 'qbo',
+            `range_start` DATE NULL,
+            `range_end` DATE NULL,
+            `item_count` INT UNSIGNED NOT NULL DEFAULT 0,
+            KEY `idx_pqis_org_project` (`org_id`, `project_id`),
+            KEY `idx_pqis_imported_at` (`org_id`, `project_id`, `imported_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `project_qbo_import_snapshot_items` (
+            `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `snapshot_id` BIGINT UNSIGNED NOT NULL,
+            `org_id` INT UNSIGNED NOT NULL,
+            `project_id` INT UNSIGNED NOT NULL,
+            `source_item_id` INT NULL,
+            `imported_at` DATETIME NOT NULL,
+            `last_payment_date` DATE NULL,
+            `account` TEXT NULL,
+            `vendor_name` VARCHAR(255) NOT NULL DEFAULT '',
+            `cost_per_period` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+            `frequency` VARCHAR(64) NOT NULL DEFAULT '',
+            KEY `idx_pqisi_snapshot` (`snapshot_id`),
+            KEY `idx_pqisi_org_project` (`org_id`, `project_id`),
+            KEY `idx_pqisi_source_item` (`org_id`, `project_id`, `source_item_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    } catch (PDOException $e) {
+        error_log('migrateQboImportSnapshotSchema: ' . $e->getMessage());
     }
 }
 

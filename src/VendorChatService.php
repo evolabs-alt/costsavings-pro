@@ -340,6 +340,17 @@ class VendorChatService
             . ' to ' . self::formatPurposeForLog($toPurpose) . '.';
     }
 
+    public static function formatAccountChangeMessage(string $fromAccount, string $toAccount, string $verb = 'Changed'): string
+    {
+        $verb = trim($verb);
+        if ($verb === '') {
+            $verb = 'Changed';
+        }
+
+        return $verb . ' account from ' . self::formatAccountForLog($fromAccount)
+            . ' to ' . self::formatAccountForLog($toAccount) . '.';
+    }
+
     private static function formatPurposeForLog(string $purpose): string
     {
         $text = trim(VendorPurposeService::stripAiPurposeUiPrefix($purpose));
@@ -348,6 +359,22 @@ class VendorChatService
         }
 
         $maxSnippet = 400;
+        $len = function_exists('mb_strlen') ? mb_strlen($text, 'UTF-8') : strlen($text);
+        if ($len > $maxSnippet) {
+            $text = (function_exists('mb_substr') ? mb_substr($text, 0, $maxSnippet, 'UTF-8') : substr($text, 0, $maxSnippet)) . '…';
+        }
+
+        return $text;
+    }
+
+    private static function formatAccountForLog(string $account): string
+    {
+        $text = VendorService::normalizeAccountValue($account);
+        if ($text === '') {
+            return '(empty)';
+        }
+
+        $maxSnippet = 200;
         $len = function_exists('mb_strlen') ? mb_strlen($text, 'UTF-8') : strlen($text);
         if ($len > $maxSnippet) {
             $text = (function_exists('mb_substr') ? mb_substr($text, 0, $maxSnippet, 'UTF-8') : substr($text, 0, $maxSnippet)) . '…';

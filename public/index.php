@@ -78,6 +78,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'load_vendor_raw_data':
                 handleLoadVendorRawData();
                 break;
+            case 'add_vendor_raw_transaction':
+                handleAddVendorRawTransaction();
+                break;
             case 'load_vendor_chat_messages':
                 handleLoadVendorChatMessages();
                 break;
@@ -162,6 +165,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'qbo_incremental_sync':
                 handleQboIncrementalSync();
                 break;
+            case 'load_qbo_import_compare':
+                handleLoadQboImportCompare();
+                break;
             case 'project_list':
                 handleProjectList();
                 break;
@@ -210,6 +216,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'export_vendors') {
     handleExportVendors();
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'export_qbo_import_compare') {
+    handleExportQboImportCompare();
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'sso_consume') {
@@ -695,15 +705,29 @@ foreach ($team_members_rows as $tmRow) {
             max-width: 180px;
         }
 
-        .cost-calculator-grid .account-col .account-display {
+        .cost-calculator-grid .account-col .account-display,
+        .cost-calculator-grid .account-col .account-input {
             display: block;
+            width: 100%;
+            max-width: 170px;
             font-size: 13px;
             line-height: 1.3;
             color: #374151;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            max-width: 170px;
+            border: 1px solid transparent;
+            background: transparent;
+            padding: 4px 6px;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        .cost-calculator-grid .account-col .account-input:hover,
+        .cost-calculator-grid .account-col .account-input:focus {
+            border-color: #d1d5db;
+            background: #fff;
+            outline: none;
         }
 
         .cost-calculator-grid .category-col select {
@@ -734,9 +758,26 @@ foreach ($team_members_rows as $tmRow) {
             gap: 6px;
         }
 
-        .cost-calculator-grid .vendor-cell-wrap input[type="text"] {
+        .cost-calculator-grid .vendor-name-stack {
             flex: 1 1 auto;
             min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .cost-calculator-grid .vendor-cell-wrap input[type="text"] {
+            width: 100%;
+            min-width: 0;
+        }
+
+        .cost-calculator-grid .vendor-imported-at {
+            font-size: 10px;
+            line-height: 1.2;
+            color: #6b7280;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .cost-calculator-grid .vendor-raw-btn {
@@ -880,6 +921,75 @@ foreach ($team_members_rows as $tmRow) {
         .vendor-raw-results th.amount-col,
         .vendor-raw-results td.amount-col {
             text-align: right;
+        }
+
+        .vendor-raw-results .vendor-raw-actions {
+            margin-top: 12px;
+        }
+
+        .vendor-raw-results .vendor-raw-add-btn {
+            padding: 8px 14px;
+            font-size: 13px;
+        }
+
+        .vendor-raw-results .vendor-raw-draft-row input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 6px 8px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .vendor-raw-results .vendor-raw-draft-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .vendor-raw-results .vendor-raw-draft-actions .vendor-raw-imported-placeholder {
+            color: #9ca3af;
+            margin-right: 4px;
+        }
+
+        .vendor-raw-results .vendor-raw-save-btn,
+        .vendor-raw-results .vendor-raw-cancel-btn {
+            border: none;
+            border-radius: 4px;
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .vendor-raw-results .vendor-raw-save-btn {
+            background: #6b5b95;
+            color: #fff;
+        }
+
+        .vendor-raw-results .vendor-raw-save-btn:hover {
+            background: #4a3f6b;
+        }
+
+        .vendor-raw-results .vendor-raw-save-btn:disabled {
+            opacity: 0.6;
+            cursor: default;
+        }
+
+        .vendor-raw-results .vendor-raw-cancel-btn {
+            background: #e5e7eb;
+            color: #374151;
+        }
+
+        .vendor-raw-results .vendor-raw-cancel-btn:hover {
+            background: #d1d5db;
+        }
+
+        .vendor-raw-results .vendor-raw-add-error {
+            margin: 8px 0 0;
+            color: #b91c1c;
+            font-size: 13px;
         }
 
         .cost-calculator-grid .cost-per-period {
@@ -1774,7 +1884,8 @@ foreach ($team_members_rows as $tmRow) {
                 display: none;
             }
 
-            .cost-calculator-grid .account-col .account-display {
+            .cost-calculator-grid .account-col .account-display,
+            .cost-calculator-grid .account-col .account-input {
                 font-size: 11px;
                 max-width: 110px;
             }
@@ -3815,6 +3926,133 @@ foreach ($team_members_rows as $tmRow) {
             max-width: 90vw;
         }
 
+        #appModalQboImportCompare .app-modal {
+            width: min(1100px, 96vw);
+            max-width: min(1100px, 96vw);
+            max-height: min(92vh, 860px);
+        }
+
+        #appModalQboImportCompare .app-modal-body {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-height: 0;
+        }
+
+        .qbo-compare-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 14px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .qbo-compare-toolbar-left,
+        .qbo-compare-toolbar-right {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            align-items: center;
+        }
+
+        .qbo-compare-counts {
+            font-size: 13px;
+            color: #4b5563;
+            line-height: 1.4;
+        }
+
+        .qbo-compare-counts strong {
+            color: #111827;
+            font-weight: 600;
+        }
+
+        .qbo-compare-table-wrap {
+            overflow: auto;
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            flex: 1 1 auto;
+            min-height: 220px;
+            max-height: min(58vh, 520px);
+        }
+
+        .qbo-compare-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12.5px;
+            table-layout: fixed;
+        }
+
+        .qbo-compare-table th,
+        .qbo-compare-table td {
+            padding: 7px 8px;
+            border-bottom: 1px solid #e5e7eb;
+            text-align: left;
+            vertical-align: top;
+            word-break: break-word;
+        }
+
+        .qbo-compare-table thead th {
+            position: sticky;
+            top: 0;
+            background: #f8fafc;
+            z-index: 1;
+            font-weight: 600;
+            color: #334155;
+            border-bottom: 1px solid #cbd5e1;
+        }
+
+        .qbo-compare-table .qbo-compare-gap {
+            width: 10px;
+            min-width: 10px;
+            max-width: 10px;
+            padding: 0;
+            background: #eef2f7;
+            border-left: 1px solid #cbd5e1;
+            border-right: 1px solid #cbd5e1;
+        }
+
+        .qbo-compare-table tr.qbo-compare-updated td.qbo-compare-changed {
+            background: #fef3c7;
+        }
+
+        .qbo-compare-table tr.qbo-compare-deleted td {
+            background: #fef2f2;
+        }
+
+        .qbo-compare-table tr.qbo-compare-added td {
+            background: #ecfdf5;
+        }
+
+        .qbo-compare-marker {
+            font-style: italic;
+            color: #6b7280;
+            white-space: nowrap;
+        }
+
+        .qbo-compare-empty {
+            margin: 0;
+            padding: 24px 12px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .qbo-compare-pagination {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 13px;
+            color: #4b5563;
+        }
+
+        .qbo-compare-pagination-controls {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
         .app-modal-header {
             display: flex;
             align-items: center;
@@ -5202,6 +5440,9 @@ foreach ($team_members_rows as $tmRow) {
                                     <button type="button" role="menuitem" class="app-submenu-item" id="appSyncQboBtn">Import QBO Transactions…</button>
                                 </li>
                                 <?php endif; ?>
+                                <li role="none">
+                                    <button type="button" role="menuitem" class="app-submenu-item" id="appCompareQboImportBtn">Compare with imported…</button>
+                                </li>
                                 <li role="none" class="has-nested" id="appExportNavItem">
                                     <button type="button" class="app-submenu-item app-submenu-parent" id="appExportMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appExportSubmenu">Export</button>
                                     <ul class="app-submenu app-submenu--nested" id="appExportSubmenu" role="menu" aria-label="Export formats">
@@ -7471,10 +7712,429 @@ foreach ($team_members_rows as $tmRow) {
                     });
                 }
             }
+
+            var qboCompareState = {
+                rows: [],
+                batches: [],
+                counts: { added: 0, updated: 0, deleted: 0, unchanged: 0, total: 0 },
+                page: 1,
+                pageSize: 50,
+                loading: false
+            };
+
+            function qboCompareFreqLabel(value) {
+                var key = String(value || '');
+                if (typeof FREQUENCY_FILTER_LABELS !== 'undefined' && FREQUENCY_FILTER_LABELS[key]) {
+                    return FREQUENCY_FILTER_LABELS[key];
+                }
+                return key;
+            }
+
+            function qboCompareFormatCost(value) {
+                var n = Number(value);
+                if (!isFinite(n)) n = 0;
+                return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            }
+
+            function qboCompareFormatDateTime(raw) {
+                var s = String(raw || '').trim();
+                if (!s) return '';
+                if (typeof formatImportTimestamp === 'function') {
+                    var formatted = formatImportTimestamp(s);
+                    if (formatted) return formatted;
+                }
+                return s;
+            }
+
+            function qboCompareFilteredRows() {
+                var changedOnly = !!(document.getElementById('qboCompareChangedOnly') || {}).checked;
+                if (!changedOnly) return qboCompareState.rows.slice();
+                return qboCompareState.rows.filter(function(row) {
+                    var status = String(row.status || '');
+                    return status === 'added' || status === 'updated' || status === 'deleted';
+                });
+            }
+
+            function qboCompareCell(text, changed) {
+                var cls = changed ? ' class="qbo-compare-changed"' : '';
+                return '<td' + cls + '>' + escapeHtml(text == null ? '' : String(text)) + '</td>';
+            }
+
+            function qboCompareMarkerCells(label, colspan) {
+                return '<td colspan="' + colspan + '"><span class="qbo-compare-marker">' + escapeHtml(label) + '</span></td>';
+            }
+
+            function renderQboComparePage() {
+                var emptyEl = document.getElementById('qboCompareEmpty');
+                var tableEl = document.getElementById('qboCompareTable');
+                var bodyEl = document.getElementById('qboCompareTableBody');
+                var paginationEl = document.getElementById('qboComparePagination');
+                var pageInfoEl = document.getElementById('qboComparePageInfo');
+                var prevBtn = document.getElementById('qboComparePrevBtn');
+                var nextBtn = document.getElementById('qboCompareNextBtn');
+                var countsEl = document.getElementById('qboCompareCounts');
+                if (!bodyEl || !tableEl || !emptyEl) return;
+
+                var counts = qboCompareState.counts || {};
+                if (countsEl) {
+                    countsEl.innerHTML = '<strong>' + (counts.total || 0) + '</strong> rows · '
+                        + '<strong>' + (counts.added || 0) + '</strong> added · '
+                        + '<strong>' + (counts.updated || 0) + '</strong> updated · '
+                        + '<strong>' + (counts.deleted || 0) + '</strong> deleted · '
+                        + '<strong>' + (counts.unchanged || 0) + '</strong> unchanged';
+                }
+
+                var filtered = qboCompareFilteredRows();
+                var pageSize = Math.max(1, parseInt(qboCompareState.pageSize, 10) || 50);
+                var totalPages = Math.max(1, Math.ceil(filtered.length / pageSize) || 1);
+                if (qboCompareState.page > totalPages) qboCompareState.page = totalPages;
+                if (qboCompareState.page < 1) qboCompareState.page = 1;
+                var start = (qboCompareState.page - 1) * pageSize;
+                var pageRows = filtered.slice(start, start + pageSize);
+
+                if (qboCompareState.loading) {
+                    emptyEl.hidden = false;
+                    emptyEl.textContent = 'Loading…';
+                    tableEl.hidden = true;
+                    if (paginationEl) paginationEl.hidden = true;
+                    return;
+                }
+
+                if (!qboCompareState.batches.length) {
+                    emptyEl.hidden = false;
+                    emptyEl.textContent = 'No QBO import snapshot yet. Import QuickBooks transactions first, then compare.';
+                    tableEl.hidden = true;
+                    if (paginationEl) paginationEl.hidden = true;
+                    return;
+                }
+
+                if (filtered.length === 0) {
+                    emptyEl.hidden = false;
+                    emptyEl.textContent = 'No differences to show for the current filters.';
+                    tableEl.hidden = true;
+                    if (paginationEl) paginationEl.hidden = true;
+                    return;
+                }
+
+                emptyEl.hidden = true;
+                tableEl.hidden = false;
+                var html = '';
+                pageRows.forEach(function(row) {
+                    var status = String(row.status || '');
+                    var changed = {};
+                    (row.changed_fields || []).forEach(function(f) { changed[f] = true; });
+                    var snap = row.snapshot || null;
+                    var cur = row.current || null;
+                    html += '<tr class="qbo-compare-' + escapeHtml(status) + '">';
+                    if (status === 'added') {
+                        html += qboCompareMarkerCells('added >', 5);
+                    } else {
+                        // Snapshot date/time is import timestamp; do not highlight it for payment-date diffs.
+                        html += qboCompareCell(qboCompareFormatDateTime(snap && snap.date_time), false);
+                        html += qboCompareCell(snap && snap.account, !!changed.account);
+                        html += qboCompareCell(snap && snap.vendor, !!changed.vendor);
+                        html += qboCompareCell(qboCompareFormatCost(snap && snap.cost), !!changed.cost);
+                        html += qboCompareCell(qboCompareFreqLabel(snap && snap.frequency), !!changed.frequency);
+                    }
+                    html += '<td class="qbo-compare-gap" aria-hidden="true"></td>';
+                    if (status === 'deleted') {
+                        html += qboCompareMarkerCells('< deleted', 5);
+                    } else {
+                        html += qboCompareCell(qboCompareFormatDateTime(cur && cur.date_time), !!changed.date_time);
+                        html += qboCompareCell(cur && cur.account, !!changed.account);
+                        html += qboCompareCell(cur && cur.vendor, !!changed.vendor);
+                        html += qboCompareCell(qboCompareFormatCost(cur && cur.cost), !!changed.cost);
+                        html += qboCompareCell(qboCompareFreqLabel(cur && cur.frequency), !!changed.frequency);
+                    }
+                    html += '</tr>';
+                });
+                bodyEl.innerHTML = html;
+
+                if (paginationEl) {
+                    paginationEl.hidden = false;
+                    if (pageInfoEl) {
+                        var from = filtered.length === 0 ? 0 : start + 1;
+                        var to = Math.min(filtered.length, start + pageSize);
+                        pageInfoEl.textContent = from + '–' + to + ' of ' + filtered.length;
+                    }
+                    if (prevBtn) prevBtn.disabled = qboCompareState.page <= 1;
+                    if (nextBtn) nextBtn.disabled = qboCompareState.page >= totalPages;
+                }
+            }
+
+            function populateQboCompareBatchSelect(batches, selectedId) {
+                var sel = document.getElementById('qboCompareBatchSelect');
+                if (!sel) return;
+                var current = selectedId == null ? String(sel.value || '') : String(selectedId || '');
+                var html = '<option value="">All imports</option>';
+                (batches || []).forEach(function(batch) {
+                    var id = String(batch.id || '');
+                    var label = 'Imported ' + qboCompareFormatDateTime(batch.imported_at);
+                    var count = parseInt(batch.item_count, 10) || 0;
+                    label += ' — ' + count + (count === 1 ? ' vendor' : ' vendors');
+                    html += '<option value="' + escapeHtml(id) + '">' + escapeHtml(label) + '</option>';
+                });
+                sel.innerHTML = html;
+                if (current) sel.value = current;
+                if (current && sel.value !== current) sel.value = '';
+            }
+
+            function loadQboImportCompare() {
+                var sel = document.getElementById('qboCompareBatchSelect');
+                var snapshotId = sel ? String(sel.value || '').trim() : '';
+                qboCompareState.loading = true;
+                renderQboComparePage();
+                var fd = new FormData();
+                fd.append('action', 'load_qbo_import_compare');
+                if (snapshotId) fd.append('snapshot_id', snapshotId);
+                return fetch(window.location.href, { method: 'POST', body: fd })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        qboCompareState.loading = false;
+                        if (!d || !d.success) {
+                            showSnackbar((d && d.error) || 'Could not load comparison', 'error');
+                            qboCompareState.rows = [];
+                            qboCompareState.batches = [];
+                            qboCompareState.counts = { added: 0, updated: 0, deleted: 0, unchanged: 0, total: 0 };
+                            renderQboComparePage();
+                            return;
+                        }
+                        qboCompareState.batches = Array.isArray(d.batches) ? d.batches : [];
+                        qboCompareState.rows = Array.isArray(d.rows) ? d.rows : [];
+                        qboCompareState.counts = d.counts || { added: 0, updated: 0, deleted: 0, unchanged: 0, total: 0 };
+                        qboCompareState.page = 1;
+                        populateQboCompareBatchSelect(qboCompareState.batches, snapshotId);
+                        renderQboComparePage();
+                    })
+                    .catch(function() {
+                        qboCompareState.loading = false;
+                        showSnackbar('Could not load comparison', 'error');
+                        renderQboComparePage();
+                    });
+            }
+
+            function openQboImportCompareModal() {
+                openAppModal('appModalQboImportCompare');
+                loadQboImportCompare();
+            }
+
+            function exportQboImportCompare() {
+                var sel = document.getElementById('qboCompareBatchSelect');
+                var changedOnly = !!(document.getElementById('qboCompareChangedOnly') || {}).checked;
+                var params = new URLSearchParams();
+                params.set('action', 'export_qbo_import_compare');
+                if (sel && sel.value) params.set('snapshot_id', sel.value);
+                if (changedOnly) params.set('changed_only', '1');
+                window.location.href = '?' + params.toString();
+            }
+
+            function initQboImportCompareUi() {
+                var btn = document.getElementById('appCompareQboImportBtn');
+                if (btn && !btn.dataset.qboCompareBound) {
+                    btn.dataset.qboCompareBound = '1';
+                    btn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        openQboImportCompareModal();
+                    });
+                }
+                var batchSel = document.getElementById('qboCompareBatchSelect');
+                if (batchSel && !batchSel.dataset.qboCompareBound) {
+                    batchSel.dataset.qboCompareBound = '1';
+                    batchSel.addEventListener('change', function() {
+                        loadQboImportCompare();
+                    });
+                }
+                var changedOnly = document.getElementById('qboCompareChangedOnly');
+                if (changedOnly && !changedOnly.dataset.qboCompareBound) {
+                    changedOnly.dataset.qboCompareBound = '1';
+                    changedOnly.addEventListener('change', function() {
+                        qboCompareState.page = 1;
+                        renderQboComparePage();
+                    });
+                }
+                var pageSize = document.getElementById('qboComparePageSize');
+                if (pageSize && !pageSize.dataset.qboCompareBound) {
+                    pageSize.dataset.qboCompareBound = '1';
+                    pageSize.addEventListener('change', function() {
+                        qboCompareState.pageSize = parseInt(pageSize.value, 10) || 50;
+                        qboCompareState.page = 1;
+                        renderQboComparePage();
+                    });
+                }
+                var prevBtn = document.getElementById('qboComparePrevBtn');
+                if (prevBtn && !prevBtn.dataset.qboCompareBound) {
+                    prevBtn.dataset.qboCompareBound = '1';
+                    prevBtn.addEventListener('click', function() {
+                        qboCompareState.page -= 1;
+                        renderQboComparePage();
+                    });
+                }
+                var nextBtn = document.getElementById('qboCompareNextBtn');
+                if (nextBtn && !nextBtn.dataset.qboCompareBound) {
+                    nextBtn.dataset.qboCompareBound = '1';
+                    nextBtn.addEventListener('click', function() {
+                        qboCompareState.page += 1;
+                        renderQboComparePage();
+                    });
+                }
+                var exportBtn = document.getElementById('qboCompareExportBtn');
+                if (exportBtn && !exportBtn.dataset.qboCompareBound) {
+                    exportBtn.dataset.qboCompareBound = '1';
+                    exportBtn.addEventListener('click', function() {
+                        if (!qboCompareState.batches.length) {
+                            showSnackbar('No QBO import snapshot to export yet.', 'error');
+                            return;
+                        }
+                        exportQboImportCompare();
+                    });
+                }
+            }
+            function formatImportTimestamp(rawValue) {
+                var raw = String(rawValue || '').trim();
+                if (!raw) return '';
+                var normalized = raw.indexOf('T') !== -1 ? raw : raw.replace(' ', 'T');
+                var dt = new Date(normalized);
+                if (isNaN(dt.getTime())) return raw;
+                return dt.toLocaleString([], {
+                    year: 'numeric',
+                    month: 'short',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                });
+            }
             function aiEscapeHtml(s) {
                 var d = document.createElement('div');
                 d.textContent = s;
                 return d.innerHTML;
+            }
+            function canAddVendorRawTransaction() {
+                var isAdmin = (typeof IS_ADMIN !== 'undefined') ? IS_ADMIN : !!isAdminUser;
+                var canManage = (typeof CAN_MANAGE_VENDORS !== 'undefined') ? CAN_MANAGE_VENDORS : !!canManageVendors;
+                return !!(isAdmin && canManage);
+            }
+            function renderVendorRawDataTable(vendorName, rows) {
+                var canAdd = canAddVendorRawTransaction();
+                var html = '<div class="vendor-raw-results" data-vendor-name="' + aiEscapeHtml(vendorName) + '"><table><thead><tr>'
+                    + '<th>Date</th><th class="amount-col">Amount</th><th>Transaction Type</th><th>Account</th><th>Memo/Description</th><th>Imported</th>'
+                    + '</tr></thead><tbody>';
+                if (!rows.length) {
+                    html += '<tr class="vendor-raw-empty-row"><td colspan="6">No raw transactions found for this vendor yet.</td></tr>';
+                } else {
+                    rows.forEach(function(row) {
+                        var date = aiEscapeHtml(String(row.transaction_date || ''));
+                        var amountNum = Number(row.amount) || 0;
+                        if (/^deposit$/i.test(String(row.transaction_type || '').trim())) {
+                            amountNum = -Math.abs(amountNum);
+                        }
+                        var amount = aiEscapeHtml(formatMoneyInteger(amountNum));
+                        var type = aiEscapeHtml(String(row.transaction_type || ''));
+                        var account = aiEscapeHtml(String(row.account || ''));
+                        var memo = aiEscapeHtml(String(row.memo || ''));
+                        var imported = aiEscapeHtml(formatImportTimestamp(row.created_at));
+                        html += '<tr><td>' + date + '</td><td class="amount-col">' + amount + '</td><td>' + type + '</td><td>' + account + '</td><td>' + memo + '</td><td>' + imported + '</td></tr>';
+                    });
+                }
+                html += '</tbody></table>';
+                if (canAdd) {
+                    html += '<div class="vendor-raw-actions">'
+                        + '<button type="button" class="add-row-btn vendor-raw-add-btn">+ Add Row</button>'
+                        + '</div>'
+                        + '<p class="vendor-raw-add-error" hidden></p>';
+                }
+                html += '</div>';
+                return html;
+            }
+            function bindVendorRawAddRowUi(body, vendorName) {
+                if (!body || !canAddVendorRawTransaction()) return;
+                var wrap = body.querySelector('.vendor-raw-results');
+                if (!wrap) return;
+                var tbody = wrap.querySelector('tbody');
+                var addBtn = wrap.querySelector('.vendor-raw-add-btn');
+                var errorEl = wrap.querySelector('.vendor-raw-add-error');
+                if (!tbody || !addBtn) return;
+
+                function showAddError(msg) {
+                    if (!errorEl) return;
+                    if (!msg) {
+                        errorEl.hidden = true;
+                        errorEl.textContent = '';
+                        return;
+                    }
+                    errorEl.hidden = false;
+                    errorEl.textContent = msg;
+                }
+
+                function removeDraftRow() {
+                    var draft = tbody.querySelector('.vendor-raw-draft-row');
+                    if (draft) draft.remove();
+                    var empty = tbody.querySelector('.vendor-raw-empty-row');
+                    if (!empty && !tbody.querySelector('tr')) {
+                        tbody.innerHTML = '<tr class="vendor-raw-empty-row"><td colspan="6">No raw transactions found for this vendor yet.</td></tr>';
+                    }
+                    addBtn.disabled = false;
+                    showAddError('');
+                }
+
+                addBtn.addEventListener('click', function() {
+                    if (tbody.querySelector('.vendor-raw-draft-row')) return;
+                    var empty = tbody.querySelector('.vendor-raw-empty-row');
+                    if (empty) empty.remove();
+                    var draft = document.createElement('tr');
+                    draft.className = 'vendor-raw-draft-row';
+                    draft.innerHTML = ''
+                        + '<td><input type="date" class="vendor-raw-date" required></td>'
+                        + '<td class="amount-col"><input type="text" class="vendor-raw-amount" inputmode="decimal" placeholder="0"></td>'
+                        + '<td><input type="text" class="vendor-raw-type" placeholder="Type"></td>'
+                        + '<td><input type="text" class="vendor-raw-account" placeholder="Account"></td>'
+                        + '<td><input type="text" class="vendor-raw-memo" placeholder="Memo / description"></td>'
+                        + '<td><div class="vendor-raw-draft-actions">'
+                        + '<span class="vendor-raw-imported-placeholder">—</span>'
+                        + '<button type="button" class="vendor-raw-save-btn">Save</button>'
+                        + '<button type="button" class="vendor-raw-cancel-btn">Cancel</button>'
+                        + '</div></td>';
+                    tbody.insertBefore(draft, tbody.firstChild);
+                    addBtn.disabled = true;
+                    showAddError('');
+                    var dateInput = draft.querySelector('.vendor-raw-date');
+                    if (dateInput) dateInput.focus();
+
+                    draft.querySelector('.vendor-raw-cancel-btn').addEventListener('click', function() {
+                        removeDraftRow();
+                    });
+                    draft.querySelector('.vendor-raw-save-btn').addEventListener('click', function() {
+                        var saveBtn = draft.querySelector('.vendor-raw-save-btn');
+                        var dateVal = (draft.querySelector('.vendor-raw-date').value || '').trim();
+                        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
+                            showAddError('A valid transaction date is required.');
+                            return;
+                        }
+                        showAddError('');
+                        if (saveBtn) saveBtn.disabled = true;
+                        var fd = new FormData();
+                        fd.append('action', 'add_vendor_raw_transaction');
+                        fd.append('vendor_name', vendorName);
+                        fd.append('transaction_date', dateVal);
+                        fd.append('amount', (draft.querySelector('.vendor-raw-amount').value || '').trim());
+                        fd.append('transaction_type', (draft.querySelector('.vendor-raw-type').value || '').trim());
+                        fd.append('account', (draft.querySelector('.vendor-raw-account').value || '').trim());
+                        fd.append('memo', (draft.querySelector('.vendor-raw-memo').value || '').trim());
+                        fetch(window.location.href, { method: 'POST', body: fd })
+                            .then(function(r) { return r.json(); })
+                            .then(function(d) {
+                                if (!d || !d.success) {
+                                    showAddError((d && d.error) ? d.error : 'Could not save the transaction.');
+                                    if (saveBtn) saveBtn.disabled = false;
+                                    return;
+                                }
+                                loadVendorRawDataModal(vendorName);
+                            })
+                            .catch(function() {
+                                showAddError('Could not save the transaction.');
+                                if (saveBtn) saveBtn.disabled = false;
+                            });
+                    });
+                });
             }
             function loadVendorRawDataModal(vendorName) {
                 var overlay = document.getElementById('appModalVendorRaw');
@@ -7495,27 +8155,8 @@ foreach ($team_members_rows as $tmRow) {
                             return;
                         }
                         var rows = Array.isArray(d.transactions) ? d.transactions : [];
-                        if (!rows.length) {
-                            body.innerHTML = '<p>No raw transactions found for this vendor yet.</p>';
-                            return;
-                        }
-                        var html = '<div class="vendor-raw-results"><table><thead><tr>'
-                            + '<th>Date</th><th class="amount-col">Amount</th><th>Transaction Type</th><th>Account</th><th>Memo/Description</th>'
-                            + '</tr></thead><tbody>';
-                        rows.forEach(function(row) {
-                            var date = aiEscapeHtml(String(row.transaction_date || ''));
-                            var amountNum = Number(row.amount) || 0;
-                            if (/^deposit$/i.test(String(row.transaction_type || '').trim())) {
-                                amountNum = -Math.abs(amountNum);
-                            }
-                            var amount = aiEscapeHtml(formatMoneyInteger(amountNum));
-                            var type = aiEscapeHtml(String(row.transaction_type || ''));
-                            var account = aiEscapeHtml(String(row.account || ''));
-                            var memo = aiEscapeHtml(String(row.memo || ''));
-                            html += '<tr><td>' + date + '</td><td class="amount-col">' + amount + '</td><td>' + type + '</td><td>' + account + '</td><td>' + memo + '</td></tr>';
-                        });
-                        html += '</tbody></table></div>';
-                        body.innerHTML = html;
+                        body.innerHTML = renderVendorRawDataTable(vendorName, rows);
+                        bindVendorRawAddRowUi(body, vendorName);
                     })
                     .catch(function() {
                         body.innerHTML = '<p>Could not load raw data.</p>';
@@ -7906,6 +8547,7 @@ foreach ($team_members_rows as $tmRow) {
                 initCsvImportUi();
                 initMappedCsvImportUi();
                 initQboSyncUi();
+                initQboImportCompareUi();
             }
             const TEAM_MEMBERS = <?php echo $team_members_json; ?>;
             const IS_ADMIN = <?php echo $is_admin ? 'true' : 'false'; ?>;
@@ -8543,12 +9185,15 @@ foreach ($team_members_rows as $tmRow) {
                         </select>
                     </td>
                     <td class="account-col">
-                        <span class="account-display" data-account="" title=""></span>
+                        <input type="text" class="account-input account-display" name="account[]" data-account="" title="" placeholder="Account" autocomplete="off" />
                     </td>
                     <td class="vendor-name">
                         <input type="hidden" class="row-db-id" value="" />
                         <div class="vendor-cell-wrap">
-                            <input type="text" name="vendor[]" placeholder="Enter vendor name" ${memberSpendLocked} />
+                            <div class="vendor-name-stack">
+                                <input type="text" name="vendor[]" placeholder="Enter vendor name" ${memberSpendLocked} />
+                                <span class="vendor-imported-at" hidden></span>
+                            </div>
                             <button type="button" class="vendor-raw-btn" disabled title="View imported raw transaction history" aria-label="View imported raw transaction history">
                                 <span class="material-symbols-outlined vendor-raw-icon" aria-hidden="true">format_list_bulleted</span>
                             </button>
@@ -8968,9 +9613,9 @@ foreach ($team_members_rows as $tmRow) {
                     return { isUnassigned: false, text: (opt ? opt.text : '').trim().toLowerCase() };
                 }
                 if (col === 'account') {
-                    const acctEl = row.querySelector('.account-display');
+                    const acctEl = row.querySelector('.account-input') || row.querySelector('.account-display');
                     const acctVal = acctEl
-                        ? String(acctEl.getAttribute('data-account') || acctEl.textContent || '').trim()
+                        ? String(acctEl.getAttribute('data-account') || acctEl.value || acctEl.textContent || '').trim()
                         : '';
                     if (!acctVal) {
                         return { isUnassigned: true, text: '' };
@@ -9209,9 +9854,9 @@ foreach ($team_members_rows as $tmRow) {
             }
 
             function getRowAccountList(row) {
-                const acctEl = row.querySelector('.account-display');
+                const acctEl = row.querySelector('.account-input') || row.querySelector('.account-display');
                 const raw = acctEl
-                    ? String(acctEl.getAttribute('data-account') || acctEl.textContent || '').trim()
+                    ? String(acctEl.getAttribute('data-account') || acctEl.value || acctEl.textContent || '').trim()
                     : '';
                 if (!raw) return [];
                 return raw.split(',').map(function(part) {
@@ -9239,14 +9884,24 @@ foreach ($team_members_rows as $tmRow) {
                 return false;
             }
 
+            function normalizeAccountClientValue(accountValue) {
+                const acct = accountValue != null ? String(accountValue).trim() : '';
+                if (acct === '' || acct === '(No account)') {
+                    return '';
+                }
+                return acct;
+            }
+
             function setRowAccountDisplay(row, accountValue) {
-                const acctEl = row.querySelector('.account-display');
+                const acctEl = row.querySelector('.account-input') || row.querySelector('.account-display');
                 if (!acctEl) return;
-                const acct = accountValue && String(accountValue).trim() !== '(No account)'
-                    ? String(accountValue).trim()
-                    : '';
+                const acct = normalizeAccountClientValue(accountValue);
                 acctEl.setAttribute('data-account', acct);
-                acctEl.textContent = acct;
+                if ('value' in acctEl) {
+                    acctEl.value = acct;
+                } else {
+                    acctEl.textContent = acct;
+                }
                 acctEl.title = acct;
             }
 
@@ -9704,6 +10359,7 @@ foreach ($team_members_rows as $tmRow) {
                 const negotiationIn = row.querySelector('.negotiation-date-input');
                 const savingsIn = row.querySelector('.renegotiated-savings-input');
                 const lastPayIn = row.querySelector('.last-payment-input');
+                const accountInput = row.querySelector('.account-input') || row.querySelector('.account-display');
 
                 const vendorName = vendorInput ? vendorInput.value.trim() : '';
                 const costPerPeriod = costInput ? parseFloat(costInput.value.replace(/[^0-9.-]/g, '')) || 0 : 0;
@@ -9725,6 +10381,11 @@ foreach ($team_members_rows as $tmRow) {
                 const negotiationDate = negotiationIn && negotiationIn.value ? negotiationIn.value : '';
                 const renegotiatedSavings = savingsIn ? parseMoneyInput(savingsIn.value) : 0;
                 const lastPay = lastPayIn && lastPayIn.value ? lastPayIn.value : '';
+                const account = normalizeAccountClientValue(
+                    accountInput
+                        ? (accountInput.value != null ? accountInput.value : (accountInput.getAttribute('data-account') || accountInput.textContent || ''))
+                        : ''
+                );
 
                 if (idVal && !vendorName && costPerPeriod === 0 && !notes && status === 'pending') {
                     return null;
@@ -9743,6 +10404,7 @@ foreach ($team_members_rows as $tmRow) {
                     cancelled_status: cancelledStatusInt,
                     notes: notes,
                     purpose_of_subscription: notes,
+                    account: account,
                     visibility: visibility,
                     cancellation_deadline: cancelDl,
                     negotiation_target_date: negotiationDate,
@@ -10016,6 +10678,19 @@ foreach ($team_members_rows as $tmRow) {
                                     const lp = lastRow.querySelector('.last-payment-input');
                                     
                                     if (vendorInput) vendorInput.value = item.vendor_name || '';
+                                    var importedAtEl = lastRow.querySelector('.vendor-imported-at');
+                                    if (importedAtEl) {
+                                        var importedStamp = formatImportTimestamp(item.imported_at);
+                                        if (importedStamp) {
+                                            importedAtEl.textContent = 'Imported ' + importedStamp;
+                                            importedAtEl.hidden = false;
+                                            importedAtEl.title = importedAtEl.textContent;
+                                        } else {
+                                            importedAtEl.textContent = '';
+                                            importedAtEl.hidden = true;
+                                            importedAtEl.removeAttribute('title');
+                                        }
+                                    }
                                     updateVendorDrilldownState(lastRow);
                                     var uch = typeof item.vendor_chat_unread !== 'undefined' ? item.vendor_chat_unread : 0;
                                     var tch = typeof item.vendor_chat_tagged !== 'undefined' ? item.vendor_chat_tagged : 0;
@@ -10160,6 +10835,34 @@ foreach ($team_members_rows as $tmRow) {
                 const negIn = row.querySelector('.negotiation-date-input');
                 const savingsIn = row.querySelector('.renegotiated-savings-input');
                 const lpIn = row.querySelector('.last-payment-input');
+                const accountInput = row.querySelector('.account-input');
+
+                if (accountInput) {
+                    const syncAccount = function() {
+                        const acct = normalizeAccountClientValue(accountInput.value);
+                        accountInput.setAttribute('data-account', acct);
+                        accountInput.title = acct;
+                        if (accountInput.value !== acct) {
+                            accountInput.value = acct;
+                        }
+                    };
+                    accountInput.addEventListener('input', function() {
+                        accountInput.setAttribute('data-account', String(accountInput.value || '').trim());
+                        markRowDirty(row);
+                        autoSave();
+                        if (!calculatorLoadInProgress) {
+                            applyVendorTablePagination(vendorCurrentPage, { keepRowVisible: row });
+                        }
+                    });
+                    accountInput.addEventListener('blur', function() {
+                        syncAccount();
+                        markRowDirty(row);
+                        autoSave();
+                        if (!calculatorLoadInProgress) {
+                            applyVendorTablePagination(vendorCurrentPage, { keepRowVisible: row });
+                        }
+                    });
+                }
 
                 if (costInput) {
                     costInput.addEventListener('input', function(e) {
@@ -10697,6 +11400,7 @@ foreach ($team_members_rows as $tmRow) {
                 initCsvImportUi();
                 initMappedCsvImportUi();
                 initQboSyncUi();
+                initQboImportCompareUi();
                 function aiEscapeHtml(s) {
                     var d = document.createElement('div');
                     d.textContent = s;
@@ -11292,51 +11996,6 @@ foreach ($team_members_rows as $tmRow) {
                     cancelGuidanceRetryBtn.addEventListener('click', function() {
                         fetchCancelGuidanceForActiveRow();
                     });
-                }
-                function loadVendorRawDataModal(vendorName) {
-                    var overlay = document.getElementById('appModalVendorRaw');
-                    var title = document.getElementById('appModalVendorRawTitle');
-                    var body = document.getElementById('vendorRawBody');
-                    if (!overlay || !title || !body) return;
-                    title.textContent = 'Raw Data - ' + vendorName;
-                    body.innerHTML = '<p>Loading transaction history...</p>';
-                    openAppModal(overlay);
-                    var fd = new FormData();
-                    fd.append('action', 'load_vendor_raw_data');
-                    fd.append('vendor_name', vendorName);
-                    fetch(window.location.href, { method: 'POST', body: fd })
-                        .then(function(r) { return r.json(); })
-                        .then(function(d) {
-                            if (!d.success) {
-                                body.innerHTML = '<p>' + aiEscapeHtml(d.error || 'Could not load raw data.') + '</p>';
-                                return;
-                            }
-                            var rows = Array.isArray(d.transactions) ? d.transactions : [];
-                            if (!rows.length) {
-                                body.innerHTML = '<p>No raw transactions found for this vendor yet.</p>';
-                                return;
-                            }
-                            var html = '<div class="vendor-raw-results"><table><thead><tr>'
-                                + '<th>Date</th><th class="amount-col">Amount</th><th>Transaction Type</th><th>Account</th><th>Memo/Description</th>'
-                                + '</tr></thead><tbody>';
-                            rows.forEach(function(row) {
-                                var date = aiEscapeHtml(String(row.transaction_date || ''));
-                                var amountNum = Number(row.amount) || 0;
-                                if (/^deposit$/i.test(String(row.transaction_type || '').trim())) {
-                                    amountNum = -Math.abs(amountNum);
-                                }
-                                var amount = aiEscapeHtml(formatMoneyInteger(amountNum));
-                                var type = aiEscapeHtml(String(row.transaction_type || ''));
-                                var account = aiEscapeHtml(String(row.account || ''));
-                                var memo = aiEscapeHtml(String(row.memo || ''));
-                                html += '<tr><td>' + date + '</td><td class="amount-col">' + amount + '</td><td>' + type + '</td><td>' + account + '</td><td>' + memo + '</td></tr>';
-                            });
-                            html += '</tbody></table></div>';
-                            body.innerHTML = html;
-                        })
-                        .catch(function() {
-                            body.innerHTML = '<p>Could not load raw data.</p>';
-                        });
                 }
                 function updateAiUsageBar(d) {
                     var bar = document.getElementById('aiUsageBar');
@@ -12627,6 +13286,78 @@ foreach ($team_members_rows as $tmRow) {
             </div>
             <div class="app-modal-body" id="vendorRawBody">
                 <p>Select a vendor row and click Raw to load transaction history.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay" id="appModalQboImportCompare" role="dialog" aria-modal="true" aria-labelledby="appModalQboImportCompareTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalQboImportCompareTitle">Compare with imported</h2>
+                <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal-body">
+                <div class="qbo-compare-toolbar">
+                    <div class="qbo-compare-toolbar-left">
+                        <label style="display:flex;gap:6px;align-items:center;font-size:13px;">
+                            <span>Import</span>
+                            <select id="qboCompareBatchSelect" aria-label="Filter by import batch">
+                                <option value="">All imports</option>
+                            </select>
+                        </label>
+                        <label style="display:flex;gap:6px;align-items:center;font-size:13px;">
+                            <input type="checkbox" id="qboCompareChangedOnly">
+                            <span>Changed only</span>
+                        </label>
+                    </div>
+                    <div class="qbo-compare-toolbar-right">
+                        <button type="button" class="btn-secondary" id="qboCompareExportBtn">Export Excel</button>
+                    </div>
+                </div>
+                <div class="qbo-compare-counts" id="qboCompareCounts" aria-live="polite"></div>
+                <div class="qbo-compare-table-wrap" id="qboCompareTableWrap">
+                    <p class="qbo-compare-empty" id="qboCompareEmpty">Loading…</p>
+                    <table class="qbo-compare-table" id="qboCompareTable" hidden>
+                        <thead>
+                            <tr>
+                                <th colspan="5">Imported snapshot</th>
+                                <th class="qbo-compare-gap" aria-hidden="true"></th>
+                                <th colspan="5">Current grid</th>
+                            </tr>
+                            <tr>
+                                <th>Date/Time</th>
+                                <th>Account</th>
+                                <th>Vendor</th>
+                                <th>Cost</th>
+                                <th>Frequency</th>
+                                <th class="qbo-compare-gap" aria-hidden="true"></th>
+                                <th>Date/Time</th>
+                                <th>Account</th>
+                                <th>Vendor</th>
+                                <th>Cost</th>
+                                <th>Frequency</th>
+                            </tr>
+                        </thead>
+                        <tbody id="qboCompareTableBody"></tbody>
+                    </table>
+                </div>
+                <div class="qbo-compare-pagination" id="qboComparePagination" hidden>
+                    <div>
+                        <label style="display:inline-flex;gap:6px;align-items:center;">
+                            <span>Rows per page</span>
+                            <select id="qboComparePageSize">
+                                <option value="25">25</option>
+                                <option value="50" selected>50</option>
+                                <option value="100">100</option>
+                            </select>
+                        </label>
+                        <span id="qboComparePageInfo" style="margin-left:10px;"></span>
+                    </div>
+                    <div class="qbo-compare-pagination-controls">
+                        <button type="button" class="btn-secondary" id="qboComparePrevBtn">Previous</button>
+                        <button type="button" class="btn-secondary" id="qboCompareNextBtn">Next</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

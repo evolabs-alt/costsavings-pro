@@ -378,6 +378,7 @@ final class OrgRole
             ['module' => 'Grid', 'permission' => 'Delete vendor rows', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
             ['module' => 'Grid', 'permission' => 'View vendor rows', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => true],
             ['module' => 'Grid', 'permission' => 'View vendor transactions detail popup', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => true],
+            ['module' => 'Grid', 'permission' => 'Add vendor transaction in detail popup', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
             ['module' => 'Grid', 'permission' => 'Update cost', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => false],
             ['module' => 'Grid', 'permission' => 'Update frequency', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => false],
             ['module' => 'Grid', 'permission' => 'Update cost owner', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => false],

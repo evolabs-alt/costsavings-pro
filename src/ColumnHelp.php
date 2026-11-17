@@ -44,7 +44,7 @@ final class ColumnHelp
             ],
             'account' => [
                 'title' => 'Account',
-                'html' => '<p class="column-help-intro">The imported QuickBooks / CSV GL account(s) for this vendor. When a vendor has activity in more than one account, all unique accounts are shown comma-separated (e.g. Advertising, Software). This value is set by import (not edited in the grid). Use filter and sort to focus on specific accounts.</p>',
+                'html' => '<p class="column-help-intro">The QuickBooks / CSV GL account(s) for this vendor. When a vendor has activity in more than one account, values are comma-separated (e.g. Advertising, Software). Populated by import and editable in the grid; edits are logged in the vendor chat. Use filter and sort to focus on specific accounts.</p>',
             ],
             'vendor' => [
                 'title' => 'Vendor',
@@ -83,7 +83,7 @@ final class ColumnHelp
             ],
             'chat' => [
                 'title' => 'Chat',
-                'html' => '<p class="column-help-intro">Per-vendor thread for team notes and an automatic action log. Status and purpose changes, plus AI purpose updates, are recorded here alongside manual messages. You can edit your own notes within one hour of posting. Type <strong>@name</strong> in a note to tag a teammate (matches username, display name, or email). A red dot means unread manual notes only—automatic log entries do not trigger the badge. An orange chat button means you were tagged in unread notes. Save the row first to enable chat. Use the filter icon to show vendors with <strong>Unread</strong> or <strong>Tagged</strong> messages.</p>',
+                'html' => '<p class="column-help-intro">Per-vendor thread for team notes and an automatic action log. Status, purpose, and account changes, plus AI purpose updates, are recorded here alongside manual messages. You can edit your own notes within one hour of posting. Type <strong>@name</strong> in a note to tag a teammate (matches username, display name, or email). A red dot means unread manual notes only—automatic log entries do not trigger the badge. An orange chat button means you were tagged in unread notes. Save the row first to enable chat. Use the filter icon to show vendors with <strong>Unread</strong> or <strong>Tagged</strong> messages.</p>',
             ],
         ];
     }

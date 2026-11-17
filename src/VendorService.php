@@ -190,23 +190,44 @@ class VendorService
      */
     public static function loadVisibleItems(PDO $pdo, int $userId, int $orgId, int $projectId, string $role): array
     {
+        $importedJoin = 'LEFT JOIN (
+                SELECT org_id, project_id, vendor_name_normalized, MAX(created_at) AS imported_at
+                FROM vendor_raw_transactions
+                WHERE org_id = :vrt_oid AND project_id = :vrt_pid
+                GROUP BY org_id, project_id, vendor_name_normalized
+            ) vrt ON vrt.org_id = cci.org_id
+                AND vrt.project_id = cci.project_id
+                AND vrt.vendor_name_normalized = LOWER(TRIM(cci.vendor_name))';
         if (!OrgRole::usesAssignedVisibilityFilter($role)) {
-            $sql = 'SELECT cci.*, pc.name AS category_name
+            $sql = 'SELECT cci.*, pc.name AS category_name, vrt.imported_at AS imported_at
                 FROM cost_calculator_items cci
                 LEFT JOIN project_categories pc ON pc.id = cci.category_id AND pc.project_id = cci.project_id
+                ' . $importedJoin . '
                 WHERE cci.org_id = :oid AND cci.project_id = :pid ORDER BY cci.id ASC';
             $stmt = $pdo->prepare($sql);
-            $stmt->execute([':oid' => $orgId, ':pid' => $projectId]);
+            $stmt->execute([
+                ':vrt_oid' => $orgId,
+                ':vrt_pid' => $projectId,
+                ':oid' => $orgId,
+                ':pid' => $projectId,
+            ]);
         } else {
             // Cost Owner: public rows plus confidential rows they manage.
-            $sql = 'SELECT cci.*, pc.name AS category_name
+            $sql = 'SELECT cci.*, pc.name AS category_name, vrt.imported_at AS imported_at
                 FROM cost_calculator_items cci
                 LEFT JOIN project_categories pc ON pc.id = cci.category_id AND pc.project_id = cci.project_id
+                ' . $importedJoin . '
                 WHERE cci.org_id = :oid AND cci.project_id = :pid AND (
                 cci.visibility = \'public\' OR (cci.visibility = \'confidential\' AND cci.manager_user_id = :uid)
             ) ORDER BY cci.id ASC';
             $stmt = $pdo->prepare($sql);
-            $stmt->execute([':oid' => $orgId, ':pid' => $projectId, ':uid' => $userId]);
+            $stmt->execute([
+                ':vrt_oid' => $orgId,
+                ':vrt_pid' => $projectId,
+                ':oid' => $orgId,
+                ':pid' => $projectId,
+                ':uid' => $userId,
+            ]);
         }
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $out = [];
@@ -279,6 +300,9 @@ class VendorService
                 ? self::jsonSafeFloat($row['renegotiated_annual_savings'])
                 : null,
             'last_payment_date' => $row['last_payment_date'] ?? null,
+            'imported_at' => isset($row['imported_at']) && $row['imported_at'] !== null && $row['imported_at'] !== ''
+                ? (string) $row['imported_at']
+                : null,
         ];
     }
 
@@ -293,6 +317,19 @@ class VendorService
         }
 
         return $f;
+    }
+
+    /**
+     * Normalize account for persistence / chat diffs. Empty and "(No account)" become ''.
+     */
+    public static function normalizeAccountValue($account): string
+    {
+        $acct = trim((string) ($account ?? ''));
+        if ($acct === '(No account)') {
+            return '';
+        }
+
+        return $acct;
     }
 
     /**
@@ -410,11 +447,11 @@ class VendorService
             $savedIds = [];
 
             $ins = $pdo->prepare(
-                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, category_id, vendor_name, cost_per_period, amount_min, amount_max, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date, negotiation_target_date, renegotiated_annual_savings)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                'INSERT INTO cost_calculator_items (org_id, project_id, user_id, user_email, manager_user_id, category_id, vendor_name, cost_per_period, amount_min, amount_max, frequency, annual_cost, status, cancel_keep, cancelled_status, visibility, purpose_of_subscription, cancellation_deadline, last_payment_date, negotiation_target_date, renegotiated_annual_savings, account)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             $upd = $pdo->prepare(
-                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, category_id=?, vendor_name=?, cost_per_period=?, amount_min=?, amount_max=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?, negotiation_target_date=?, renegotiated_annual_savings=?
+                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, category_id=?, vendor_name=?, cost_per_period=?, amount_min=?, amount_max=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?, negotiation_target_date=?, renegotiated_annual_savings=?, account=?
                  WHERE id=? AND org_id=? AND project_id=?'
             );
 
@@ -442,6 +479,8 @@ class VendorService
                 [$negotiationDate, $renegotiatedSavings] = self::resolveRenegotiationFields($item);
                 [$amountMin, $amountMax] = self::resolveAmountRangeFromItem($item);
                 $frequency = self::normalizeFrequencyValue($item['frequency'] ?? '');
+                $account = self::normalizeAccountValue($item['account'] ?? '');
+                $accountDb = $account !== '' ? $account : null;
 
                 if ($rowId > 0) {
                     if (!isset($allowedIds[$rowId])) {
@@ -475,6 +514,7 @@ class VendorService
                         $lastPay,
                         $negotiationDate,
                         $renegotiatedSavings,
+                        $accountDb,
                         $rowId,
                         $orgId,
                         $projectId,
@@ -503,6 +543,7 @@ class VendorService
                         $lastPay,
                         $negotiationDate,
                         $renegotiatedSavings,
+                        $accountDb,
                     ]);
                     $newId = (int) $pdo->lastInsertId();
                     if ($newId > 0) {
@@ -580,7 +621,7 @@ class VendorService
             $cc = '';
 
             $upd = $pdo->prepare(
-                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, category_id=?, vendor_name=?, cost_per_period=?, amount_min=?, amount_max=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?, negotiation_target_date=?, renegotiated_annual_savings=?
+                'UPDATE cost_calculator_items SET user_id=?, user_email=?, manager_user_id=?, category_id=?, vendor_name=?, cost_per_period=?, amount_min=?, amount_max=?, frequency=?, annual_cost=?, status=?, cancel_keep=?, cancelled_status=?, visibility=?, purpose_of_subscription=?, cancellation_deadline=?, last_payment_date=?, negotiation_target_date=?, renegotiated_annual_savings=?, account=?
                  WHERE id=? AND org_id=? AND project_id=?'
             );
 
@@ -609,6 +650,8 @@ class VendorService
                 [$negotiationDate, $renegotiatedSavings] = self::resolveRenegotiationFields($item);
                 [$amountMin, $amountMax] = self::resolveAmountRangeFromItem($item);
                 $frequency = self::normalizeFrequencyValue($item['frequency'] ?? '');
+                $account = self::normalizeAccountValue($item['account'] ?? '');
+                $accountDb = $account !== '' ? $account : null;
                 // Cost Owner cannot rename vendors — keep existing name.
                 $vendorName = isset($existingVendorNames[$rowId]) && $existingVendorNames[$rowId] !== ''
                     ? $existingVendorNames[$rowId]
@@ -633,6 +676,7 @@ class VendorService
                     $lastPay,
                     $negotiationDate,
                     $renegotiatedSavings,
+                    $accountDb,
                     $rowId,
                     $orgId,
                     $projectId,
@@ -774,10 +818,7 @@ class VendorService
                 $deadline = self::normDate($item['cancellation_deadline'] ?? null);
                 $lastPay = self::normDate($item['last_payment_date'] ?? null);
                 [$negotiationDate, $renegotiatedSavings] = self::resolveRenegotiationFields($item);
-                $account = trim((string) ($item['account'] ?? ''));
-                if ($account === '(No account)') {
-                    $account = '';
-                }
+                $account = self::normalizeAccountValue($item['account'] ?? '');
                 [$amountMin, $amountMax] = self::resolveAmountRangeFromItem($item);
                 $frequency = self::normalizeFrequencyValue($item['frequency'] ?? '');
                 $amountIrregular = !empty($item['amount_irregular'])
@@ -1101,6 +1142,38 @@ class VendorService
     }
 
     /**
+     * Whether the user may view/add raw transactions for this vendor under project visibility rules.
+     */
+    public static function isVendorRawAccessible(
+        PDO $pdo,
+        int $orgId,
+        int $projectId,
+        int $userId,
+        string $role,
+        string $vendorName
+    ): bool {
+        $vendorNorm = self::normalizeVendorName($vendorName);
+        if ($vendorNorm === '') {
+            return false;
+        }
+        if (!OrgRole::usesAssignedVisibilityFilter($role)) {
+            return true;
+        }
+        $check = $pdo->prepare(
+            'SELECT 1
+             FROM cost_calculator_items
+             WHERE org_id = :oid
+               AND project_id = :pid
+               AND LOWER(TRIM(vendor_name)) = :v
+               AND (visibility = \'public\' OR (visibility = \'confidential\' AND manager_user_id = :uid))
+             LIMIT 1'
+        );
+        $check->execute([':oid' => $orgId, ':pid' => $projectId, ':v' => $vendorNorm, ':uid' => $userId]);
+
+        return (bool) $check->fetchColumn();
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     public static function loadRawTransactionsForVisibleVendor(
@@ -1111,25 +1184,10 @@ class VendorService
         string $role,
         string $vendorName
     ): array {
-        $vendorNorm = self::normalizeVendorName($vendorName);
-        if ($vendorNorm === '') {
+        if (!self::isVendorRawAccessible($pdo, $orgId, $projectId, $userId, $role, $vendorName)) {
             return [];
         }
-        if (OrgRole::usesAssignedVisibilityFilter($role)) {
-            $check = $pdo->prepare(
-                'SELECT 1
-                 FROM cost_calculator_items
-                 WHERE org_id = :oid
-                   AND project_id = :pid
-                   AND LOWER(TRIM(vendor_name)) = :v
-                   AND (visibility = \'public\' OR (visibility = \'confidential\' AND manager_user_id = :uid))
-                 LIMIT 1'
-            );
-            $check->execute([':oid' => $orgId, ':pid' => $projectId, ':v' => $vendorNorm, ':uid' => $userId]);
-            if (!$check->fetchColumn()) {
-                return [];
-            }
-        }
+        $vendorNorm = self::normalizeVendorName($vendorName);
         $stmt = $pdo->prepare(
             'SELECT vendor_name, transaction_date, amount, transaction_type, account, memo, upload_batch_id, created_at
              FROM vendor_raw_transactions
@@ -1140,5 +1198,57 @@ class VendorService
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * Insert one manual raw transaction for a visible vendor.
+     *
+     * @return array{success:bool, inserted?:int, error?:string}
+     */
+    public static function addRawTransactionForVisibleVendor(
+        PDO $pdo,
+        int $orgId,
+        int $projectId,
+        int $userId,
+        string $role,
+        string $vendorName,
+        string $transactionDate,
+        float $amount,
+        string $transactionType,
+        string $account,
+        string $memo
+    ): array {
+        if (!self::isVendorRawAccessible($pdo, $orgId, $projectId, $userId, $role, $vendorName)) {
+            return ['success' => false, 'error' => 'Vendor not found or not visible'];
+        }
+        $date = trim($transactionDate);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            return ['success' => false, 'error' => 'A valid transaction date is required'];
+        }
+        $batchId = 'manual-' . uniqid('', true);
+        $result = self::appendRawTransactions(
+            $pdo,
+            $orgId,
+            $projectId,
+            $userId,
+            $batchId,
+            [[
+                'vendor_name' => $vendorName,
+                'transaction_date' => $date,
+                'amount' => $amount,
+                'transaction_type' => $transactionType,
+                'account' => $account,
+                'memo' => $memo,
+            ]]
+        );
+        if (!$result['success']) {
+            return $result;
+        }
+        $inserted = (int) ($result['inserted'] ?? 0);
+        if ($inserted < 1) {
+            return ['success' => false, 'error' => 'Could not save the transaction'];
+        }
+
+        return ['success' => true, 'inserted' => $inserted];
     }
 }
