@@ -4368,16 +4368,62 @@ foreach ($team_members_rows as $tmRow) {
             border: 1px solid var(--color-border);
         }
 
-        .privacy-notice {
+        .privacy-notice,
+        .info-notice {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
             margin: 0 0 12px;
             padding: 10px 12px;
             font-size: 13px;
             line-height: 1.45;
+            border-radius: 10px;
+            border: 1px solid transparent;
+            border-left-width: 3px;
+            border-left-style: solid;
+        }
+
+        .privacy-notice .modal-notice-icon,
+        .info-notice .modal-notice-icon {
+            flex: 0 0 auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
+            margin-top: 1px;
+            border-radius: 50%;
+            font-size: 12px;
+        }
+
+        .privacy-notice .modal-notice-text,
+        .info-notice .modal-notice-text {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .privacy-notice {
             color: #92400e;
             background: #fffbeb;
-            border: 1px solid #fcd34d;
-            border-left: 3px solid var(--color-warning);
-            border-radius: 6px;
+            border-color: #fcd34d;
+            border-left-color: var(--color-warning);
+        }
+
+        .privacy-notice .modal-notice-icon {
+            background: rgba(245, 158, 11, 0.16);
+            color: #b45309;
+        }
+
+        .info-notice {
+            color: #0c4a6e;
+            background: #f0f9ff;
+            border-color: #bae6fd;
+            border-left-color: var(--color-info);
+        }
+
+        .info-notice .modal-notice-icon {
+            background: rgba(14, 165, 233, 0.14);
+            color: var(--color-info);
         }
 
         .app-modal-body .data-actions {
@@ -4969,54 +5015,116 @@ foreach ($team_members_rows as $tmRow) {
             position: fixed;
             top: 20px;
             left: 50%;
-            transform: translateX(-50%);
-            background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-hover) 100%);
-            color: white;
-            text-align: center;
-            border-radius: 12px;
-            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: min(320px, 90vw);
+            max-width: min(480px, 92vw);
+            padding: 12px 12px 12px 14px;
+            background: rgba(255, 255, 255, 0.96);
+            color: var(--color-text-primary);
+            text-align: left;
+            border-radius: 14px;
+            border: 1px solid rgba(220, 227, 234, 0.95);
+            border-left: 4px solid var(--color-primary);
+            box-shadow: 0 16px 40px rgba(11, 88, 163, 0.14), 0 0 0 1px rgba(255, 255, 255, 0.7) inset;
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
             z-index: 22000;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            max-width: 90%;
+            font-size: 14px;
             font-weight: 500;
-            transition: all 0.3s ease-in-out;
+            line-height: 1.45;
             opacity: 0;
-            transform: translateX(-50%) translateY(-20px);
+            transform: translateX(-50%) translateY(-12px) scale(0.98);
+            transition: opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+                        transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+                        visibility 0.28s;
+            pointer-events: none;
         }
 
         body.wizard-active .snackbar {
             top: 88px;
         }
-        
-        .snackbar.error {
-            background: linear-gradient(135deg, #ef4444 0%, var(--color-error) 100%);
+
+        .snackbar.info {
+            border-left-color: var(--color-info);
         }
-        
+
         .snackbar.success {
-            background: linear-gradient(135deg, #22c55e 0%, var(--color-success) 100%);
+            border-left-color: var(--color-success);
         }
-        
+
+        .snackbar.error {
+            border-left-color: var(--color-error);
+        }
+
         .snackbar.show {
             visibility: visible;
             opacity: 1;
-            transform: translateX(-50%) translateY(0);
+            transform: translateX(-50%) translateY(0) scale(1);
+            pointer-events: auto;
         }
-        
+
+        .snackbar-icon {
+            flex: 0 0 auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: rgba(11, 88, 163, 0.1);
+            color: var(--color-primary);
+            font-size: 13px;
+        }
+
+        .snackbar.info .snackbar-icon {
+            background: rgba(14, 165, 233, 0.12);
+            color: var(--color-info);
+        }
+
+        .snackbar.success .snackbar-icon {
+            background: rgba(22, 163, 74, 0.12);
+            color: var(--color-success);
+        }
+
+        .snackbar.error .snackbar-icon {
+            background: rgba(220, 38, 38, 0.12);
+            color: var(--color-error);
+        }
+
+        .snackbar-message {
+            flex: 1 1 auto;
+            min-width: 0;
+            color: var(--color-text-primary);
+        }
+
         .snackbar .close-btn {
-            margin-left: 12px;
-            background: none;
+            flex: 0 0 auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            margin: 0;
+            padding: 0;
             border: none;
-            color: white;
-            font-size: 18px;
+            border-radius: 50%;
+            background: transparent;
+            color: var(--color-text-secondary);
+            font-size: 12px;
             cursor: pointer;
-            opacity: 0.8;
-            transition: opacity 0.2s ease;
+            transition: background 0.15s ease, color 0.15s ease;
         }
-        
+
         .snackbar .close-btn:hover {
-            opacity: 1;
+            background: rgba(11, 88, 163, 0.08);
+            color: var(--color-text-primary);
+        }
+
+        .snackbar .close-btn:focus-visible {
+            outline: 2px solid rgba(11, 88, 163, 0.35);
+            outline-offset: 1px;
         }
 
         /* Savvy theme overrides for legacy sections */
@@ -5200,9 +5308,12 @@ foreach ($team_members_rows as $tmRow) {
 <body>
 
     <!-- Snackbar for messages -->
-    <div id="snackbar" class="snackbar">
-        <span id="snackbar-message"></span>
-        <button type="button" class="close-btn" onclick="hideSnackbar()">&times;</button>
+    <div id="snackbar" class="snackbar" role="status" aria-live="polite" aria-atomic="true">
+        <span class="snackbar-icon" aria-hidden="true"><i class="fa-solid fa-circle-info"></i></span>
+        <span id="snackbar-message" class="snackbar-message"></span>
+        <button type="button" class="close-btn" onclick="hideSnackbar()" aria-label="Dismiss notification">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
     </div>
 
     <div id="appAiPopulateOverlay" class="app-ai-populate-overlay" hidden aria-live="polite" aria-busy="false">
@@ -5214,21 +5325,41 @@ foreach ($team_members_rows as $tmRow) {
 
     <script>
     // Snackbar Functions
+    let snackbarHideTimer = null;
+    const snackbarIcons = {
+        success: 'fa-solid fa-circle-check',
+        error: 'fa-solid fa-circle-exclamation',
+        info: 'fa-solid fa-circle-info',
+        '': 'fa-solid fa-bell'
+    };
+
     function showSnackbar(message, type = '') {
         const snackbar = document.getElementById('snackbar');
         const messageSpan = document.getElementById('snackbar-message');
-        
+        const iconEl = snackbar.querySelector('.snackbar-icon i');
+        const normalizedType = ['success', 'error', 'info'].includes(type) ? type : '';
+
         messageSpan.textContent = message;
-        snackbar.className = 'snackbar ' + type;
+        snackbar.className = 'snackbar' + (normalizedType ? ' ' + normalizedType : '');
+        if (iconEl) {
+            iconEl.className = snackbarIcons[normalizedType] || snackbarIcons[''];
+        }
+        snackbar.setAttribute('role', normalizedType === 'error' ? 'alert' : 'status');
         snackbar.classList.add('show');
-        
-        // Auto-hide after 5 seconds
-        setTimeout(hideSnackbar, 5000);
+
+        if (snackbarHideTimer) {
+            clearTimeout(snackbarHideTimer);
+        }
+        snackbarHideTimer = setTimeout(hideSnackbar, 5000);
     }
-    
+
     function hideSnackbar() {
         const snackbar = document.getElementById('snackbar');
         snackbar.classList.remove('show');
+        if (snackbarHideTimer) {
+            clearTimeout(snackbarHideTimer);
+            snackbarHideTimer = null;
+        }
     }
 
     function setButtonLoading(btn, isLoading, loadingLabel) {
@@ -11915,6 +12046,7 @@ foreach ($team_members_rows as $tmRow) {
 
     <?php
     $expense_visibility_notice = 'Please note that upon linking QBO to Savvy Saver, expenses will be visible to users. Review and remove any sensitive records before inviting managers to the project.';
+    $expense_visibility_notice_html = '<p class="privacy-notice"><span class="modal-notice-icon" aria-hidden="true"><i class="fa-solid fa-triangle-exclamation"></i></span><span class="modal-notice-text">' . htmlspecialchars($expense_visibility_notice) . '</span></p>';
     ?>
     <?php if ($can_invite_users): ?>
     <div class="app-modal-overlay" id="appModalMembersInvite" role="dialog" aria-modal="true" aria-labelledby="appModalMembersInviteTitle" aria-hidden="true">
@@ -11927,7 +12059,7 @@ foreach ($team_members_rows as $tmRow) {
                 <p style="margin:0 0 10px;color:#4b5563;font-size:14px;">
                     Usage: <strong><?php echo (int) $team_members_count; ?>/<?php echo (int) $team_members_max; ?></strong> users
                 </p>
-                <p class="privacy-notice"><?php echo htmlspecialchars($expense_visibility_notice); ?></p>
+                <?php echo $expense_visibility_notice_html; ?>
                 <div class="invite-block">
                     <form method="POST" style="display:flex;flex-direction:column;gap:10px;max-width:420px;">
                         <input type="hidden" name="action" value="invite_member">
@@ -12209,7 +12341,7 @@ foreach ($team_members_rows as $tmRow) {
                 <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.5;">
                     Link this organization to QuickBooks Online, then import transactions into this project.
                 </p>
-                <p class="privacy-notice"><?php echo htmlspecialchars($expense_visibility_notice); ?></p>
+                <?php echo $expense_visibility_notice_html; ?>
                 <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
                     <button type="button" class="btn-secondary app-modal-close project-wizard-cancel-btn" id="postCreateUploadSkipBtn">Cancel</button>
                     <button type="button" id="postCreateQboConnectBtn" style="<?php echo !empty($qbo_status['connected']) ? 'display:none;' : ''; ?>">Connect to QuickBooks</button>
@@ -12373,7 +12505,10 @@ foreach ($team_members_rows as $tmRow) {
                     <span id="csvAccountSelectionStatus" style="font-size:13px;color:#4b5563;"></span>
                 </div>
                 <div class="csv-account-list" id="csvAccountList" role="group" aria-label="GL accounts"></div>
-                <p style="margin:0 0 12px;font-size:13px;color:#4b5563;line-height:1.5;">Please note that Savvy Saver will only send emails for vendors from the accounts you select above.</p>
+                <p class="info-notice">
+                    <span class="modal-notice-icon" aria-hidden="true"><i class="fa-solid fa-circle-info"></i></span>
+                    <span class="modal-notice-text">Please note that Savvy Saver will only send emails for vendors from the accounts you select above.</span>
+                </p>
                 <div style="display:flex;gap:8px;justify-content:flex-end;">
                     <button type="button" class="btn-secondary app-modal-close" id="csvAccountCancelBtn">Cancel</button>
                     <button type="button" id="csvAccountImportBtn" disabled>Import selected</button>
@@ -12517,7 +12652,7 @@ foreach ($team_members_rows as $tmRow) {
                         Connect this organization’s QuickBooks company. Only Org Admins and Finance Admins can link or sync QBO.
                         App credentials are configured by Savvy on the server (same developer app for all customers).
                     </p>
-                    <p class="privacy-notice"><?php echo htmlspecialchars($expense_visibility_notice); ?></p>
+                    <?php echo $expense_visibility_notice_html; ?>
                     <p style="margin:0 0 8px;font-size:13px;">
                         Status:
                         <?php if (!empty($qbo_status['connected'])): ?>
@@ -12654,7 +12789,7 @@ foreach ($team_members_rows as $tmRow) {
             </div>
             <div class="app-modal-body">
                 <p style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;">Select the date range of transactions to import from QuickBooks Online (max 24 months).</p>
-                <p class="privacy-notice"><?php echo htmlspecialchars($expense_visibility_notice); ?></p>
+                <?php echo $expense_visibility_notice_html; ?>
                 <label class="checkbox-label" style="margin:12px 0 16px;">
                     <input type="checkbox" id="qboWeeklyImportConsent">
                     <span>I agree for Savvy Saver to make automated weekly transactions imports for purposes of notifying me of important updates. This will not affect the project content and setup.</span>
