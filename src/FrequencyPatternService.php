@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace CostSavings;
 
 /**
- * Detects payment frequency from payments-per-month rate (±10%),
- * splits mixed-cadence vendors into numbered rows, and flags irregular amounts.
+ * Detects payment frequency from payments-per-month rate (±10%)
+ * and flags irregular amounts. One payee maps to one vendor row.
  */
 class FrequencyPatternService
 {
@@ -34,7 +34,7 @@ class FrequencyPatternService
     ];
 
     /**
-     * Group raw transactions by payee, split mixed cadences, retag raw vendor names.
+     * Group raw transactions by payee and build one summary row per payee.
      *
      * @param array<int, array{vendor_name:string,transaction_date:string,amount:float,transaction_type?:string,account?:string,memo?:string}> $rawRows
      * @return array{
@@ -45,7 +45,7 @@ class FrequencyPatternService
     public static function buildSplitImportPayload(array $rawRows): array
     {
         $byPayee = [];
-        foreach ($rawRows as $idx => $row) {
+        foreach ($rawRows as $row) {
             $vendor = trim((string) ($row['vendor_name'] ?? ''));
             if ($vendor === '') {
                 continue;
@@ -54,7 +54,6 @@ class FrequencyPatternService
                 $byPayee[$vendor] = [];
             }
             $byPayee[$vendor][] = [
-                '_idx' => (int) $idx,
                 'date' => (string) ($row['transaction_date'] ?? ''),
                 'amount' => (float) ($row['amount'] ?? 0),
                 'account' => (string) ($row['account'] ?? ''),
@@ -64,38 +63,27 @@ class FrequencyPatternService
         }
 
         $summary = [];
-        $retag = []; // original raw index => new vendor_name
-
         foreach ($byPayee as $payee => $txs) {
-            $seriesList = self::extractSeries($txs);
-            $n = count($seriesList);
-            foreach ($seriesList as $i => $seriesTxs) {
-                $name = $n === 1 ? $payee : ($payee . ' (' . ($i + 1) . ')');
-                $summary[] = self::summarizeSeries($name, $seriesTxs);
-                foreach ($seriesTxs as $tx) {
-                    $retag[(int) $tx['_idx']] = $name;
-                }
-            }
+            $summary[] = self::summarizeSeries($payee, $txs);
         }
 
         $outRaw = [];
-        foreach ($rawRows as $idx => $row) {
-            $copy = [
-                'vendor_name' => $retag[(int) $idx] ?? (string) ($row['vendor_name'] ?? ''),
+        foreach ($rawRows as $row) {
+            $outRaw[] = [
+                'vendor_name' => (string) ($row['vendor_name'] ?? ''),
                 'transaction_date' => (string) ($row['transaction_date'] ?? ''),
                 'amount' => (float) ($row['amount'] ?? 0),
                 'transaction_type' => (string) ($row['transaction_type'] ?? ''),
                 'account' => (string) ($row['account'] ?? ''),
                 'memo' => (string) ($row['memo'] ?? ''),
             ];
-            $outRaw[] = $copy;
         }
 
         return ['summary' => $summary, 'raw' => $outRaw];
     }
 
     /**
-     * Summarize a single vendor series (no further splitting).
+     * Summarize a single vendor series.
      *
      * @param array<int, array{date:string,amount:float,account?:string,transaction_type?:string,memo?:string}> $rows
      * @return array{vendor_name:string,cost_per_period:float,frequency:string,annual_cost:float,last_payment_date:?string,account:string,amount_min:?float,amount_max:?float,amount_irregular:bool}
@@ -271,216 +259,5 @@ class FrequencyPatternService
             default:
                 return 0;
         }
-    }
-
-    public static function normalizeMemo(string $memo): string
-    {
-        $m = strtolower(trim($memo));
-        $m = preg_replace('/\d{4}[-\/]\d{1,2}[-\/]\d{1,2}/', ' ', $m) ?? $m;
-        $m = preg_replace('/\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4}/', ' ', $m) ?? $m;
-        $m = preg_replace('/\d{4,}/', ' ', $m) ?? $m;
-        $m = preg_replace('/[^a-z\s]/', ' ', $m) ?? $m;
-        $m = preg_replace('/\s+/', ' ', $m) ?? $m;
-
-        return trim($m);
-    }
-
-    /**
-     * @param array<int, array{_idx:int,date:string,amount:float,account:string,transaction_type:string,memo:string}> $txs
-     * @return array<int, array<int, array{_idx:int,date:string,amount:float,account:string,transaction_type:string,memo:string}>>
-     */
-    private static function extractSeries(array $txs): array
-    {
-        usort($txs, static function ($a, $b) {
-            $c = strcmp($a['date'], $b['date']);
-            if ($c !== 0) {
-                return $c;
-            }
-
-            return $a['_idx'] <=> $b['_idx'];
-        });
-
-        $spend = [];
-        $deposits = [];
-        foreach ($txs as $tx) {
-            if (CsvImport::isDepositType($tx['transaction_type'])) {
-                $deposits[] = $tx;
-            } else {
-                $spend[] = $tx;
-            }
-        }
-        $pool = count($spend) > 0 ? $spend : $txs;
-
-        $remaining = $pool;
-        $series = [];
-
-        while (count($remaining) >= 2) {
-            $best = self::findBestCadenceSubsequence($remaining);
-            if ($best === null) {
-                break;
-            }
-            $series[] = $best['txs'];
-            $used = [];
-            foreach ($best['txs'] as $tx) {
-                $used[$tx['_idx']] = true;
-            }
-            $remaining = array_values(array_filter($remaining, static function ($tx) use ($used) {
-                return !isset($used[$tx['_idx']]);
-            }));
-        }
-
-        if (count($remaining) > 0) {
-            // Group leftovers by memo cluster when helpful
-            $byMemo = [];
-            foreach ($remaining as $tx) {
-                $key = self::normalizeMemo($tx['memo']);
-                if ($key === '') {
-                    $key = '__empty__';
-                }
-                if (!isset($byMemo[$key])) {
-                    $byMemo[$key] = [];
-                }
-                $byMemo[$key][] = $tx;
-            }
-            if (count($byMemo) > 1 && count($series) > 0) {
-                foreach ($byMemo as $group) {
-                    $series[] = $group;
-                }
-            } else {
-                $series[] = $remaining;
-            }
-        }
-
-        // Include deposit-only leftover only when no spend existed
-        if (count($spend) === 0 && count($deposits) > 0 && count($series) === 0) {
-            $series[] = $deposits;
-        }
-
-        usort($series, static function ($a, $b) {
-            $da = $a[0]['date'] ?? '';
-            $db = $b[0]['date'] ?? '';
-            $c = strcmp($da, $db);
-            if ($c !== 0) {
-                return $c;
-            }
-
-            return count($b) <=> count($a);
-        });
-
-        return $series;
-    }
-
-    /**
-     * @param array<int, array{_idx:int,date:string,amount:float,account:string,transaction_type:string,memo:string}> $remaining
-     * @return array{txs: array<int, array>, frequency: string, score: float}|null
-     */
-    private static function findBestCadenceSubsequence(array $remaining): ?array
-    {
-        $best = null;
-        $n = count($remaining);
-        if ($n < 2) {
-            return null;
-        }
-
-        foreach (self::PERIOD_DAYS as $freq => $periodDays) {
-            for ($start = 0; $start < $n - 1; $start++) {
-                $chain = [$remaining[$start]];
-                $memoKey = self::normalizeMemo($remaining[$start]['memo']);
-                $anchorAmt = round((float) $remaining[$start]['amount'], 2);
-
-                try {
-                    $lastDate = new \DateTimeImmutable($remaining[$start]['date']);
-                } catch (\Exception $e) {
-                    continue;
-                }
-
-                for ($j = $start + 1; $j < $n; $j++) {
-                    try {
-                        $d = new \DateTimeImmutable($remaining[$j]['date']);
-                    } catch (\Exception $e) {
-                        continue;
-                    }
-                    $gap = (int) $d->diff($lastDate)->format('%a');
-                    if ($gap <= 0) {
-                        continue;
-                    }
-                    $rel = abs($gap - $periodDays) / $periodDays;
-                    if ($rel > self::TOLERANCE) {
-                        // Allow skipping if too soon (overlapping other cadence)
-                        if ($gap < $periodDays * (1 - self::TOLERANCE)) {
-                            continue;
-                        }
-                        // Too late — stop extending from this anchor for contiguous fit
-                        break;
-                    }
-
-                    $chain[] = $remaining[$j];
-                    $lastDate = $d;
-                }
-
-                if (count($chain) < 2) {
-                    continue;
-                }
-
-                $dates = array_column($chain, 'date');
-                $inferred = self::inferFrequencyFromDates($dates);
-                if ($inferred !== $freq && $inferred !== 'irregular') {
-                    // Rate-based check may differ slightly; still accept if gap chain matched this period
-                    // but prefer rate confirmation when possible
-                }
-                if ($inferred === 'irregular') {
-                    // Re-check rate for this chain alone
-                    $inferred = self::inferFrequencyFromDates($dates);
-                }
-                if ($inferred !== $freq) {
-                    // Gap chain matched period; allow if rate is within tolerance of this freq
-                    $rateOk = false;
-                    try {
-                        $count = count($dates);
-                        $first = new \DateTimeImmutable($dates[0]);
-                        $last = new \DateTimeImmutable($dates[$count - 1]);
-                        $days = (int) $last->diff($first)->format('%a');
-                        if ($days > 0 && $count >= 2) {
-                            $months = max($days / self::DAYS_PER_MONTH, 1 / self::DAYS_PER_MONTH);
-                            $rate = ($count - 1) / $months;
-                            $target = self::TARGET_RATES[$freq];
-                            if (abs($rate - $target) / $target <= self::TOLERANCE) {
-                                $rateOk = true;
-                            }
-                        }
-                    } catch (\Exception $e) {
-                        $rateOk = false;
-                    }
-                    if (!$rateOk) {
-                        continue;
-                    }
-                }
-
-                $sameMemo = 0;
-                $sameAmt = 0;
-                foreach ($chain as $tx) {
-                    if (self::normalizeMemo($tx['memo']) === $memoKey && $memoKey !== '') {
-                        $sameMemo++;
-                    }
-                    if (round((float) $tx['amount'], 2) === $anchorAmt) {
-                        $sameAmt++;
-                    }
-                }
-                $len = count($chain);
-                $score = $len * 10.0
-                    + ($sameMemo / $len) * 3.0
-                    + ($sameAmt / $len) * 2.0;
-
-                if ($best === null || $score > $best['score']) {
-                    $best = [
-                        'txs' => $chain,
-                        'frequency' => $freq,
-                        'score' => $score,
-                    ];
-                }
-            }
-        }
-
-        return $best;
     }
 }
