@@ -33,10 +33,10 @@ body.wizard-active .app-modal {
 }
 body.wizard-active #appModalCsvAccounts .app-modal,
 body.wizard-active #appModalQboDateRange .app-modal {
-    max-height: calc(100vh - 228px);
+    max-height: calc(100vh - 148px);
 }
 body.wizard-active .csv-account-list {
-    max-height: min(120px, 24vh);
+    max-height: min(200px, 30vh);
 }
 body.wizard-active .app-modal-body {
     overflow-y: auto;
@@ -122,10 +122,10 @@ body.wizard-active .snackbar {
     }
     body.wizard-active #appModalCsvAccounts .app-modal,
     body.wizard-active #appModalQboDateRange .app-modal {
-        max-height: calc(100vh - 200px);
+        max-height: calc(100vh - 120px);
     }
     body.wizard-active .csv-account-list {
-        max-height: min(100px, 20vh);
+        max-height: min(180px, 26vh);
     }
     body.wizard-active .snackbar {
         top: 76px;
