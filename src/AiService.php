@@ -383,9 +383,158 @@ class AiService
     }
 
     /**
+     * Structured vendor overlap pairs for the project wizard (JSON only).
+     *
+     * @param array<int, array{id?:int, vendor_name:string, annual_cost:float, purpose?:string}> $vendors
+     * @return array{success:bool, overlaps?:array<int, array<string, mixed>>, error?:string}
+     */
+    public static function analyzeVendorOverlapsJson(PDO $pdo, int $userId, array $vendors): array
+    {
+        $hasPerplexity = defined('PERPLEXITY_API_KEY') && PERPLEXITY_API_KEY !== '';
+        $hasOpenAI = defined('OPENAI_API_KEY') && OPENAI_API_KEY !== '';
+        if (!$hasPerplexity && !$hasOpenAI) {
+            return ['success' => false, 'error' => 'AI is not configured.'];
+        }
+
+        \ensureAiUsageTable($pdo);
+        $ym = date('Y-m');
+        $limit = defined('AI_MONTHLY_LIMIT') ? (int) AI_MONTHLY_LIMIT : 50;
+        try {
+            $st0 = $pdo->prepare(
+                'SELECT `usage_count` FROM `ai_usage` WHERE `user_id` = ? AND `year_month` = ?'
+            );
+            $st0->execute([$userId, $ym]);
+            $row0 = $st0->fetch(PDO::FETCH_ASSOC);
+            $current = (int) (is_array($row0) ? ($row0['usage_count'] ?? 0) : 0);
+        } catch (PDOException $e) {
+            error_log('AiService::analyzeVendorOverlapsJson usage read: ' . $e->getMessage());
+
+            return ['success' => false, 'error' => 'Could not check AI usage.'];
+        }
+        if ($current >= $limit) {
+            return ['success' => false, 'error' => 'Monthly AI limit reached (' . $limit . ').'];
+        }
+
+        try {
+            $st = $pdo->prepare(
+                'INSERT INTO `ai_usage` (`user_id`, `year_month`, `usage_count`) VALUES (?,?,1)
+                 ON DUPLICATE KEY UPDATE `usage_count` = `usage_count` + 1'
+            );
+            $st->execute([$userId, $ym]);
+        } catch (PDOException $e) {
+            error_log('AiService::analyzeVendorOverlapsJson db: ' . $e->getMessage());
+
+            return ['success' => false, 'error' => 'Could not record usage.'];
+        }
+
+        $lines = [];
+        foreach ($vendors as $v) {
+            if (!is_array($v)) {
+                continue;
+            }
+            $lines[] = sprintf(
+                '- id=%d | %s | annual ~$%s | purpose: %s',
+                (int) ($v['id'] ?? 0),
+                (string) ($v['vendor_name'] ?? ''),
+                number_format((float) ($v['annual_cost'] ?? 0), 2, '.', ''),
+                substr((string) ($v['purpose'] ?? ''), 0, 220)
+            );
+        }
+        $prompt = "Identify vendors that likely offer overlapping or redundant services (different vendor names).\n"
+            . "Do NOT flag exact same-name duplicates.\n"
+            . "Respond with STRICT JSON only. No markdown, no prose.\n"
+            . "Schema: {\"overlaps\":[{\"vendor_a\":\"\",\"vendor_b\":\"\",\"reason\":\"\",\"suggested_annual_savings\":0}]}\n"
+            . "Rules: compare different vendors only; reason <= 160 chars; suggested_annual_savings is a number "
+            . "(conservative estimate of annual spend that could be cut by consolidating); max 25 pairs; "
+            . "prefer highest-impact pairs.\n\nVendors:\n" . implode("\n", $lines);
+
+        $maxTokens = defined('AI_MAX_TOKENS') ? max(1200, (int) AI_MAX_TOKENS) : 1800;
+        $messages = [
+            ['role' => 'system', 'content' => 'You analyze vendor spend for redundant services. Return strict JSON only.'],
+            ['role' => 'user', 'content' => $prompt],
+        ];
+
+        if ($hasPerplexity) {
+            $payload = [
+                'model' => defined('AI_MODEL') ? AI_MODEL : 'sonar',
+                'messages' => $messages,
+                'max_tokens' => $maxTokens,
+                'temperature' => 0.2,
+            ];
+            $url = defined('PERPLEXITY_API_URL') ? PERPLEXITY_API_URL : 'https://api.perplexity.ai/chat/completions';
+            $out = self::postChatCompletion($url, PERPLEXITY_API_KEY, $payload);
+        } else {
+            $payload = [
+                'model' => 'gpt-4o-mini',
+                'messages' => $messages,
+                'max_tokens' => $maxTokens,
+                'temperature' => 0.2,
+            ];
+            $out = self::postChatCompletion('https://api.openai.com/v1/chat/completions', OPENAI_API_KEY, $payload);
+        }
+
+        if (!$out['ok']) {
+            return ['success' => false, 'error' => (string) ($out['error'] ?? 'Overlap analysis failed.')];
+        }
+
+        return self::parseVendorOverlapsJson((string) ($out['text'] ?? ''));
+    }
+
+    /**
+     * @return array{success:bool, overlaps?:array<int, array<string, mixed>>, error?:string}
+     */
+    private static function parseVendorOverlapsJson(string $raw): array
+    {
+        $json = trim($raw);
+        if (str_starts_with($json, '```')) {
+            $json = preg_replace('/^```(?:json)?\s*/i', '', $json) ?? $json;
+            $json = preg_replace('/\s*```$/', '', $json) ?? $json;
+            $json = trim($json);
+        }
+        $data = json_decode($json, true);
+        if (!is_array($data)) {
+            $start = strpos($json, '{');
+            $end = strrpos($json, '}');
+            if ($start !== false && $end !== false && $end > $start) {
+                $data = json_decode(substr($json, $start, ($end - $start + 1)), true);
+            }
+        }
+        if (!is_array($data)) {
+            return ['success' => false, 'error' => 'Overlap analysis returned invalid JSON.'];
+        }
+        $list = isset($data['overlaps']) && is_array($data['overlaps']) ? $data['overlaps'] : [];
+        $overlaps = [];
+        foreach ($list as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $a = trim((string) ($row['vendor_a'] ?? ''));
+            $b = trim((string) ($row['vendor_b'] ?? ''));
+            if ($a === '' || $b === '') {
+                continue;
+            }
+            if (VendorService::normalizeVendorName($a) === VendorService::normalizeVendorName($b)) {
+                continue;
+            }
+            $overlaps[] = [
+                'kind' => 'overlap',
+                'vendor_a' => $a,
+                'vendor_b' => $b,
+                'reason' => substr(trim((string) ($row['reason'] ?? '')), 0, 200),
+                'suggested_annual_savings' => round(max(0, (float) ($row['suggested_annual_savings'] ?? 0)), 2),
+            ];
+            if (count($overlaps) >= 25) {
+                break;
+            }
+        }
+
+        return ['success' => true, 'overlaps' => $overlaps];
+    }
+
+    /**
      * @param array<string, mixed> $payload
      *
-     * @return array{ok: bool, text?: string}
+     * @return array{ok: bool, text?: string, error?: string}
      */
     private static function postChatCompletion(string $url, string $bearer, array $payload): array
     {
@@ -402,14 +551,14 @@ class AiService
             ],
             \CURLOPT_POSTFIELDS => $body,
             \CURLOPT_RETURNTRANSFER => true,
-            \CURLOPT_TIMEOUT => 60,
+            \CURLOPT_TIMEOUT => 90,
         ]);
         $resp = \curl_exec($ch);
         $code = (int) \curl_getinfo($ch, \CURLINFO_HTTP_CODE);
         \curl_close($ch);
 
         if ($resp === false || $code >= 400) {
-            return ['ok' => false];
+            return ['ok' => false, 'error' => 'AI request failed.'];
         }
         $data = \json_decode($resp, true);
         $text = $data['choices'][0]['message']['content'] ?? '';

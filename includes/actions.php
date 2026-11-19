@@ -14,6 +14,7 @@ use CostSavings\QboService;
 use CostSavings\RoleContext;
 use CostSavings\VendorChatService;
 use CostSavings\VendorPurposeService;
+use CostSavings\VendorRedundancyService;
 use CostSavings\VendorService;
 
 function normalizeUserEmail($email) {
@@ -2958,6 +2959,42 @@ function handleOrgRename(): void
     } catch (PDOException $e) {
         error_log('handleOrgRename: ' . $e->getMessage());
         echo json_encode(['success' => false, 'error' => 'Could not rename organization.']);
+    }
+    exit;
+}
+
+function handleAnalyzeVendorRedundancy(): void
+{
+    header('Content-Type: application/json; charset=UTF-8');
+    if (empty($_SESSION['user_id']) || (int) ($_SESSION['org_id'] ?? 0) < 1) {
+        echo json_encode(['success' => false, 'error' => 'Not signed in.']);
+        exit;
+    }
+    try {
+        $pdo = getDBConnection();
+        $projectId = requireActiveProjectId($pdo);
+        if ($projectId === null) {
+            echo json_encode([
+                'success' => true,
+                'duplicates' => [],
+                'overlaps' => [],
+                'duplicate_savings' => 0,
+                'overlap_savings' => 0,
+            ]);
+            exit;
+        }
+        $items = VendorService::loadVisibleItems(
+            $pdo,
+            (int) $_SESSION['user_id'],
+            (int) $_SESSION['org_id'],
+            $projectId,
+            effectiveVendorGridRole()
+        );
+        $result = VendorRedundancyService::analyze($pdo, (int) $_SESSION['user_id'], $items);
+        echo json_encode($result, JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        error_log('handleAnalyzeVendorRedundancy: ' . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => 'Could not analyze vendors.']);
     }
     exit;
 }

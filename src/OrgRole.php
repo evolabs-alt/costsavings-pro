@@ -22,6 +22,7 @@ final class OrgRole
 
     public const VISIBILITY_FULL = 'full';
     public const VISIBILITY_ASSIGNED = 'assigned';
+    public const VISIBILITY_PUBLIC = 'public';
 
     /** @return list<string> */
     public static function allRoles(): array
@@ -241,17 +242,31 @@ final class OrgRole
         return self::visibilityMode($role) === self::VISIBILITY_ASSIGNED;
     }
 
+    public static function seesPublicOnly(string $role): bool
+    {
+        return self::visibilityMode($role) === self::VISIBILITY_PUBLIC;
+    }
+
     /**
-     * full = all rows; assigned = public + confidential where manager_user_id = user.
+     * full = all rows;
+     * assigned = public + confidential where manager_user_id = user;
+     * public = public rows only (Executive/Viewer).
      */
     public static function visibilityMode(string $role): string
     {
-        return self::isCostOwner($role) ? self::VISIBILITY_ASSIGNED : self::VISIBILITY_FULL;
+        if (self::isCostOwner($role)) {
+            return self::VISIBILITY_ASSIGNED;
+        }
+        if (self::isExecutive($role)) {
+            return self::VISIBILITY_PUBLIC;
+        }
+
+        return self::VISIBILITY_FULL;
     }
 
     /**
      * Whether loadVisibleItems should apply the Cost Owner filter.
-     * Org admin / finance / PM / executive see all rows.
+     * Org admin / finance / PM see all rows; Executive sees public only.
      */
     public static function usesAssignedVisibilityFilter(string $role): bool
     {
@@ -333,7 +348,7 @@ final class OrgRole
             ],
             [
                 'title' => 'Executive/Viewer',
-                'description' => 'Read-only access to all project data, exports, and row chat. No edits, AI assistant, or project emails.',
+                'description' => 'Read-only access to public project data, exports, and row chat. Cannot see confidential rows. No edits, AI assistant, or project emails.',
             ],
         ];
     }
@@ -356,6 +371,7 @@ final class OrgRole
     {
         $pmLimited = 'PM, Cost Owner, Executive only';
         $assignedOnly = 'Assigned rows only';
+        $publicOnly = 'Public rows only';
 
         return [
             ['module' => 'Organization', 'permission' => 'Connect/Disconnect QBO to organization', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => false, 'cost_owner' => false, 'executive' => false],
@@ -368,7 +384,7 @@ final class OrgRole
             ['module' => 'Project', 'permission' => 'Create project', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
             ['module' => 'Project', 'permission' => 'Change project name', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
             ['module' => 'Project', 'permission' => 'Delete project', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
-            ['module' => 'Project', 'permission' => 'Export project reports (download Excel, PDF)', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => true],
+            ['module' => 'Project', 'permission' => 'Export project reports (download Excel, PDF)', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => $publicOnly],
             ['module' => 'Project', 'permission' => 'Receive all project emails', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
             ['module' => 'Project', 'permission' => 'AI Assistant', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => true, 'executive' => false],
             ['module' => 'Project', 'permission' => 'Generate vendor purpose', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => true, 'executive' => false],
@@ -376,15 +392,15 @@ final class OrgRole
             ['module' => 'Grid', 'permission' => 'Update vendor name', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
             ['module' => 'Grid', 'permission' => 'Add vendor rows', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
             ['module' => 'Grid', 'permission' => 'Delete vendor rows', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
-            ['module' => 'Grid', 'permission' => 'View vendor rows', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => true],
-            ['module' => 'Grid', 'permission' => 'View vendor transactions detail popup', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => true],
+            ['module' => 'Grid', 'permission' => 'View vendor rows', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => $publicOnly],
+            ['module' => 'Grid', 'permission' => 'View vendor transactions detail popup', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => $publicOnly],
             ['module' => 'Grid', 'permission' => 'Add vendor transaction in detail popup', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => false, 'executive' => false],
             ['module' => 'Grid', 'permission' => 'Update cost', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => false],
             ['module' => 'Grid', 'permission' => 'Update frequency', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => false],
             ['module' => 'Grid', 'permission' => 'Update cost owner', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => false],
             ['module' => 'Grid', 'permission' => 'Update visibility', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => false],
             ['module' => 'Grid', 'permission' => 'Update status', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => false],
-            ['module' => 'Grid', 'permission' => 'Ability to chat', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => true],
+            ['module' => 'Grid', 'permission' => 'Ability to chat', 'org_admin' => true, 'finance_admin' => true, 'project_manager' => true, 'cost_owner' => $assignedOnly, 'executive' => $publicOnly],
         ];
     }
 

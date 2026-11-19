@@ -812,10 +812,33 @@ class VendorChatService
             return null;
         }
 
-        if (!OrgRole::usesAssignedVisibilityFilter($role)) {
+        if (OrgRole::usesAssignedVisibilityFilter($role)) {
             $sql = 'SELECT id, vendor_name, visibility, manager_user_id
                     FROM cost_calculator_items
-                    WHERE id = :id AND org_id = :oid AND project_id = :pid
+                    WHERE id = :id
+                      AND org_id = :oid
+                      AND project_id = :pid
+                      AND (visibility = \'public\' OR (visibility = \'confidential\' AND manager_user_id = :uid))
+                    LIMIT 1';
+            $st = $pdo->prepare($sql);
+            $st->execute([
+                ':id' => $vendorItemId,
+                ':oid' => $orgId,
+                ':pid' => $projectId,
+                ':uid' => $userId,
+            ]);
+
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            return $row ?: null;
+        }
+
+        if (OrgRole::seesPublicOnly($role)) {
+            $sql = 'SELECT id, vendor_name, visibility, manager_user_id
+                    FROM cost_calculator_items
+                    WHERE id = :id
+                      AND org_id = :oid
+                      AND project_id = :pid
+                      AND visibility = \'public\'
                     LIMIT 1';
             $st = $pdo->prepare($sql);
             $st->execute([
@@ -830,17 +853,13 @@ class VendorChatService
 
         $sql = 'SELECT id, vendor_name, visibility, manager_user_id
                 FROM cost_calculator_items
-                WHERE id = :id
-                  AND org_id = :oid
-                  AND project_id = :pid
-                  AND (visibility = \'public\' OR (visibility = \'confidential\' AND manager_user_id = :uid))
+                WHERE id = :id AND org_id = :oid AND project_id = :pid
                 LIMIT 1';
         $st = $pdo->prepare($sql);
         $st->execute([
             ':id' => $vendorItemId,
             ':oid' => $orgId,
             ':pid' => $projectId,
-            ':uid' => $userId,
         ]);
 
         $row = $st->fetch(PDO::FETCH_ASSOC);

@@ -1,0 +1,245 @@
+/* New project wizard — full-bleed top progress bar + coach marks + review */
+.wizard-progress-bar {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 20000;
+    background: linear-gradient(180deg, #0b3d6e 0%, #0f4c81 100%);
+    color: #fff;
+    box-shadow: 0 4px 18px rgba(11, 61, 110, 0.35);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.wizard-progress-bar.is-visible {
+    display: block;
+}
+body.wizard-active {
+    padding-top: 72px;
+}
+.wizard-progress-bar__inner {
+    padding: 10px 16px 12px;
+    box-sizing: border-box;
+}
+.wizard-progress-bar__meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+.wizard-progress-bar__title {
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+.wizard-progress-bar__step-label {
+    opacity: 0.92;
+    font-weight: 500;
+}
+.wizard-progress-bar__track {
+    position: relative;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.22);
+    overflow: hidden;
+}
+.wizard-progress-bar__fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #5eead4 0%, #38bdf8 55%, #fbbf24 100%);
+    transition: width 0.35s ease;
+}
+.wizard-progress-bar__steps {
+    display: flex;
+    justify-content: space-between;
+    gap: 4px;
+    margin-top: 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.wizard-progress-bar__steps::-webkit-scrollbar {
+    display: none;
+}
+.wizard-progress-bar__tick {
+    flex: 1 1 0;
+    min-width: 0;
+    text-align: center;
+    font-size: 11px;
+    line-height: 1.25;
+    opacity: 0.55;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 2px;
+}
+.wizard-progress-bar__tick.is-done {
+    opacity: 0.85;
+}
+.wizard-progress-bar__tick.is-current {
+    opacity: 1;
+    font-weight: 700;
+    color: #fde68a;
+}
+@media (max-width: 720px) {
+    body.wizard-active {
+        padding-top: 64px;
+    }
+    .wizard-progress-bar__tick:not(.is-current) {
+        font-size: 0;
+        line-height: 0;
+    }
+    .wizard-progress-bar__tick:not(.is-current)::before {
+        content: '';
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.45);
+        margin: 4px auto;
+    }
+    .wizard-progress-bar__tick.is-done:not(.is-current)::before {
+        background: #5eead4;
+    }
+}
+
+.wizard-coach-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 21000;
+    pointer-events: auto;
+}
+.wizard-coach-overlay.is-open {
+    display: block;
+}
+.wizard-coach-overlay__dim {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    display: none;
+}
+.wizard-coach-overlay__dim.is-on {
+    display: block;
+}
+.wizard-coach-overlay__spot {
+    position: absolute;
+    border-radius: 10px;
+    box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.55);
+    outline: 2px solid #38bdf8;
+    background: transparent;
+    pointer-events: none;
+    transition: top 0.2s ease, left 0.2s ease, width 0.2s ease, height 0.2s ease;
+}
+.wizard-coach-bubble {
+    position: absolute;
+    z-index: 1;
+    max-width: min(360px, calc(100vw - 24px));
+    background: #fff;
+    color: #1f2937;
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.28);
+    padding: 14px 14px 12px;
+    box-sizing: border-box;
+}
+.wizard-coach-bubble__text {
+    margin: 0 0 12px;
+    font-size: 14px;
+    line-height: 1.5;
+}
+.wizard-coach-bubble__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.wizard-coach-bubble__arrow {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: #fff;
+    border-left: 1px solid #e5e7eb;
+    border-top: 1px solid #e5e7eb;
+    transform: rotate(45deg);
+}
+
+.wizard-review-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 0 14px;
+}
+.wizard-review-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.wizard-review-pill--dup {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #f59e0b;
+}
+.wizard-review-pill--overlap {
+    background: #e0e7ff;
+    color: #3730a3;
+    border: 1px solid #818cf8;
+}
+.wizard-review-list {
+    max-height: min(42vh, 360px);
+    overflow: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+}
+.wizard-review-row {
+    display: grid;
+    gap: 4px;
+    padding: 10px 12px;
+    border-bottom: 1px solid #f3f4f6;
+    font-size: 13px;
+    line-height: 1.4;
+}
+.wizard-review-row:last-child {
+    border-bottom: none;
+}
+.wizard-review-row--dup {
+    background: #fffbeb;
+    border-left: 4px solid #f59e0b;
+}
+.wizard-review-row--overlap {
+    background: #eef2ff;
+    border-left: 4px solid #6366f1;
+}
+.wizard-review-row__title {
+    font-weight: 600;
+    color: #111827;
+}
+.wizard-review-row__meta {
+    color: #4b5563;
+}
+.wizard-review-empty {
+    margin: 0;
+    padding: 16px;
+    text-align: center;
+    color: #6b7280;
+    font-size: 14px;
+}
+
+#appModalVendorRedundancy .app-modal {
+    max-width: 720px;
+}
+#appModalSetupComplete .app-modal {
+    max-width: 440px;
+    text-align: center;
+}
+.setup-complete-icon {
+    font-size: 42px;
+    line-height: 1;
+    margin-bottom: 8px;
+}

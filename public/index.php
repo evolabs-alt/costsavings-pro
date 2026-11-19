@@ -189,6 +189,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'copy_project_chats':
                 handleCopyProjectChats();
                 break;
+            case 'analyze_vendor_redundancy':
+                handleAnalyzeVendorRedundancy();
+                break;
             case 'category_create':
                 handleCategoryCreate();
                 break;
@@ -1765,6 +1768,7 @@ foreach ($team_members_rows as $tmRow) {
         }
 
         .app-header {
+            position: relative;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -1783,6 +1787,7 @@ foreach ($team_members_rows as $tmRow) {
             gap: 12px;
             min-width: 0;
             flex: 0 1 auto;
+            z-index: 1;
         }
 
         .app-header-logo {
@@ -1801,6 +1806,41 @@ foreach ($team_members_rows as $tmRow) {
             white-space: nowrap;
             padding-left: 12px;
             border-left: 1px solid rgba(255, 255, 255, 0.22);
+        }
+
+        .app-header-context {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            max-width: min(50vw, 420px);
+            min-width: 0;
+            padding: 0 8px;
+            box-sizing: border-box;
+            color: rgba(255, 255, 255, 0.9);
+            font-family: 'Inter', system-ui, sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: 0.01em;
+            text-align: center;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .app-header-context-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+        }
+
+        .app-header-context-sep {
+            flex: 0 0 auto;
+            color: rgba(255, 255, 255, 0.45);
         }
 
         /* Responsive styles for cost savings tool table */
@@ -3471,6 +3511,7 @@ foreach ($team_members_rows as $tmRow) {
             border: 0;
             background: transparent;
             box-shadow: none;
+            z-index: 1;
         }
 
         .app-nav-cluster {
@@ -4761,6 +4802,17 @@ foreach ($team_members_rows as $tmRow) {
                 justify-content: center;
             }
 
+            .app-header-context {
+                position: static;
+                left: auto;
+                top: auto;
+                transform: none;
+                width: 100%;
+                max-width: none;
+                padding: 2px 4px 0;
+                order: 0;
+            }
+
             .app-nav {
                 justify-content: center;
             }
@@ -5128,6 +5180,7 @@ foreach ($team_members_rows as $tmRow) {
             color: #374151;
         }
 
+        <?php readfile(__DIR__ . '/../includes/project_wizard_styles.css'); ?>
     </style>
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-K84J5NBK1Y"></script>
@@ -5271,6 +5324,30 @@ foreach ($team_members_rows as $tmRow) {
     });
     </script>
 
+    <div id="wizardProgressBar" class="wizard-progress-bar" role="progressbar" aria-valuemin="1" aria-valuenow="1" aria-valuemax="10" aria-label="Project setup progress" hidden>
+        <div class="wizard-progress-bar__inner">
+            <div id="wizardProgressMeta" class="wizard-progress-bar__meta">
+                <span class="wizard-progress-bar__title">Project setup</span>
+                <span class="wizard-progress-bar__step-label">Step 1</span>
+            </div>
+            <div class="wizard-progress-bar__track">
+                <div id="wizardProgressFill" class="wizard-progress-bar__fill"></div>
+            </div>
+            <div id="wizardProgressSteps" class="wizard-progress-bar__steps" aria-hidden="true"></div>
+        </div>
+    </div>
+    <div id="wizardCoachOverlay" class="wizard-coach-overlay" aria-live="polite" aria-hidden="true">
+        <div class="wizard-coach-overlay__dim" id="wizardCoachDim" aria-hidden="true"></div>
+        <div class="wizard-coach-overlay__spot" id="wizardCoachSpot"></div>
+        <div class="wizard-coach-bubble" id="wizardCoachBubble" role="dialog" aria-labelledby="wizardCoachText">
+            <p class="wizard-coach-bubble__text" id="wizardCoachText"></p>
+            <div class="wizard-coach-bubble__actions">
+                <button type="button" class="btn-secondary" id="wizardCoachSkipBtn">Skip tour</button>
+                <button type="button" id="wizardCoachNextBtn">Next</button>
+            </div>
+        </div>
+    </div>
+
     <div class="container-wrapper <?php echo ($current_view === 'placeholder') ? 'placeholder-container-wrapper' : ''; ?>">
         <?php if ($current_view === 'login'): ?>
             <div class="logo-above-container">
@@ -5290,6 +5367,11 @@ foreach ($team_members_rows as $tmRow) {
                          alt="Savvy CFO"
                          class="app-header-logo">
                     <span class="app-header-product">Savvy Saver</span>
+                </div>
+                <div class="app-header-context" aria-live="polite">
+                    <span class="app-header-context-name" id="appHeaderOrgName"><?php echo htmlspecialchars($active_org_name); ?></span>
+                    <span class="app-header-context-sep" aria-hidden="true">·</span>
+                    <span class="app-header-context-name" id="appHeaderProjectName">Project</span>
                 </div>
                 <nav class="app-nav" aria-label="App sections">
                     <ul class="app-nav-cluster">
@@ -5722,6 +5804,9 @@ foreach ($team_members_rows as $tmRow) {
             const canManageQbo = <?php echo $can_manage_qbo ? 'true' : 'false'; ?>;
             const canManageVendors = <?php echo !empty($can_manage_vendors) ? 'true' : 'false'; ?>;
             const canUseAi = <?php echo !empty($can_use_ai) ? 'true' : 'false'; ?>;
+            const TEAM_MEMBERS_COUNT = <?php echo (int) $team_members_count; ?>;
+            window.CURRENT_ORG_ID = <?php echo (int) ($_SESSION['org_id'] ?? 0); ?>;
+            window.CURRENT_USER_ID = <?php echo (int) ($_SESSION['user_id'] ?? 0); ?>;
             const COLUMN_HELP = <?php echo json_encode(\CostSavings\ColumnHelp::entriesForJs(), JSON_UNESCAPED_UNICODE); ?>;
 
             function postJson(data) {
@@ -5789,6 +5874,9 @@ foreach ($team_members_rows as $tmRow) {
                         rebuildProjectSwitchSubmenu(d.projects || [], currentActiveProjectId);
                         const hasNoProjects = !Array.isArray(d.projects) || d.projects.length === 0;
                         if (canCreateProjects && (d.onboarding_required || hasNoProjects)) {
+                            if (typeof beginWizardAtNameStep === 'function') {
+                                beginWizardAtNameStep();
+                            }
                             openAppModal('appModalProjectWizard');
                         }
                     })
@@ -5941,9 +6029,14 @@ foreach ($team_members_rows as $tmRow) {
                 projectName = projectName.trim();
                 document.title = projectName !== '' ? (baseTitle + ' - ' + projectName) : baseTitle;
 
+                const resolvedProjectName = projectName !== '' ? projectName : 'Project';
                 const currentNameEl = document.getElementById('appProjectCurrentName');
                 if (currentNameEl) {
-                    currentNameEl.textContent = projectName !== '' ? projectName : 'Project';
+                    currentNameEl.textContent = resolvedProjectName;
+                }
+                const headerProjectEl = document.getElementById('appHeaderProjectName');
+                if (headerProjectEl) {
+                    headerProjectEl.textContent = resolvedProjectName;
                 }
                 const btnEl = document.getElementById('appProjectMenuBtn');
                 if (btnEl) {
@@ -5951,608 +6044,8 @@ foreach ($team_members_rows as $tmRow) {
                 }
             }
 
-            var postProjectCreateFlow = {
-                active: false,
-                projectId: 0,
-                projectName: '',
-                dataMode: 'qbo_after',
-                previousActiveProjectId: 0,
-                step: null,
-                importCompleted: false,
-                purposeCheckInFlight: false,
-                postCreateCsvImportInFlight: false,
-                copyPurposes: null,
-                copyChats: null,
-                copyCategories: null,
-                overwriteBlankPurposes: false
-            };
-            var QBO_ORG_CONNECTED = <?php echo !empty($qbo_status['connected']) ? 'true' : 'false'; ?>;
-            var POST_CREATE_FLOW_STORAGE_KEY = 'savvy_post_create_qbo_flow';
+            <?php include __DIR__ . '/../includes/project_wizard_flow.js'; ?>
 
-            function isPostCreateUploadWaiting() {
-                return postProjectCreateFlow.active && (
-                    postProjectCreateFlow.step === 'upload_waiting_import'
-                    || postProjectCreateFlow.step === 'qbo_waiting_sync'
-                );
-            }
-
-            function isPostCreateQboWaiting() {
-                return postProjectCreateFlow.active && postProjectCreateFlow.step === 'qbo_waiting_sync';
-            }
-
-            function isPostCreateCsvModalId(modalId) {
-                return modalId === 'appModalCsvAccounts' || modalId === 'appModalCsvMapping' || modalId === 'appModalQboDateRange';
-            }
-
-            function savePostCreateFlowToSessionStorage() {
-                try {
-                    sessionStorage.setItem(POST_CREATE_FLOW_STORAGE_KEY, JSON.stringify({
-                        active: true,
-                        projectId: postProjectCreateFlow.projectId,
-                        projectName: postProjectCreateFlow.projectName,
-                        previousActiveProjectId: postProjectCreateFlow.previousActiveProjectId,
-                        step: 'qbo_waiting_sync',
-                        dataMode: postProjectCreateFlow.dataMode || 'qbo_after'
-                    }));
-                } catch (e) {}
-            }
-
-            function loadPostCreateFlowFromSessionStorage() {
-                try {
-                    var raw = sessionStorage.getItem(POST_CREATE_FLOW_STORAGE_KEY);
-                    if (!raw) return null;
-                    var data = JSON.parse(raw);
-                    return data && typeof data === 'object' ? data : null;
-                } catch (e) {
-                    return null;
-                }
-            }
-
-            function clearPostCreateFlowSessionStorage() {
-                try { sessionStorage.removeItem(POST_CREATE_FLOW_STORAGE_KEY); } catch (e) {}
-            }
-
-            function openPostCreateQboSyncModal() {
-                postProjectCreateFlow.step = 'qbo_waiting_sync';
-                closeAppModal('appModalPostCreateUpload');
-                var range = defaultQboDateRange();
-                var startEl = document.getElementById('qboSyncStartDate');
-                var endEl = document.getElementById('qboSyncEndDate');
-                if (startEl) startEl.value = range.start;
-                if (endEl) endEl.value = range.end;
-                prepareQboWeeklyImportConsent().finally(function() {
-                    openAppModal('appModalQboDateRange');
-                });
-            }
-
-            function reopenPostCreateUploadModal() {
-                postProjectCreateFlow.step = 'qbo';
-                postProjectCreateFlow.importCompleted = false;
-                setPostCreateSubtitle('postCreateUploadSubtitle', 1);
-                refreshPostCreateQboButtons();
-                openAppModal('appModalPostCreateUpload');
-            }
-
-            function refreshPostCreateQboButtons() {
-                var connectBtn = document.getElementById('postCreateQboConnectBtn');
-                var syncBtn = document.getElementById('postCreateQboSyncBtn');
-                if (connectBtn) connectBtn.style.display = QBO_ORG_CONNECTED ? 'none' : '';
-                if (syncBtn) syncBtn.style.display = QBO_ORG_CONNECTED ? '' : 'none';
-            }
-
-            function handlePostCreateImportFailure() {
-                if (!isPostCreateUploadWaiting()) return;
-                postProjectCreateFlow.postCreateCsvImportInFlight = false;
-                closeAppModal('appModalCsvAccounts');
-                closeAppModal('appModalCsvMapping');
-                closeAppModal('appModalQboDateRange');
-                reopenPostCreateUploadModal();
-            }
-
-            function maybeReturnToPostCreateUploadAfterCsvClose(modalId) {
-                if (!isPostCreateUploadWaiting()) return;
-                if (postProjectCreateFlow.postCreateCsvImportInFlight) return;
-                if (!isPostCreateCsvModalId(modalId)) return;
-                reopenPostCreateUploadModal();
-            }
-
-            function postCreateFlowStepLabel(stepNum) {
-                var name = postProjectCreateFlow.projectName || 'your project';
-                return 'Setting up ' + name + ' — step ' + stepNum + ' of 3';
-            }
-
-            function setPostCreateSubtitle(elId, stepNum) {
-                var el = document.getElementById(elId);
-                if (el) el.textContent = postCreateFlowStepLabel(stepNum);
-            }
-
-            function fetchActiveProjectVendorCount() {
-                var fd = new FormData();
-                fd.append('action', 'load_cost_calculator');
-                return fetch(window.location.href, { method: 'POST', body: fd, credentials: 'same-origin' })
-                    .then(function(r) { return r.json(); })
-                    .then(function(data) {
-                        if (!data || !data.success || !Array.isArray(data.items)) return 0;
-                        return data.items.filter(function(item) {
-                            return String(item.vendor_name || '').trim() !== '';
-                        }).length;
-                    })
-                    .catch(function() { return 0; });
-            }
-
-            function resetPostCreatePurposeModal() {
-                postProjectCreateFlow.copyPurposes = null;
-                postProjectCreateFlow.copyChats = null;
-                postProjectCreateFlow.copyCategories = null;
-                postProjectCreateFlow.overwriteBlankPurposes = false;
-                var questionsBlock = document.getElementById('postCreateCopyQuestionsBlock');
-                var sourceBlock = document.getElementById('postCreatePurposeSelectBlock');
-                var continueBtn = document.getElementById('postCreateCopyContinueBtn');
-                var proceedBtn = document.getElementById('postCreatePurposeProceedBtn');
-                var select = document.getElementById('postCreatePurposeSource');
-                var blankCb = document.getElementById('postCreateOverwriteBlankPurposes');
-                if (questionsBlock) questionsBlock.style.display = '';
-                if (sourceBlock) sourceBlock.style.display = 'none';
-                if (continueBtn) continueBtn.style.display = '';
-                if (proceedBtn) proceedBtn.style.display = 'none';
-                if (select) select.innerHTML = '';
-                if (blankCb) blankCb.checked = false;
-                document.querySelectorAll('input[name="postCreateCopyPurposes"]').forEach(function(r) { r.checked = false; });
-                document.querySelectorAll('input[name="postCreateCopyChats"]').forEach(function(r) { r.checked = false; });
-                document.querySelectorAll('input[name="postCreateCopyCategories"]').forEach(function(r) { r.checked = false; });
-            }
-
-            function postCreateCopyAnswersChosen() {
-                var purposeRadio = document.querySelector('input[name="postCreateCopyPurposes"]:checked');
-                var chatRadio = document.querySelector('input[name="postCreateCopyChats"]:checked');
-                var categoryRadio = document.querySelector('input[name="postCreateCopyCategories"]:checked');
-                return !!(purposeRadio && chatRadio && categoryRadio);
-            }
-
-            function readPostCreateCopyAnswers() {
-                var purposeRadio = document.querySelector('input[name="postCreateCopyPurposes"]:checked');
-                var chatRadio = document.querySelector('input[name="postCreateCopyChats"]:checked');
-                var categoryRadio = document.querySelector('input[name="postCreateCopyCategories"]:checked');
-                postProjectCreateFlow.copyPurposes = purposeRadio ? purposeRadio.value === 'yes' : null;
-                postProjectCreateFlow.copyChats = chatRadio ? chatRadio.value === 'yes' : null;
-                postProjectCreateFlow.copyCategories = categoryRadio ? categoryRadio.value === 'yes' : null;
-                var blankCb = document.getElementById('postCreateOverwriteBlankPurposes');
-                postProjectCreateFlow.overwriteBlankPurposes = blankCb ? !!blankCb.checked : false;
-            }
-
-            function populatePostCreatePurposeSourceSelect() {
-                var select = document.getElementById('postCreatePurposeSource');
-                if (!select) return Promise.resolve();
-                return postJson({ action: 'project_list' }).then(function(d) {
-                    select.innerHTML = '';
-                    var firstOpt = null;
-                    (d.projects || []).forEach(function(p) {
-                        var pid = parseInt(p.id, 10) || 0;
-                        if (pid <= 0 || pid === postProjectCreateFlow.projectId) return;
-                        var opt = document.createElement('option');
-                        opt.value = String(pid);
-                        opt.textContent = p.name || ('Project ' + pid);
-                        select.appendChild(opt);
-                        if (!firstOpt) firstOpt = opt;
-                    });
-                    var prev = postProjectCreateFlow.previousActiveProjectId;
-                    if (prev > 0 && prev !== postProjectCreateFlow.projectId) {
-                        select.value = String(prev);
-                    } else if (firstOpt) {
-                        select.value = firstOpt.value;
-                    }
-                });
-            }
-
-            function openPostCreatePurposeModal() {
-                resetPostCreatePurposeModal();
-                setPostCreateSubtitle('postCreatePurposeSubtitle', 2);
-                openAppModal('appModalPostCreatePurpose');
-            }
-
-            function openPostCreateInviteModal() {
-                setPostCreateSubtitle('postCreateInviteSubtitle', 3);
-                openAppModal('appModalPostCreateInvite');
-            }
-
-            function proceedToPurposeOrInvite() {
-                if (postProjectCreateFlow.purposeCheckInFlight) return;
-                var projectId = parseInt(postProjectCreateFlow.projectId, 10) || parseInt(currentActiveProjectId, 10) || 0;
-                if (!projectId) {
-                    postProjectCreateFlow.step = 'invite';
-                    openPostCreateInviteModal();
-                    return;
-                }
-                postProjectCreateFlow.purposeCheckInFlight = true;
-                var syncActive = postJson({ action: 'project_set_active', project_id: projectId }).then(function(d) {
-                    if (d && d.success) {
-                        currentActiveProjectId = projectId;
-                    }
-                }).catch(function() {});
-                syncActive.then(function() {
-                    return fetchActiveProjectVendorCount();
-                }).then(function(count) {
-                    if (count === 0) {
-                        showSnackbar('Import vendors first to copy from another project or use AI purpose populate.', 'info');
-                        postProjectCreateFlow.step = 'invite';
-                        openPostCreateInviteModal();
-                        return;
-                    }
-                    showSnackbar('Populating purposes with AI… For many vendors, this may take up to 3 minutes…', 'info');
-                    showAiPopulateLoader('Populating purposes with AI… For many vendors, this may take up to 3 minutes…');
-                    clearTimeout(saveTimeout);
-                    var populateFn = typeof window.runProjectAutoPopulatePurpose === 'function'
-                        ? window.runProjectAutoPopulatePurpose
-                        : null;
-                    var waitForSaves = typeof window.waitForCalculatorSaveIdle === 'function'
-                        ? window.waitForCalculatorSaveIdle()
-                        : Promise.resolve();
-                    var populatePromise = waitForSaves.then(function() {
-                        if (!populateFn) {
-                            return Promise.resolve({ success: false, error: 'Auto populate is not ready yet.' });
-                        }
-                        // Server persists purposes; skip client save + grid reload avoids overwriting DB.
-                        return populateFn(projectId, { silent: true, skipClientSave: true, hideLoader: true });
-                    });
-                    return populatePromise.then(function(d) {
-                        if (!d || !d.success) {
-                            showSnackbar((d && d.error) || 'Purpose auto-populate failed.', 'error');
-                        } else {
-                            var updated = typeof d.updated === 'number' ? d.updated : 0;
-                            if (updated > 0) {
-                                showSnackbar('Populated purposes for ' + updated + ' vendor(s).', 'success');
-                            } else if (!(d.resolved && d.resolved.length)) {
-                                showSnackbar('No purposes could be resolved for these vendors.', 'info');
-                            }
-                        }
-                        return loadCalculatorData().then(function() {
-                            if (d && Array.isArray(d.resolved) && d.resolved.length
-                                && typeof window.applyPurposeLookupResultsToUi === 'function') {
-                                window.applyPurposeLookupResultsToUi(d.resolved);
-                            }
-                        });
-                    }).then(function() {
-                        postProjectCreateFlow.step = 'purpose';
-                        openPostCreatePurposeModal();
-                    }).catch(function() {
-                        showSnackbar('Could not finish purpose setup.', 'error');
-                        postProjectCreateFlow.step = 'purpose';
-                        openPostCreatePurposeModal();
-                    }).finally(function() {
-                        hideAiPopulateLoader();
-                    });
-                }).catch(function() {
-                    showSnackbar('Could not finish purpose setup.', 'error');
-                    postProjectCreateFlow.step = 'purpose';
-                    openPostCreatePurposeModal();
-                }).finally(function() {
-                    postProjectCreateFlow.purposeCheckInFlight = false;
-                });
-            }
-
-            function advancePostProjectCreateFlow() {
-                if (!postProjectCreateFlow.active) return;
-                var step = postProjectCreateFlow.step;
-                if (step === 'purpose_check') return;
-                if (step === 'upload' || step === 'upload_waiting_import' || step === 'qbo' || step === 'qbo_waiting_sync') {
-                    clearPostCreateFlowSessionStorage();
-                    postProjectCreateFlow.step = 'purpose_check';
-                    proceedToPurposeOrInvite();
-                    return;
-                }
-                if (step === 'purpose' || step === 'purpose_done') {
-                    postProjectCreateFlow.step = 'invite';
-                    openPostCreateInviteModal();
-                    return;
-                }
-            }
-
-            function endPostProjectCreateFlow() {
-                if (!postProjectCreateFlow.active) return;
-                postProjectCreateFlow.active = false;
-                postProjectCreateFlow.step = null;
-                postProjectCreateFlow.importCompleted = false;
-                postProjectCreateFlow.purposeCheckInFlight = false;
-                postProjectCreateFlow.postCreateCsvImportInFlight = false;
-                clearPostCreateFlowSessionStorage();
-                closeAppModal('appModalPostCreateUpload');
-                closeAppModal('appModalPostCreatePurpose');
-                closeAppModal('appModalPostCreateInvite');
-                resetPostCreatePurposeModal();
-                var form = document.getElementById('projectWizardForm');
-                if (form) form.reset();
-                var uploadRadio = document.getElementById('projectWizardDataModeUpload');
-                if (uploadRadio) uploadRadio.checked = true;
-                var startDateInput = document.getElementById('projectWizardStartDate');
-                if (startDateInput && !startDateInput.value) {
-                    startDateInput.value = new Date().toISOString().slice(0, 10);
-                }
-                showSnackbar('Project setup complete.', 'success');
-            }
-
-            function startPostProjectCreateFlow(opts) {
-                opts = opts || {};
-                postProjectCreateFlow.active = true;
-                postProjectCreateFlow.projectId = parseInt(opts.projectId, 10) || 0;
-                postProjectCreateFlow.projectName = opts.projectName || '';
-                postProjectCreateFlow.dataMode = opts.dataMode || 'qbo_after';
-                postProjectCreateFlow.previousActiveProjectId = parseInt(opts.previousActiveProjectId, 10) || 0;
-                postProjectCreateFlow.importCompleted = false;
-                postProjectCreateFlow.purposeCheckInFlight = false;
-                postProjectCreateFlow.postCreateCsvImportInFlight = false;
-                if (postProjectCreateFlow.dataMode === 'qbo_after' || postProjectCreateFlow.dataMode === 'upload_after') {
-                    postProjectCreateFlow.step = 'qbo';
-                    setPostCreateSubtitle('postCreateUploadSubtitle', 1);
-                    refreshPostCreateQboButtons();
-                    openAppModal('appModalPostCreateUpload');
-                } else {
-                    postProjectCreateFlow.step = 'purpose_check';
-                    proceedToPurposeOrInvite();
-                }
-            }
-
-            function resumePostCreateQboSyncFromOAuth() {
-                var stored = loadPostCreateFlowFromSessionStorage();
-                <?php
-                $qboResumeFromSession = null;
-                if (!empty($_SESSION['qbo_resume_wizard']) && is_array($_SESSION['qbo_resume_wizard'])) {
-                    $qboResumeFromSession = $_SESSION['qbo_resume_wizard'];
-                    unset($_SESSION['qbo_resume_wizard']);
-                }
-                ?>
-                var phpResume = <?php echo json_encode($qboResumeFromSession, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
-                var params = new URLSearchParams(window.location.search);
-                var shouldResume = params.get('resume_qbo_sync') === '1' || (phpResume && phpResume.project_id);
-                if (!shouldResume) return;
-
-                QBO_ORG_CONNECTED = true;
-                var projectId = (phpResume && phpResume.project_id) || (stored && stored.projectId) || 0;
-                var projectName = (phpResume && phpResume.project_name) || (stored && stored.projectName) || '';
-                var prevId = (stored && stored.previousActiveProjectId) || 0;
-                if (!projectId) return;
-
-                postProjectCreateFlow.active = true;
-                postProjectCreateFlow.projectId = parseInt(projectId, 10) || 0;
-                postProjectCreateFlow.projectName = projectName || '';
-                postProjectCreateFlow.previousActiveProjectId = parseInt(prevId, 10) || 0;
-                postProjectCreateFlow.dataMode = 'qbo_after';
-                postProjectCreateFlow.importCompleted = false;
-
-                var syncActive = postJson({ action: 'project_set_active', project_id: postProjectCreateFlow.projectId })
-                    .then(function(d) {
-                        if (d && d.success) {
-                            currentActiveProjectId = postProjectCreateFlow.projectId;
-                        }
-                    })
-                    .catch(function() {});
-
-                syncActive.then(function() {
-                    return loadProjectsIntoMenu();
-                }).then(function() {
-                    openPostCreateQboSyncModal();
-                    if (window.history && window.history.replaceState) {
-                        var url = new URL(window.location.href);
-                        url.searchParams.delete('qbo');
-                        url.searchParams.delete('resume_qbo_sync');
-                        window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
-                    }
-                });
-            }
-
-            function openQboConnectConsent(opts) {
-                opts = opts || {};
-                var box = document.getElementById('qboConnectConsentCheckbox');
-                var submit = document.getElementById('qboConnectConsentSubmit');
-                var resume = document.getElementById('qboConnectResumeWizard');
-                var projectId = document.getElementById('qboConnectProjectId');
-                var projectName = document.getElementById('qboConnectProjectName');
-                if (!box || !submit) return;
-                if (resume) resume.value = opts.resumeWizard ? '1' : '';
-                if (projectId) projectId.value = opts.projectId ? String(opts.projectId) : '';
-                if (projectName) projectName.value = opts.projectName || '';
-                box.checked = false;
-                submit.disabled = true;
-                submit.textContent = opts.reconnect ? 'Reconnect QuickBooks' : 'Connect to QuickBooks';
-                openAppModal('appModalQboConnectConsent');
-                var body = document.querySelector('#appModalQboConnectConsent .app-modal-body');
-                if (body) body.scrollTop = 0;
-            }
-
-            function initQboConnectConsent() {
-                var box = document.getElementById('qboConnectConsentCheckbox');
-                var submit = document.getElementById('qboConnectConsentSubmit');
-                var form = document.getElementById('qboConnectConsentForm');
-                var settingsBtn = document.getElementById('qboSettingsConnectBtn');
-                if (box && submit) {
-                    box.addEventListener('change', function() {
-                        submit.disabled = !box.checked;
-                    });
-                }
-                if (form) {
-                    form.addEventListener('submit', function(e) {
-                        if (!box || !box.checked) {
-                            e.preventDefault();
-                            return;
-                        }
-                        var resume = document.getElementById('qboConnectResumeWizard');
-                        if (resume && resume.value === '1' && postProjectCreateFlow.active) {
-                            savePostCreateFlowToSessionStorage();
-                        }
-                    });
-                }
-                if (settingsBtn) {
-                    settingsBtn.addEventListener('click', function() {
-                        openQboConnectConsent({
-                            reconnect: settingsBtn.getAttribute('data-reconnect') === '1'
-                        });
-                    });
-                }
-                document.querySelectorAll('#qboConnectConsentForm a[href="#qboSaverFeatures"], #qboConnectConsentForm a[data-open-qbo-features]').forEach(function(link) {
-                    link.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        openAppModal('appModalQboSaverFeatures');
-                    });
-                });
-            }
-
-            function initPostProjectCreateFlow() {
-                var skipBtn = document.getElementById('postCreateUploadSkipBtn');
-                var connectBtn = document.getElementById('postCreateQboConnectBtn');
-                var syncBtn = document.getElementById('postCreateQboSyncBtn');
-                if (connectBtn) {
-                    connectBtn.addEventListener('click', function() {
-                        if (!postProjectCreateFlow.active) return;
-                        openQboConnectConsent({
-                            resumeWizard: true,
-                            projectId: postProjectCreateFlow.projectId || 0,
-                            projectName: postProjectCreateFlow.projectName || ''
-                        });
-                    });
-                }
-                if (syncBtn) {
-                    syncBtn.addEventListener('click', function() {
-                        if (!postProjectCreateFlow.active) return;
-                        var projectId = postProjectCreateFlow.projectId || 0;
-                        var ensureActive = projectId
-                            ? postJson({ action: 'project_set_active', project_id: projectId }).then(function(d) {
-                                if (d && d.success) currentActiveProjectId = projectId;
-                            }).catch(function() {})
-                            : Promise.resolve();
-                        ensureActive.then(function() {
-                            openPostCreateQboSyncModal();
-                        });
-                    });
-                }
-                if (skipBtn) {
-                    skipBtn.addEventListener('click', function() {
-                        closeAppModal('appModalPostCreateUpload');
-                        advancePostProjectCreateFlow();
-                    });
-                }
-                var copyContinueBtn = document.getElementById('postCreateCopyContinueBtn');
-                var purposeProceed = document.getElementById('postCreatePurposeProceedBtn');
-                if (copyContinueBtn) {
-                    copyContinueBtn.addEventListener('click', function() {
-                        if (!postCreateCopyAnswersChosen()) {
-                            showSnackbar('Answer all three questions to continue.', 'error');
-                            return;
-                        }
-                        readPostCreateCopyAnswers();
-                        if (!postProjectCreateFlow.copyPurposes && !postProjectCreateFlow.copyChats && !postProjectCreateFlow.copyCategories) {
-                            closeAppModal('appModalPostCreatePurpose');
-                            postProjectCreateFlow.step = 'purpose_done';
-                            advancePostProjectCreateFlow();
-                            return;
-                        }
-                        populatePostCreatePurposeSourceSelect().then(function() {
-                            var select = document.getElementById('postCreatePurposeSource');
-                            if (!select || select.options.length === 0) {
-                                showSnackbar('No other projects are available to copy from.', 'info');
-                                return;
-                            }
-                            var questionsBlock = document.getElementById('postCreateCopyQuestionsBlock');
-                            var sourceBlock = document.getElementById('postCreatePurposeSelectBlock');
-                            var proceedBtn = document.getElementById('postCreatePurposeProceedBtn');
-                            var blankRow = document.getElementById('postCreateBlankPurposeRow');
-                            if (questionsBlock) questionsBlock.style.display = 'none';
-                            if (sourceBlock) sourceBlock.style.display = 'grid';
-                            if (copyContinueBtn) copyContinueBtn.style.display = 'none';
-                            if (proceedBtn) proceedBtn.style.display = '';
-                            if (blankRow) {
-                                blankRow.style.display = postProjectCreateFlow.copyPurposes ? '' : 'none';
-                            }
-                        });
-                    });
-                }
-                if (purposeProceed) {
-                    purposeProceed.addEventListener('click', function() {
-                        var select = document.getElementById('postCreatePurposeSource');
-                        var fromId = select ? parseInt(select.value, 10) : 0;
-                        if (!fromId) {
-                            showSnackbar('Select a source project.', 'error');
-                            return;
-                        }
-                        readPostCreateCopyAnswers();
-                        var toId = postProjectCreateFlow.projectId;
-                        purposeProceed.disabled = true;
-                        var chain = Promise.resolve();
-                        if (postProjectCreateFlow.copyPurposes) {
-                            chain = chain.then(function() {
-                                return postJson({
-                                    action: 'copy_project_purposes',
-                                    from_project_id: fromId,
-                                    to_project_id: toId,
-                                    include_blank_purposes: postProjectCreateFlow.overwriteBlankPurposes ? 1 : 0
-                                }).then(function(d) {
-                                    if (!d || !d.success) {
-                                        throw new Error((d && d.error) || 'Could not copy purposes.');
-                                    }
-                                    var matched = parseInt(d.matched || 0, 10) || 0;
-                                    showSnackbar('Copied purposes for ' + matched + ' vendor(s).', 'success');
-                                });
-                            });
-                        }
-                        if (postProjectCreateFlow.copyChats) {
-                            chain = chain.then(function() {
-                                return postJson({
-                                    action: 'copy_project_chats',
-                                    from_project_id: fromId,
-                                    to_project_id: toId
-                                }).then(function(d) {
-                                    if (!d || !d.success) {
-                                        throw new Error((d && d.error) || 'Could not copy chats.');
-                                    }
-                                    var msgs = parseInt(d.copied_messages || 0, 10) || 0;
-                                    var vendors = parseInt(d.matched_vendors || 0, 10) || 0;
-                                    showSnackbar('Copied ' + msgs + ' chat message(s) across ' + vendors + ' vendor(s).', 'success');
-                                });
-                            });
-                        }
-                        if (postProjectCreateFlow.copyCategories) {
-                            chain = chain.then(function() {
-                                return postJson({
-                                    action: 'copy_project_categories',
-                                    from_project_id: fromId,
-                                    to_project_id: toId
-                                }).then(function(d) {
-                                    if (!d || !d.success) {
-                                        throw new Error((d && d.error) || 'Could not copy categories.');
-                                    }
-                                    var matched = parseInt(d.matched || 0, 10) || 0;
-                                    showSnackbar('Copied categories for ' + matched + ' vendor(s).', 'success');
-                                });
-                            });
-                        }
-                        chain.then(function() {
-                            return loadCalculatorData();
-                        }).then(function() {
-                            closeAppModal('appModalPostCreatePurpose');
-                            postProjectCreateFlow.step = 'purpose_done';
-                            advancePostProjectCreateFlow();
-                        }).catch(function(err) {
-                            showSnackbar(err && err.message ? err.message : 'Copy failed.', 'error');
-                        }).finally(function() {
-                            purposeProceed.disabled = false;
-                        });
-                    });
-                }
-                var inviteNo = document.getElementById('postCreateInviteNoBtn');
-                var inviteYes = document.getElementById('postCreateInviteYesBtn');
-                if (inviteNo) {
-                    inviteNo.addEventListener('click', function() {
-                        closeAppModal('appModalPostCreateInvite');
-                        endPostProjectCreateFlow();
-                    });
-                }
-                if (inviteYes) {
-                    inviteYes.addEventListener('click', function() {
-                        closeAppModal('appModalPostCreateInvite');
-                        postProjectCreateFlow.step = 'invite_open';
-                        openAppModal('appModalMembersInvite');
-                    });
-                }
-            }
 
             function submitProjectWizardForm() {
                 const form = document.getElementById('projectWizardForm');
@@ -6684,6 +6177,13 @@ foreach ($team_members_rows as $tmRow) {
                     }
                 }
                 if (overlay.id === 'appModalMembersInvite' && postProjectCreateFlow.active && postProjectCreateFlow.step === 'invite_open') {
+                    if (typeof openSetupCompleteModal === 'function') {
+                        openSetupCompleteModal();
+                    } else {
+                        endPostProjectCreateFlow();
+                    }
+                }
+                if (overlay.id === 'appModalProjectWizard' && postProjectCreateFlow.active && postProjectCreateFlow.step === 'name') {
                     endPostProjectCreateFlow();
                 }
                 if (!document.querySelector('.app-modal-overlay.is-open')) {
@@ -6704,7 +6204,7 @@ foreach ($team_members_rows as $tmRow) {
             var suppressCsvMappingModalCleanup = false;
             var CSV_ACCOUNT_INTRO_QB = 'Choose which GL accounts to include. Vendor rows are grouped by payee (Name) from the selected accounts only.';
             var CSV_ACCOUNT_INTRO_MAPPED = 'Choose which account values to include from your mapped column.';
-            var CSV_ACCOUNT_INTRO_QBO = 'Choose which GL accounts to include from QuickBooks Online. Accounts are grouped by QuickBooks type. Vendor rows are grouped by payee from the selected accounts only.';
+            var CSV_ACCOUNT_INTRO_QBO = 'Choose which accounts to include from QuickBooks Online. Accounts are grouped by QuickBooks type. Vendor rows are grouped by payee from the selected accounts only.';
             function setCsvAccountModalIntro(mode) {
                 var intro = document.getElementById('appModalCsvAccountsIntro');
                 if (!intro) return;
@@ -7423,7 +6923,7 @@ foreach ($team_members_rows as $tmRow) {
             function defaultQboDateRange() {
                 var end = new Date();
                 var start = new Date();
-                start.setFullYear(start.getFullYear() - 1);
+                start.setFullYear(start.getFullYear() - 2);
                 function fmt(d) {
                     var y = d.getFullYear();
                     var m = String(d.getMonth() + 1).padStart(2, '0');
@@ -7653,7 +7153,7 @@ foreach ($team_members_rows as $tmRow) {
                             showSnackbar('Start date must be on or before end date', 'error');
                             return;
                         }
-                        setButtonLoading(pullBtn, true, 'Pulling…');
+                        setButtonLoading(pullBtn, true, 'Importing…');
                         maybeSaveQboWeeklyImportConsent()
                             .then(function() {
                                 var fd = new FormData();
@@ -7680,6 +7180,9 @@ foreach ($team_members_rows as $tmRow) {
                                     postProjectCreateFlow.postCreateCsvImportInFlight = true;
                                 }
                                 closeAppModal(document.getElementById('appModalQboDateRange'));
+                                if (typeof markWizardImportAccountsOpen === 'function') {
+                                    markWizardImportAccountsOpen();
+                                }
                                 openAppModal('appModalCsvAccounts');
                                 if (isPostCreateQboWaiting()) {
                                     setTimeout(function() {
@@ -8258,16 +7761,32 @@ foreach ($team_members_rows as $tmRow) {
                         closeAppModal(qboConsentOverlay);
                         return;
                     }
+                    var coachOverlay = document.getElementById('wizardCoachOverlay');
+                    if (coachOverlay && coachOverlay.classList.contains('is-open')) {
+                        if (typeof finishWizardTour === 'function') {
+                            finishWizardTour();
+                        }
+                        return;
+                    }
                     document.querySelectorAll('.app-modal-overlay.is-open').forEach(function(ov) {
                         if (postProjectCreateFlow.active && ov.classList.contains('post-create-flow-modal')) {
                             if (ov.id === 'appModalPostCreateUpload') {
                                 closeAppModal(ov);
                                 advancePostProjectCreateFlow();
-                            } else if (ov.id === 'appModalPostCreatePurpose') {
+                            } else if (ov.id === 'appModalPostCreatePurpose' || ov.id === 'appModalPostCreateChats') {
                                 closeAppModal(ov);
-                                postProjectCreateFlow.step = 'purpose_done';
+                                advancePostProjectCreateFlow();
+                            } else if (ov.id === 'appModalVendorRedundancy') {
+                                closeAppModal(ov);
                                 advancePostProjectCreateFlow();
                             } else if (ov.id === 'appModalPostCreateInvite') {
+                                closeAppModal(ov);
+                                if (typeof openSetupCompleteModal === 'function') {
+                                    openSetupCompleteModal();
+                                } else {
+                                    endPostProjectCreateFlow();
+                                }
+                            } else if (ov.id === 'appModalSetupComplete') {
                                 closeAppModal(ov);
                                 endPostProjectCreateFlow();
                             }
@@ -8428,6 +7947,10 @@ foreach ($team_members_rows as $tmRow) {
                         var sel = document.getElementById('orgSwitcherSelect');
                         if (sel && sel.selectedIndex >= 0 && sel.options[sel.selectedIndex]) {
                             sel.options[sel.selectedIndex].textContent = savedName;
+                        }
+                        var headerOrgEl = document.getElementById('appHeaderOrgName');
+                        if (headerOrgEl) {
+                            headerOrgEl.textContent = savedName;
                         }
                     }
                 });
@@ -9429,10 +8952,10 @@ foreach ($team_members_rows as $tmRow) {
             }
             
             function formatMoneyInteger(amount) {
-                var n = Math.round(Number(amount) || 0);
+                var n = Number(amount) || 0;
                 var sign = n < 0 ? '-' : '';
                 var abs = Math.abs(n);
-                return sign + '$' + String(abs).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                return sign + '$' + abs.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
             }
 
             function parseMoneyInput(value) {
@@ -10601,9 +10124,15 @@ foreach ($team_members_rows as $tmRow) {
                         ? window.waitForCalculatorSaveIdle()
                         : Promise.resolve();
                 }).then(function() {
+                    // Wizard coach-mark tour covers frequency review; skip the standalone modal.
+                    if (flowActive) {
+                        return Promise.resolve();
+                    }
                     return showFrequencyReviewNotice();
                 }).then(function() {
                     if (flowActive) {
+                        postProjectCreateFlow.importCompleted = true;
+                        postProjectCreateFlow.vendorCount = Math.max(1, postProjectCreateFlow.vendorCount || 0);
                         advancePostProjectCreateFlow();
                     }
                 });
@@ -12603,13 +12132,9 @@ foreach ($team_members_rows as $tmRow) {
                     <label>End date
                         <input type="date" id="projectWizardEndDate">
                     </label>
-                    <label>
-                        <input type="radio" name="projectWizardDataMode" id="projectWizardDataModeUpload" value="qbo_after" checked>
-                        I will connect QuickBooks after creating this project.
-                    </label>
                     <div style="display:flex;gap:8px;justify-content:flex-end;">
                         <button type="button" class="btn-secondary app-modal-close project-wizard-cancel-btn">Cancel</button>
-                        <button type="submit">Create</button>
+                        <button type="submit">Create project</button>
                     </div>
                 </form>
             </div>
@@ -12659,19 +12184,18 @@ foreach ($team_members_rows as $tmRow) {
     <div class="app-modal-overlay post-create-flow-modal" id="appModalPostCreateUpload" role="dialog" aria-modal="true" aria-labelledby="appModalPostCreateUploadTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
-                <h2 id="appModalPostCreateUploadTitle">Connect QuickBooks</h2>
+                <h2 id="appModalPostCreateUploadTitle">Connect QuickBooks to your organization</h2>
             </div>
             <div class="app-modal-body">
                 <p id="postCreateUploadSubtitle" style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;"></p>
                 <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.5;">
-                    Link this organization to QuickBooks Online, then sync transactions into this project.
-                    You must be an organization super admin to connect.
+                    Link this organization to QuickBooks Online, then import transactions into this project.
                 </p>
                 <p class="privacy-notice"><?php echo htmlspecialchars($expense_visibility_notice); ?></p>
                 <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
-                    <button type="button" class="btn-secondary" id="postCreateUploadSkipBtn">Skip for now</button>
+                    <button type="button" class="btn-secondary app-modal-close project-wizard-cancel-btn" id="postCreateUploadSkipBtn">Cancel</button>
                     <button type="button" id="postCreateQboConnectBtn" style="<?php echo !empty($qbo_status['connected']) ? 'display:none;' : ''; ?>">Connect to QuickBooks</button>
-                    <button type="button" id="postCreateQboSyncBtn" style="<?php echo empty($qbo_status['connected']) ? 'display:none;' : ''; ?>">Sync with QuickBooks</button>
+                    <button type="button" id="postCreateQboSyncBtn" style="<?php echo empty($qbo_status['connected']) ? 'display:none;' : ''; ?>">Connect QuickBooks</button>
                 </div>
             </div>
         </div>
@@ -12680,25 +12204,16 @@ foreach ($team_members_rows as $tmRow) {
     <div class="app-modal-overlay post-create-flow-modal" id="appModalPostCreatePurpose" role="dialog" aria-modal="true" aria-labelledby="appModalPostCreatePurposeTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
-                <h2 id="appModalPostCreatePurposeTitle">Copy from previous project</h2>
+                <h2 id="appModalPostCreatePurposeTitle">Vendor purposes</h2>
             </div>
             <div class="app-modal-body">
                 <p id="postCreatePurposeSubtitle" style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;"></p>
-                <div id="postCreateCopyQuestionsBlock">
+                <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.5;">Savvy Saver has auto-populated vendor purposes with AI. Would you like to overwrite purposes from a previous project? Matching is by vendor name.</p>
+                <div id="postCreatePurposeQuestionsBlock">
                     <fieldset style="border:none;margin:0 0 14px;padding:0;">
-                        <legend style="font-size:14px;color:#374151;margin-bottom:8px;">Copy purposes from a previous project? Purposes are matched by vendor name.</legend>
+                        <legend style="font-size:14px;color:#374151;margin-bottom:8px;">Overwrite matching vendor purposes?</legend>
                         <label style="margin-right:14px;font-size:14px;"><input type="radio" name="postCreateCopyPurposes" value="yes"> Yes</label>
                         <label style="font-size:14px;"><input type="radio" name="postCreateCopyPurposes" value="no"> No</label>
-                    </fieldset>
-                    <fieldset style="border:none;margin:0 0 14px;padding:0;">
-                        <legend style="font-size:14px;color:#374151;margin-bottom:8px;">Copy vendor chats from a previous project? Chats are matched by vendor name.</legend>
-                        <label style="margin-right:14px;font-size:14px;"><input type="radio" name="postCreateCopyChats" value="yes"> Yes</label>
-                        <label style="font-size:14px;"><input type="radio" name="postCreateCopyChats" value="no"> No</label>
-                    </fieldset>
-                    <fieldset style="border:none;margin:0 0 14px;padding:0;">
-                        <legend style="font-size:14px;color:#374151;margin-bottom:8px;">Copy vendor categories from a previous project? Categories are matched by vendor name.</legend>
-                        <label style="margin-right:14px;font-size:14px;"><input type="radio" name="postCreateCopyCategories" value="yes"> Yes</label>
-                        <label style="font-size:14px;"><input type="radio" name="postCreateCopyCategories" value="no"> No</label>
                     </fieldset>
                 </div>
                 <div id="postCreatePurposeSelectBlock" style="display:none;margin-bottom:14px;">
@@ -12706,14 +12221,54 @@ foreach ($team_members_rows as $tmRow) {
                         <span>Source project</span>
                         <select id="postCreatePurposeSource" style="max-width:100%;"></select>
                     </label>
-                    <label id="postCreateBlankPurposeRow" style="display:none;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;">
-                        <input type="checkbox" id="postCreateOverwriteBlankPurposes" style="margin-top:3px;">
-                        <span>Overwrite blank purposes from the selected project</span>
+                </div>
+                <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+                    <button type="button" id="postCreatePurposeContinueBtn">Continue</button>
+                    <button type="button" id="postCreatePurposeProceedBtn" style="display:none;">Overwrite purposes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay post-create-flow-modal" id="appModalPostCreateChats" role="dialog" aria-modal="true" aria-labelledby="appModalPostCreateChatsTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalPostCreateChatsTitle">Copy vendor chats</h2>
+            </div>
+            <div class="app-modal-body">
+                <p id="postCreateChatsSubtitle" style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;"></p>
+                <div id="postCreateChatsQuestionsBlock">
+                    <fieldset style="border:none;margin:0 0 14px;padding:0;">
+                        <legend style="font-size:14px;color:#374151;margin-bottom:8px;">Copy vendor chats from a previous project? Chats are matched by vendor name.</legend>
+                        <label style="margin-right:14px;font-size:14px;"><input type="radio" name="postCreateCopyChats" value="yes"> Yes</label>
+                        <label style="font-size:14px;"><input type="radio" name="postCreateCopyChats" value="no"> No</label>
+                    </fieldset>
+                </div>
+                <div id="postCreateChatsSelectBlock" style="display:none;margin-bottom:14px;">
+                    <label style="display:grid;gap:6px;font-size:14px;margin-bottom:10px;">
+                        <span>Source project</span>
+                        <select id="postCreateChatsSource" style="max-width:100%;"></select>
                     </label>
                 </div>
                 <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
-                    <button type="button" id="postCreateCopyContinueBtn">Continue</button>
-                    <button type="button" id="postCreatePurposeProceedBtn" style="display:none;">Proceed</button>
+                    <button type="button" id="postCreateChatsContinueBtn">Continue</button>
+                    <button type="button" id="postCreateChatsProceedBtn" style="display:none;">Copy chats</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay post-create-flow-modal" id="appModalVendorRedundancy" role="dialog" aria-modal="true" aria-labelledby="appModalVendorRedundancyTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalVendorRedundancyTitle">Overlapping &amp; duplicate vendors</h2>
+            </div>
+            <div class="app-modal-body">
+                <p id="wizardReviewMessage" style="margin:0 0 12px;font-size:14px;color:#374151;line-height:1.5;"></p>
+                <div id="wizardReviewSummary" class="wizard-review-summary"></div>
+                <div id="wizardReviewList" class="wizard-review-list"></div>
+                <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px;">
+                    <button type="button" id="wizardReviewContinueBtn">Continue</button>
                 </div>
             </div>
         </div>
@@ -12730,6 +12285,21 @@ foreach ($team_members_rows as $tmRow) {
                 <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
                     <button type="button" class="btn-secondary" id="postCreateInviteNoBtn">No</button>
                     <button type="button" id="postCreateInviteYesBtn">Yes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-modal-overlay post-create-flow-modal" id="appModalSetupComplete" role="dialog" aria-modal="true" aria-labelledby="appModalSetupCompleteTitle" aria-hidden="true">
+        <div class="app-modal" tabindex="-1">
+            <div class="app-modal-header">
+                <h2 id="appModalSetupCompleteTitle">Setup complete</h2>
+            </div>
+            <div class="app-modal-body">
+                <div class="setup-complete-icon" aria-hidden="true">✓</div>
+                <p style="margin:0 0 14px;font-size:15px;color:#374151;line-height:1.5;">Your project is ready. Review vendors on the grid and keep refining savings.</p>
+                <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+                    <button type="button" id="setupCompleteDoneBtn">Go to vendors</button>
                 </div>
             </div>
         </div>
@@ -12785,7 +12355,7 @@ foreach ($team_members_rows as $tmRow) {
                     <span id="csvAccountSelectionStatus" style="font-size:13px;color:#4b5563;"></span>
                 </div>
                 <div class="csv-account-list" id="csvAccountList" role="group" aria-label="GL accounts"></div>
-                <p style="margin:0 0 12px;font-size:13px;color:#4b5563;line-height:1.5;">Savvy Saver will only send emails for vendors from the accounts you select.</p>
+                <p style="margin:0 0 12px;font-size:13px;color:#4b5563;line-height:1.5;">Please note that Savvy Saver will only send emails for vendors from the accounts you select above.</p>
                 <div style="display:flex;gap:8px;justify-content:flex-end;">
                     <button type="button" class="btn-secondary app-modal-close" id="csvAccountCancelBtn">Cancel</button>
                     <button type="button" id="csvAccountImportBtn" disabled>Import selected</button>
@@ -13061,15 +12631,15 @@ foreach ($team_members_rows as $tmRow) {
     <div class="app-modal-overlay" id="appModalQboDateRange" role="dialog" aria-modal="true" aria-labelledby="appModalQboDateRangeTitle" aria-hidden="true">
         <div class="app-modal" tabindex="-1">
             <div class="app-modal-header">
-                <h2 id="appModalQboDateRangeTitle">Sync with QuickBooks</h2>
+                <h2 id="appModalQboDateRangeTitle">Retrieve QuickBooks data</h2>
                 <button type="button" class="app-modal-close" aria-label="Close">&times;</button>
             </div>
             <div class="app-modal-body">
-                <p style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;">Select the date range of transactions to pull from QuickBooks Online (max 24 months).</p>
+                <p style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;">Select the date range of transactions to import from QuickBooks Online (max 24 months).</p>
                 <p class="privacy-notice"><?php echo htmlspecialchars($expense_visibility_notice); ?></p>
                 <label class="checkbox-label" style="margin:12px 0 16px;">
                     <input type="checkbox" id="qboWeeklyImportConsent">
-                    <span>I agree for Savvy Saver to make automated weekly transactions imports for purposes of notifying me of new vendors. This will not affect the project content and setup.</span>
+                    <span>I agree for Savvy Saver to make automated weekly transactions imports for purposes of notifying me of important updates. This will not affect the project content and setup.</span>
                 </label>
                 <div style="display:grid;gap:12px;max-width:360px;">
                     <label style="display:grid;gap:6px;font-size:14px;">
@@ -13083,7 +12653,7 @@ foreach ($team_members_rows as $tmRow) {
                 </div>
                 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
                     <button type="button" class="btn-secondary app-modal-close">Cancel</button>
-                    <button type="button" id="qboSyncPullBtn">Pull transactions</button>
+                    <button type="button" id="qboSyncPullBtn">Import transactions</button>
                 </div>
             </div>
         </div>

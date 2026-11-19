@@ -68,7 +68,7 @@ final class ColumnHelp
             ],
             'visibility' => [
                 'title' => 'Visibility',
-                'html' => '<p class="column-help-intro"><strong>Public</strong> rows are visible to all project managers. <strong>Confidential</strong> rows are limited to the assigned manager and project super admins. Managers see public rows plus confidential rows they manage.</p>',
+                'html' => '<p class="column-help-intro"><strong>Public</strong> rows are visible to Org Admins, Finance Admins, Project Managers, Cost Owners, and Executives. <strong>Confidential</strong> rows are visible to Org Admins, Finance Admins, Project Managers, and the assigned Cost Owner. Executives cannot see confidential rows.</p>',
             ],
             'status' => [
                 'title' => 'Status',

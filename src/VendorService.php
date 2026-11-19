@@ -198,20 +198,7 @@ class VendorService
             ) vrt ON vrt.org_id = cci.org_id
                 AND vrt.project_id = cci.project_id
                 AND vrt.vendor_name_normalized = LOWER(TRIM(cci.vendor_name))';
-        if (!OrgRole::usesAssignedVisibilityFilter($role)) {
-            $sql = 'SELECT cci.*, pc.name AS category_name, vrt.imported_at AS imported_at
-                FROM cost_calculator_items cci
-                LEFT JOIN project_categories pc ON pc.id = cci.category_id AND pc.project_id = cci.project_id
-                ' . $importedJoin . '
-                WHERE cci.org_id = :oid AND cci.project_id = :pid ORDER BY cci.id ASC';
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([
-                ':vrt_oid' => $orgId,
-                ':vrt_pid' => $projectId,
-                ':oid' => $orgId,
-                ':pid' => $projectId,
-            ]);
-        } else {
+        if (OrgRole::usesAssignedVisibilityFilter($role)) {
             // Cost Owner: public rows plus confidential rows they manage.
             $sql = 'SELECT cci.*, pc.name AS category_name, vrt.imported_at AS imported_at
                 FROM cost_calculator_items cci
@@ -227,6 +214,34 @@ class VendorService
                 ':oid' => $orgId,
                 ':pid' => $projectId,
                 ':uid' => $userId,
+            ]);
+        } elseif (OrgRole::seesPublicOnly($role)) {
+            // Executive/Viewer: public rows only.
+            $sql = 'SELECT cci.*, pc.name AS category_name, vrt.imported_at AS imported_at
+                FROM cost_calculator_items cci
+                LEFT JOIN project_categories pc ON pc.id = cci.category_id AND pc.project_id = cci.project_id
+                ' . $importedJoin . '
+                WHERE cci.org_id = :oid AND cci.project_id = :pid AND cci.visibility = \'public\'
+                ORDER BY cci.id ASC';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([
+                ':vrt_oid' => $orgId,
+                ':vrt_pid' => $projectId,
+                ':oid' => $orgId,
+                ':pid' => $projectId,
+            ]);
+        } else {
+            $sql = 'SELECT cci.*, pc.name AS category_name, vrt.imported_at AS imported_at
+                FROM cost_calculator_items cci
+                LEFT JOIN project_categories pc ON pc.id = cci.category_id AND pc.project_id = cci.project_id
+                ' . $importedJoin . '
+                WHERE cci.org_id = :oid AND cci.project_id = :pid ORDER BY cci.id ASC';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([
+                ':vrt_oid' => $orgId,
+                ':vrt_pid' => $projectId,
+                ':oid' => $orgId,
+                ':pid' => $projectId,
             ]);
         }
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -895,11 +910,34 @@ class VendorService
         $updated = 0;
         $applied = 0;
         $appliedIds = [];
-        if (!OrgRole::usesAssignedVisibilityFilter($role)) {
+        if (OrgRole::usesAssignedVisibilityFilter($role)) {
+            // Cost Owner: public rows or confidential rows they manage.
             $stmt = $pdo->prepare(
                 'UPDATE cost_calculator_items
                  SET purpose_of_subscription = ?
-                 WHERE id = ? AND org_id = ? AND project_id = ?'
+                 WHERE id = ? AND org_id = ? AND project_id = ?
+                   AND (visibility = \'public\' OR (visibility = \'confidential\' AND manager_user_id = ?))'
+            );
+            foreach ($updates as $u) {
+                $rowId = (int) ($u['id'] ?? 0);
+                if ($rowId <= 0) {
+                    continue;
+                }
+                $stmt->execute([(string) ($u['purpose'] ?? ''), $rowId, $orgId, $projectId, $userId]);
+                $updated += $stmt->rowCount();
+                ++$applied;
+                $appliedIds[] = $rowId;
+            }
+
+            return ['updated' => $updated, 'applied' => $applied, 'applied_ids' => $appliedIds];
+        }
+
+        if (OrgRole::seesPublicOnly($role)) {
+            // Executive/Viewer: public rows only.
+            $stmt = $pdo->prepare(
+                'UPDATE cost_calculator_items
+                 SET purpose_of_subscription = ?
+                 WHERE id = ? AND org_id = ? AND project_id = ? AND visibility = \'public\''
             );
             foreach ($updates as $u) {
                 $rowId = (int) ($u['id'] ?? 0);
@@ -915,19 +953,17 @@ class VendorService
             return ['updated' => $updated, 'applied' => $applied, 'applied_ids' => $appliedIds];
         }
 
-        // Member: public rows or confidential rows they manage.
         $stmt = $pdo->prepare(
             'UPDATE cost_calculator_items
              SET purpose_of_subscription = ?
-             WHERE id = ? AND org_id = ? AND project_id = ?
-               AND (visibility = \'public\' OR (visibility = \'confidential\' AND manager_user_id = ?))'
+             WHERE id = ? AND org_id = ? AND project_id = ?'
         );
         foreach ($updates as $u) {
             $rowId = (int) ($u['id'] ?? 0);
             if ($rowId <= 0) {
                 continue;
             }
-            $stmt->execute([(string) ($u['purpose'] ?? ''), $rowId, $orgId, $projectId, $userId]);
+            $stmt->execute([(string) ($u['purpose'] ?? ''), $rowId, $orgId, $projectId]);
             $updated += $stmt->rowCount();
             ++$applied;
             $appliedIds[] = $rowId;
@@ -1156,8 +1192,22 @@ class VendorService
         if ($vendorNorm === '') {
             return false;
         }
-        if (!OrgRole::usesAssignedVisibilityFilter($role)) {
+        if (OrgRole::canViewFullGrid($role)) {
             return true;
+        }
+        if (OrgRole::seesPublicOnly($role)) {
+            $check = $pdo->prepare(
+                'SELECT 1
+                 FROM cost_calculator_items
+                 WHERE org_id = :oid
+                   AND project_id = :pid
+                   AND LOWER(TRIM(vendor_name)) = :v
+                   AND visibility = \'public\'
+                 LIMIT 1'
+            );
+            $check->execute([':oid' => $orgId, ':pid' => $projectId, ':v' => $vendorNorm]);
+
+            return (bool) $check->fetchColumn();
         }
         $check = $pdo->prepare(
             'SELECT 1
