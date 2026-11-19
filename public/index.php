@@ -4975,7 +4975,7 @@ foreach ($team_members_rows as $tmRow) {
             text-align: center;
             border-radius: 12px;
             padding: 16px 24px;
-            z-index: 9999;
+            z-index: 22000;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.2);
@@ -4984,6 +4984,10 @@ foreach ($team_members_rows as $tmRow) {
             transition: all 0.3s ease-in-out;
             opacity: 0;
             transform: translateX(-50%) translateY(-20px);
+        }
+
+        body.wizard-active .snackbar {
+            top: 88px;
         }
         
         .snackbar.error {
@@ -6072,6 +6076,15 @@ foreach ($team_members_rows as $tmRow) {
                         showSnackbar('Project created.', 'success');
                         var mainAppContainer = document.querySelector('.container');
                         if (mainAppContainer) mainAppContainer.classList.remove('project-onboarding-hidden');
+                        // Advance off 'name' before close so cancel handler does not hide the progress bar.
+                        if (typeof prepareWizardContinueAfterCreate === 'function') {
+                            prepareWizardContinueAfterCreate({
+                                projectId: d.project_id,
+                                projectName: projectName,
+                                dataMode: dataMode,
+                                previousActiveProjectId: previousActiveProjectId
+                            });
+                        }
                         closeAppModal('appModalProjectWizard');
                         var loadPromise = loadProjectsIntoMenu().then(function() {
                             return loadCalculatorData();
@@ -6184,7 +6197,11 @@ foreach ($team_members_rows as $tmRow) {
                         endPostProjectCreateFlow();
                     }
                 }
-                if (overlay.id === 'appModalProjectWizard' && postProjectCreateFlow.active && postProjectCreateFlow.step === 'name') {
+                // Only end wizard when user cancels name step (no project created yet).
+                if (overlay.id === 'appModalProjectWizard'
+                    && postProjectCreateFlow.active
+                    && postProjectCreateFlow.step === 'name'
+                    && !(parseInt(postProjectCreateFlow.projectId, 10) > 0)) {
                     endPostProjectCreateFlow();
                 }
                 if (!document.querySelector('.app-modal-overlay.is-open')) {

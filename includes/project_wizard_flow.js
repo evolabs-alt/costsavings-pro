@@ -15,6 +15,7 @@
                 hasPriorProjects: false,
                 vendorCount: 0,
                 orgMemberCount: typeof TEAM_MEMBERS_COUNT === 'number' ? TEAM_MEMBERS_COUNT : 1,
+                includeQboConnect: false,
                 visibleSteps: [],
                 tourIndex: 0
             };
@@ -133,8 +134,9 @@
                 var needsImportPath = postProjectCreateFlow.dataMode === 'qbo_after'
                     || postProjectCreateFlow.dataMode === 'upload_after'
                     || opts.forceImportPath;
-                if (needsImportPath && !postProjectCreateFlow.importCompleted) {
-                    if (!QBO_ORG_CONNECTED) {
+                // Keep Retrieve/Import (and Connect if used) on the bar for the whole session.
+                if (needsImportPath) {
+                    if (postProjectCreateFlow.includeQboConnect) {
                         steps.push('qbo_connect');
                     }
                     steps.push('qbo_range');
@@ -754,23 +756,50 @@
                 postProjectCreateFlow.importCompleted = false;
                 postProjectCreateFlow.hasPriorProjects = false;
                 postProjectCreateFlow.vendorCount = 0;
+                postProjectCreateFlow.includeQboConnect = !QBO_ORG_CONNECTED;
                 postProjectCreateFlow.orgMemberCount = typeof TEAM_MEMBERS_COUNT === 'number' ? TEAM_MEMBERS_COUNT : 1;
                 fetchHasPriorProjects().finally(function() {
                     setWizardStep('name');
                 });
             }
 
-            function startPostProjectCreateFlow(opts) {
+            /** Keep bar visible while transitioning from Name → post-create steps (Create success). */
+            function prepareWizardContinueAfterCreate(opts) {
                 opts = opts || {};
                 postProjectCreateFlow.active = true;
                 postProjectCreateFlow.projectId = parseInt(opts.projectId, 10) || 0;
                 postProjectCreateFlow.projectName = opts.projectName || '';
                 postProjectCreateFlow.dataMode = opts.dataMode || 'qbo_after';
                 postProjectCreateFlow.previousActiveProjectId = parseInt(opts.previousActiveProjectId, 10) || 0;
+                postProjectCreateFlow.includeQboConnect = !QBO_ORG_CONNECTED;
+                var nextStep = 'qbo_connect';
+                if (postProjectCreateFlow.dataMode === 'qbo_after' || postProjectCreateFlow.dataMode === 'upload_after') {
+                    nextStep = QBO_ORG_CONNECTED ? 'qbo_range' : 'qbo_connect';
+                } else {
+                    nextStep = 'purposes';
+                }
+                setWizardStep(nextStep);
+            }
+
+            function startPostProjectCreateFlow(opts) {
+                opts = opts || {};
+                postProjectCreateFlow.active = true;
+                postProjectCreateFlow.projectId = parseInt(opts.projectId, 10) || postProjectCreateFlow.projectId || 0;
+                postProjectCreateFlow.projectName = opts.projectName || postProjectCreateFlow.projectName || '';
+                postProjectCreateFlow.dataMode = opts.dataMode || postProjectCreateFlow.dataMode || 'qbo_after';
+                postProjectCreateFlow.previousActiveProjectId = parseInt(opts.previousActiveProjectId, 10)
+                    || postProjectCreateFlow.previousActiveProjectId
+                    || 0;
                 postProjectCreateFlow.importCompleted = false;
                 postProjectCreateFlow.purposeCheckInFlight = false;
                 postProjectCreateFlow.postCreateCsvImportInFlight = false;
+                if (typeof opts.includeQboConnect === 'boolean') {
+                    postProjectCreateFlow.includeQboConnect = opts.includeQboConnect;
+                } else if (!postProjectCreateFlow.includeQboConnect && !QBO_ORG_CONNECTED) {
+                    postProjectCreateFlow.includeQboConnect = true;
+                }
                 postProjectCreateFlow.orgMemberCount = typeof TEAM_MEMBERS_COUNT === 'number' ? TEAM_MEMBERS_COUNT : 1;
+                showWizardProgressBar();
                 fetchHasPriorProjects().then(function() {
                     if (postProjectCreateFlow.dataMode === 'qbo_after' || postProjectCreateFlow.dataMode === 'upload_after') {
                         if (QBO_ORG_CONNECTED) {
@@ -813,6 +842,7 @@
                 postProjectCreateFlow.previousActiveProjectId = parseInt(prevId, 10) || 0;
                 postProjectCreateFlow.dataMode = 'qbo_after';
                 postProjectCreateFlow.importCompleted = false;
+                postProjectCreateFlow.includeQboConnect = true;
                 showWizardProgressBar();
 
                 var syncActive = postJson({ action: 'project_set_active', project_id: postProjectCreateFlow.projectId })
