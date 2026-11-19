@@ -1769,6 +1769,7 @@ foreach ($team_members_rows as $tmRow) {
 
         .app-header {
             position: relative;
+            z-index: 30;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -3609,7 +3610,7 @@ foreach ($team_members_rows as $tmRow) {
             border-radius: 12px;
             background: #fff;
             box-shadow: 0 16px 36px rgba(8, 54, 96, 0.18);
-            z-index: 40;
+            z-index: 50;
             display: none;
             opacity: 0;
             transition: opacity 0.14s ease, transform 0.14s ease;
