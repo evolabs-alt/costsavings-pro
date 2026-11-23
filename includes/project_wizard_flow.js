@@ -38,16 +38,65 @@
 
             var WIZARD_COACH_STEPS = [
                 {
-                    selector: 'th.visibility-col',
-                    text: 'Vendors import as confidential. Invited users can’t see confidential data—set visibility to Public to show the vendor row.'
+                    selector: 'th.select-row',
+                    text: 'Select rows for bulk actions. The header checkbox applies to filtered rows on this view.'
+                },
+                {
+                    selector: 'th.item-number',
+                    text: 'Display order in the current view—updates when you filter, sort, or paginate.'
+                },
+                {
+                    selector: 'th.category-col',
+                    text: 'Optional project grouping. Pick an existing category or create one.'
+                },
+                {
+                    selector: 'th.account-col',
+                    text: 'GL account(s) from QuickBooks/CSV. Editable; multiple accounts appear comma-separated.'
+                },
+                {
+                    selector: 'th.vendor-name',
+                    text: 'Vendor or subscription name. Editable on rows you can see.'
+                },
+                {
+                    selector: 'th.cost-per-period',
+                    text: 'Enter the $ amount for the selected frequency. Approximate ranges come from imported historical transactions.'
                 },
                 {
                     selector: 'th.frequency',
                     text: 'Saver estimated each vendor’s payment frequency. Review and adjust as needed.'
                 },
                 {
-                    selector: 'th.cost-per-period',
-                    text: 'Enter the $ amount for the selected frequency. Approximate ranges come from imported historical transactions.'
+                    selector: 'th.annual-cost',
+                    text: 'Yearly spend from Cost × Frequency. Sort to surface the largest line items.'
+                },
+                {
+                    selector: 'th.manager-col',
+                    text: 'Who owns this spend. On confidential rows, only the owner (and admins) can change status.'
+                },
+                {
+                    selector: 'th.visibility-col',
+                    text: 'Vendors import as confidential. Invited users can’t see confidential data—set visibility to Public to show the vendor row.'
+                },
+                {
+                    selector: 'th.row-status',
+                    text: 'Track review, keep, cancel, and renegotiate decisions for each vendor.'
+                },
+                {
+                    selector: '#togglePurposeColumnBtn',
+                    text: 'This is what AI described for the vendor—edit it to what makes more sense to you.',
+                    ensurePurposeVisible: true
+                },
+                {
+                    selector: 'th.vendor-chat-col',
+                    text: 'Chat with other members of this project.'
+                },
+                {
+                    selector: '#costCalculatorGrid thead .vendor-col-filter-btn',
+                    text: 'Use the filter icon to narrow columns (checkboxes or vendor name search). Filters apply across pages.'
+                },
+                {
+                    selector: '#costCalculatorGrid thead .vendor-col-sort-btn',
+                    text: 'Use the sort icon to order a column ascending or descending. Click again to flip direction.'
                 },
                 {
                     selector: '#costCalculatorGrid tbody tr:not([hidden]) .vendor-raw-btn',
@@ -560,12 +609,16 @@
                     finishWizardTour();
                     return;
                 }
+                var step = steps[idx];
+                if (step && step.ensurePurposeVisible && typeof setPurposeColumnState === 'function') {
+                    setPurposeColumnState(true);
+                }
                 var overlay = document.getElementById('wizardCoachOverlay');
                 if (overlay) {
                     overlay.classList.add('is-open');
                     overlay.setAttribute('aria-hidden', 'false');
                 }
-                positionWizardCoach(steps[idx]);
+                positionWizardCoach(step);
                 var nextBtn = document.getElementById('wizardCoachNextBtn');
                 if (nextBtn) {
                     nextBtn.textContent = (idx >= steps.length - 1) ? 'Got it' : 'Next';
