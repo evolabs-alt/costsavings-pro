@@ -11,21 +11,41 @@ class VendorRedundancyService
 {
     /**
      * @param array<int, array<string, mixed>> $items Visible vendor rows
+     * @param string $mode One of: duplicates | overlaps | all
      * @return array{
      *   success:bool,
      *   duplicates:array<int, array<string, mixed>>,
      *   overlaps:array<int, array<string, mixed>>,
      *   duplicate_savings:float,
      *   overlap_savings:float,
-     *   error?:string
+     *   error?:string,
+     *   overlap_warning?:string
      * }
      */
-    public static function analyze(PDO $pdo, int $userId, array $items): array
+    public static function analyze(PDO $pdo, int $userId, array $items, string $mode = 'all'): array
     {
-        $duplicates = self::findDuplicates($items);
+        $mode = strtolower(trim($mode));
+        if (!in_array($mode, ['duplicates', 'overlaps', 'all'], true)) {
+            $mode = 'all';
+        }
+
+        $duplicates = [];
         $duplicateSavings = 0.0;
-        foreach ($duplicates as $row) {
-            $duplicateSavings += (float) ($row['extra_annual_cost'] ?? 0);
+        if ($mode === 'duplicates' || $mode === 'all') {
+            $duplicates = self::findDuplicates($items);
+            foreach ($duplicates as $row) {
+                $duplicateSavings += (float) ($row['extra_annual_cost'] ?? 0);
+            }
+        }
+
+        if ($mode === 'duplicates') {
+            return [
+                'success' => true,
+                'duplicates' => $duplicates,
+                'overlaps' => [],
+                'duplicate_savings' => round($duplicateSavings, 2),
+                'overlap_savings' => 0.0,
+            ];
         }
 
         $overlapResult = self::findOverlapsViaAi($pdo, $userId, $items);

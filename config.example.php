@@ -45,21 +45,7 @@ if (!defined('QBO_TOKEN_ENCRYPTION_KEY')) {
 }
 
 /**
- * Gmail API OAuth (invites). Prefer env vars in production.
- * From address must match the OAuth-authorized Workspace mailbox.
- */
-define('GOOGLE_CLIENT_ID', getenv('GOOGLE_CLIENT_ID') ?: '');
-define('GOOGLE_CLIENT_SECRET', getenv('GOOGLE_CLIENT_SECRET') ?: '');
-define(
-    'GOOGLE_REDIRECT_URI',
-    getenv('GOOGLE_REDIRECT_URI') ?: (rtrim(BASE_URL, '/') . '/index.php?page=gmail-callback')
-);
-define('GMAIL_OAUTH_SETUP_KEY', getenv('GMAIL_OAUTH_SETUP_KEY') ?: '');
-define('SMTP_FROM_EMAIL', getenv('SMTP_FROM_EMAIL') ?: 'contactus@savvycfo.com');
-define('SMTP_FROM_NAME', getenv('SMTP_FROM_NAME') ?: 'Savvy Saver');
-
-/**
- * GoHighLevel Conversations API (deadline + monthly renewal reminders).
+ * GoHighLevel Conversations API (invites + deadline / renewal reminders).
  * Use the same GHL_LOCATION_ID as Scorecard Pro.
  */
 define('GHL_API_KEY', getenv('GHL_API_KEY') ?: getenv('GHL_API_TOKEN') ?: '');

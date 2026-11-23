@@ -8,16 +8,9 @@ if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
 }
 require_once __DIR__ . '/../includes/mail.php';
 require_once __DIR__ . '/../includes/actions.php';
-require_once __DIR__ . '/../includes/gmail_handlers.php';
 require_once __DIR__ . '/../includes/qbo_handlers.php';
 
 $page = $_GET['page'] ?? '';
-if ($page === 'gmail-auth') {
-    csGmailAuthenticate();
-}
-if ($page === 'gmail-callback') {
-    csGmailCallback();
-}
 
 if (isset($_SESSION['user_email'])) {
     $_SESSION['user_email'] = normalizeUserEmail($_SESSION['user_email']);
@@ -1361,6 +1354,30 @@ foreach ($team_members_rows as $tmRow) {
         .report-filters .column-toggle-btn:hover {
             border-color: #6b5b95;
             color: #4a3f6b;
+        }
+
+        .report-filters .column-toggle-btn--ai {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .report-filters .column-toggle-btn--ai .material-symbols-outlined {
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        .report-filters .column-toggle-btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        #calculatorRows tr.vendor-row--redundancy-hit {
+            background: #fef3c7;
+        }
+
+        #calculatorRows tr.vendor-row--redundancy-hit td {
+            background: transparent;
         }
 
         .report-filters-top {
@@ -5702,6 +5719,14 @@ foreach ($team_members_rows as $tmRow) {
                         </div>
                     </div>
                     <div class="report-filters-top">
+                        <button type="button" id="analyzeDuplicatesBtn" class="column-toggle-btn column-toggle-btn--ai" title="Find duplicate vendors">
+                            <span class="material-symbols-outlined" aria-hidden="true">auto_awesome</span>
+                            Duplicates
+                        </button>
+                        <button type="button" id="analyzeOverlapsBtn" class="column-toggle-btn column-toggle-btn--ai" title="Find overlapping vendors">
+                            <span class="material-symbols-outlined" aria-hidden="true">auto_awesome</span>
+                            Overlaps
+                        </button>
                         <button type="button" id="togglePurposeColumnBtn" class="column-toggle-btn" aria-pressed="false">Show Purpose</button>
                     </div>
                 </div>
@@ -7982,8 +8007,12 @@ foreach ($team_members_rows as $tmRow) {
                                 closeAppModal(ov);
                                 advancePostProjectCreateFlow();
                             } else if (ov.id === 'appModalVendorRedundancy') {
-                                closeAppModal(ov);
-                                advancePostProjectCreateFlow();
+                                if (typeof dismissVendorRedundancyModal === 'function') {
+                                    dismissVendorRedundancyModal();
+                                } else {
+                                    closeAppModal(ov);
+                                    advancePostProjectCreateFlow();
+                                }
                             } else if (ov.id === 'appModalPostCreateInvite') {
                                 closeAppModal(ov);
                                 if (typeof openSetupCompleteModal === 'function') {
@@ -7998,6 +8027,10 @@ foreach ($team_members_rows as $tmRow) {
                             return;
                         }
                         if (isPostCreateUploadWaiting() && isPostCreateCsvModalId(ov.id)) {
+                            return;
+                        }
+                        if (ov.id === 'appModalVendorRedundancy' && typeof dismissVendorRedundancyModal === 'function') {
+                            dismissVendorRedundancyModal();
                             return;
                         }
                         closeAppModal(ov);

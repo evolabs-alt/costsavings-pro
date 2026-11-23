@@ -46,12 +46,8 @@
                     text: 'Display order in the current view—updates when you filter, sort, or paginate.'
                 },
                 {
-                    selector: 'th.category-col',
-                    text: 'Optional project grouping. Pick an existing category or create one.'
-                },
-                {
                     selector: 'th.account-col',
-                    text: 'GL account(s) from QuickBooks/CSV. Editable; multiple accounts appear comma-separated.'
+                    text: 'Account(s) from QuickBooks. Editable; multiple accounts appear comma-separated.'
                 },
                 {
                     selector: 'th.vendor-name',
@@ -91,11 +87,11 @@
                     text: 'Chat with other members of this project.'
                 },
                 {
-                    selector: '#costCalculatorGrid thead .vendor-col-filter-btn',
+                    selector: '#costCalculatorGrid th.account-col .vendor-col-filter-btn',
                     text: 'Use the filter icon to narrow columns (checkboxes or vendor name search). Filters apply across pages.'
                 },
                 {
-                    selector: '#costCalculatorGrid thead .vendor-col-sort-btn',
+                    selector: '#costCalculatorGrid th.account-col .vendor-col-sort-btn',
                     text: 'Use the sort icon to order a column ascending or descending. Click again to flip direction.'
                 },
                 {
@@ -482,55 +478,174 @@
                 return '$' + v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
             }
 
-            function openVendorRedundancyModal(data) {
-                setWizardStep('review');
+            var vendorRedundancyModalFromWizard = false;
+            var vendorRedundancyAnalyzeBusy = false;
+
+            function clearVendorRedundancyHighlights() {
+                document.querySelectorAll('#calculatorRows tr.vendor-row--redundancy-hit').forEach(function(row) {
+                    row.classList.remove('vendor-row--redundancy-hit');
+                });
+            }
+
+            function normalizeVendorNameClient(name) {
+                return String(name || '').trim().toLowerCase();
+            }
+
+            function highlightVendorRedundancyRows(data, mode) {
+                clearVendorRedundancyHighlights();
+                var idSet = {};
+                var nameSet = {};
+                var showDups = mode === 'duplicates' || mode === 'all';
+                var showOverlaps = mode === 'overlaps' || mode === 'all';
+
+                if (showDups) {
+                    (data.duplicates || []).forEach(function(d) {
+                        (d.row_ids || []).forEach(function(id) {
+                            var n = parseInt(id, 10) || 0;
+                            if (n > 0) idSet[String(n)] = true;
+                        });
+                    });
+                }
+                if (showOverlaps) {
+                    (data.overlaps || []).forEach(function(o) {
+                        var a = normalizeVendorNameClient(o.vendor_a);
+                        var b = normalizeVendorNameClient(o.vendor_b);
+                        if (a) nameSet[a] = true;
+                        if (b) nameSet[b] = true;
+                    });
+                }
+
+                var firstHit = null;
+                document.querySelectorAll('#calculatorRows tr').forEach(function(row) {
+                    var idEl = row.querySelector('.row-db-id');
+                    var id = idEl ? (parseInt(idEl.value, 10) || 0) : 0;
+                    var vendorInput = row.querySelector('input[name="vendor[]"]');
+                    var vName = normalizeVendorNameClient(vendorInput ? vendorInput.value : '');
+                    var hit = (id > 0 && idSet[String(id)]) || (vName && nameSet[vName]);
+                    if (hit) {
+                        row.classList.add('vendor-row--redundancy-hit');
+                        if (!firstHit) firstHit = row;
+                    }
+                });
+                if (firstHit && typeof firstHit.scrollIntoView === 'function') {
+                    firstHit.scrollIntoView({ block: 'center', inline: 'nearest' });
+                }
+            }
+
+            function openVendorRedundancyModal(data, options) {
+                options = options || {};
+                var mode = options.mode || 'all';
+                var fromWizard = !!options.fromWizard;
+                vendorRedundancyModalFromWizard = fromWizard;
+
+                if (fromWizard) {
+                    setWizardStep('review');
+                }
+
+                var titleEl = document.getElementById('appModalVendorRedundancyTitle');
                 var summary = document.getElementById('wizardReviewSummary');
                 var list = document.getElementById('wizardReviewList');
                 var msg = document.getElementById('wizardReviewMessage');
+                var continueBtn = document.getElementById('wizardReviewContinueBtn');
                 var dupSave = Number(data && data.duplicate_savings) || 0;
                 var ovSave = Number(data && data.overlap_savings) || 0;
+                var showDups = mode === 'duplicates' || mode === 'all';
+                var showOverlaps = mode === 'overlaps' || mode === 'all';
+
+                if (titleEl) {
+                    if (mode === 'duplicates') titleEl.textContent = 'Duplicate vendors';
+                    else if (mode === 'overlaps') titleEl.textContent = 'Overlapping vendors';
+                    else titleEl.textContent = 'Overlapping & duplicate vendors';
+                }
+                if (continueBtn) {
+                    continueBtn.textContent = fromWizard ? 'Continue' : 'Got it';
+                }
                 if (msg) {
-                    msg.textContent = 'Identify vendors you will not use anymore. Based on duplicates you could save '
-                        + formatMoney(dupSave) + ', and based on potential overlaps you could save '
-                        + formatMoney(ovSave) + '.';
+                    if (mode === 'duplicates') {
+                        msg.textContent = 'Identify vendors you will not use anymore. Based on duplicates you could save '
+                            + formatMoney(dupSave) + '.';
+                    } else if (mode === 'overlaps') {
+                        msg.textContent = 'Identify vendors you will not use anymore. Based on potential overlaps you could save '
+                            + formatMoney(ovSave) + '.';
+                    } else {
+                        msg.textContent = 'Identify vendors you will not use anymore. Based on duplicates you could save '
+                            + formatMoney(dupSave) + ', and based on potential overlaps you could save '
+                            + formatMoney(ovSave) + '.';
+                    }
                 }
                 if (summary) {
-                    summary.innerHTML =
-                        '<span class="wizard-review-pill wizard-review-pill--dup">Duplicates · save '
-                        + formatMoney(dupSave) + '</span>'
-                        + '<span class="wizard-review-pill wizard-review-pill--overlap">Overlaps · save '
-                        + formatMoney(ovSave) + '</span>';
+                    var pills = '';
+                    if (showDups) {
+                        pills += '<span class="wizard-review-pill wizard-review-pill--dup">Duplicates · save '
+                            + formatMoney(dupSave) + '</span>';
+                    }
+                    if (showOverlaps) {
+                        pills += '<span class="wizard-review-pill wizard-review-pill--overlap">Overlaps · save '
+                            + formatMoney(ovSave) + '</span>';
+                    }
+                    summary.innerHTML = pills;
                 }
                 var html = '';
-                (data.duplicates || []).forEach(function(d) {
-                    html += '<div class="wizard-review-row wizard-review-row--dup">'
-                        + '<div class="wizard-review-row__title">Duplicate: ' + escapeHtml(d.vendor_name || '') + '</div>'
-                        + '<div class="wizard-review-row__meta">' + (d.row_count || 0)
-                        + ' rows · extra annual ' + formatMoney(d.extra_annual_cost || 0) + '</div>'
-                        + '</div>';
-                });
-                (data.overlaps || []).forEach(function(o) {
-                    html += '<div class="wizard-review-row wizard-review-row--overlap">'
-                        + '<div class="wizard-review-row__title">' + escapeHtml(o.vendor_a || '')
-                        + ' ↔ ' + escapeHtml(o.vendor_b || '') + '</div>'
-                        + '<div class="wizard-review-row__meta">' + escapeHtml(o.reason || 'Potential overlap')
-                        + ' · potential save ' + formatMoney(o.suggested_annual_savings || 0) + '</div>'
-                        + '</div>';
-                });
+                if (showDups) {
+                    (data.duplicates || []).forEach(function(d) {
+                        html += '<div class="wizard-review-row wizard-review-row--dup">'
+                            + '<div class="wizard-review-row__title">Duplicate: ' + escapeHtml(d.vendor_name || '') + '</div>'
+                            + '<div class="wizard-review-row__meta">' + (d.row_count || 0)
+                            + ' rows · extra annual ' + formatMoney(d.extra_annual_cost || 0) + '</div>'
+                            + '</div>';
+                    });
+                }
+                if (showOverlaps) {
+                    (data.overlaps || []).forEach(function(o) {
+                        html += '<div class="wizard-review-row wizard-review-row--overlap">'
+                            + '<div class="wizard-review-row__title">' + escapeHtml(o.vendor_a || '')
+                            + ' ↔ ' + escapeHtml(o.vendor_b || '') + '</div>'
+                            + '<div class="wizard-review-row__meta">' + escapeHtml(o.reason || 'Potential overlap')
+                            + ' · potential save ' + formatMoney(o.suggested_annual_savings || 0) + '</div>'
+                            + '</div>';
+                    });
+                }
                 if (!html) {
-                    html = '<p class="wizard-review-empty">No duplicates or overlaps found.</p>';
+                    if (mode === 'duplicates') html = '<p class="wizard-review-empty">No duplicates found.</p>';
+                    else if (mode === 'overlaps') html = '<p class="wizard-review-empty">No overlaps found.</p>';
+                    else html = '<p class="wizard-review-empty">No duplicates or overlaps found.</p>';
                 }
                 if (list) list.innerHTML = html;
                 if (data.overlap_warning) {
                     showSnackbar(data.overlap_warning, 'info');
                 }
+                highlightVendorRedundancyRows(data || {}, mode);
                 openAppModal('appModalVendorRedundancy');
             }
 
-            function runVendorRedundancyStep() {
-                setWizardStep('review');
-                showSnackbar('Checking for duplicate and overlapping vendors…', 'info');
-                return postJson({ action: 'analyze_vendor_redundancy' }).then(function(d) {
+            function dismissVendorRedundancyModal() {
+                closeAppModal('appModalVendorRedundancy');
+                if (vendorRedundancyModalFromWizard && postProjectCreateFlow.active) {
+                    vendorRedundancyModalFromWizard = false;
+                    advancePostProjectCreateFlow();
+                    return;
+                }
+                vendorRedundancyModalFromWizard = false;
+                clearVendorRedundancyHighlights();
+            }
+
+            function setVendorRedundancyToolbarBusy(busy) {
+                vendorRedundancyAnalyzeBusy = !!busy;
+                var dupBtn = document.getElementById('analyzeDuplicatesBtn');
+                var ovBtn = document.getElementById('analyzeOverlapsBtn');
+                if (dupBtn) dupBtn.disabled = !!busy;
+                if (ovBtn) ovBtn.disabled = !!busy;
+            }
+
+            function runToolbarVendorRedundancy(mode) {
+                if (vendorRedundancyAnalyzeBusy) return;
+                clearVendorRedundancyHighlights();
+                setVendorRedundancyToolbarBusy(true);
+                var snack = mode === 'duplicates'
+                    ? 'Checking for duplicate vendors…'
+                    : 'Checking for overlapping vendors…';
+                showSnackbar(snack, 'info');
+                return postJson({ action: 'analyze_vendor_redundancy', mode: mode }).then(function(d) {
                     if (!d || !d.success) {
                         showSnackbar((d && d.error) || 'Could not analyze vendors.', 'error');
                         openVendorRedundancyModal({
@@ -538,10 +653,10 @@
                             overlaps: [],
                             duplicate_savings: 0,
                             overlap_savings: 0
-                        });
+                        }, { mode: mode, fromWizard: false });
                         return;
                     }
-                    openVendorRedundancyModal(d);
+                    openVendorRedundancyModal(d, { mode: mode, fromWizard: false });
                 }).catch(function() {
                     showSnackbar('Could not analyze vendors.', 'error');
                     openVendorRedundancyModal({
@@ -549,7 +664,35 @@
                         overlaps: [],
                         duplicate_savings: 0,
                         overlap_savings: 0
-                    });
+                    }, { mode: mode, fromWizard: false });
+                }).finally(function() {
+                    setVendorRedundancyToolbarBusy(false);
+                });
+            }
+
+            function runVendorRedundancyStep() {
+                setWizardStep('review');
+                showSnackbar('Checking for duplicate and overlapping vendors…', 'info');
+                return postJson({ action: 'analyze_vendor_redundancy', mode: 'all' }).then(function(d) {
+                    if (!d || !d.success) {
+                        showSnackbar((d && d.error) || 'Could not analyze vendors.', 'error');
+                        openVendorRedundancyModal({
+                            duplicates: [],
+                            overlaps: [],
+                            duplicate_savings: 0,
+                            overlap_savings: 0
+                        }, { mode: 'all', fromWizard: true });
+                        return;
+                    }
+                    openVendorRedundancyModal(d, { mode: 'all', fromWizard: true });
+                }).catch(function() {
+                    showSnackbar('Could not analyze vendors.', 'error');
+                    openVendorRedundancyModal({
+                        duplicates: [],
+                        overlaps: [],
+                        duplicate_savings: 0,
+                        overlap_savings: 0
+                    }, { mode: 'all', fromWizard: true });
                 });
             }
 
@@ -1140,8 +1283,20 @@
                 var reviewContinue = document.getElementById('wizardReviewContinueBtn');
                 if (reviewContinue) {
                     reviewContinue.addEventListener('click', function() {
-                        closeAppModal('appModalVendorRedundancy');
-                        advancePostProjectCreateFlow();
+                        dismissVendorRedundancyModal();
+                    });
+                }
+
+                var analyzeDupBtn = document.getElementById('analyzeDuplicatesBtn');
+                var analyzeOvBtn = document.getElementById('analyzeOverlapsBtn');
+                if (analyzeDupBtn) {
+                    analyzeDupBtn.addEventListener('click', function() {
+                        runToolbarVendorRedundancy('duplicates');
+                    });
+                }
+                if (analyzeOvBtn) {
+                    analyzeOvBtn.addEventListener('click', function() {
+                        runToolbarVendorRedundancy('overlaps');
                     });
                 }
 

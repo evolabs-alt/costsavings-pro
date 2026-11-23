@@ -658,7 +658,7 @@ function handleInviteMember() {
             'mail_detail' => $detailForLog,
         ]);
         // Keep the invitation row so the token stays valid; admin can share the link manually.
-        $hint = 'Complete Gmail OAuth setup, ensure SMTP_FROM_EMAIL matches the authorized mailbox, and check pro.logs for sendInviteEmail_fail.';
+        $hint = 'Check GHL_API_KEY, GHL_LOCATION_ID, Conversations scope, and pro.logs for sendInviteEmail_fail / ghl_send_fail.';
         if ($mailDetail !== '') {
             $short = function_exists('mb_substr') ? mb_substr($mailDetail, 0, 450) : substr($mailDetail, 0, 450);
             $hint = $short . ' See pro.logs for details. ' . $hint;
@@ -2996,7 +2996,11 @@ function handleAnalyzeVendorRedundancy(): void
             $projectId,
             effectiveVendorGridRole()
         );
-        $result = VendorRedundancyService::analyze($pdo, (int) $_SESSION['user_id'], $items);
+        $mode = strtolower(trim((string) ($_POST['mode'] ?? 'all')));
+        if (!in_array($mode, ['duplicates', 'overlaps', 'all'], true)) {
+            $mode = 'all';
+        }
+        $result = VendorRedundancyService::analyze($pdo, (int) $_SESSION['user_id'], $items, $mode);
         echo json_encode($result, JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         error_log('handleAnalyzeVendorRedundancy: ' . $e->getMessage());

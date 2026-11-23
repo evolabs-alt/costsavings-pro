@@ -538,13 +538,6 @@ function migrateSchema(PDO $pdo) {
 
         migrateEmailReminderDigestSchema($pdo);
 
-        $pdo->exec("CREATE TABLE IF NOT EXISTS `cs_gmail_tokens` (
-            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-            `token_data` TEXT NOT NULL,
-            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
         $pdo->exec("CREATE TABLE IF NOT EXISTS `org_qbo_connections` (
             `org_id` INT UNSIGNED NOT NULL PRIMARY KEY,
             `environment` VARCHAR(16) NOT NULL DEFAULT 'production',
@@ -1471,30 +1464,3 @@ function saveUserRoleToDB($email, $role, $firstName = null, $lastName = null) {
     }
 }
 
-function csGetGmailToken(): ?array
-{
-    $pdo = getDBConnection();
-    $stmt = $pdo->query('SELECT * FROM cs_gmail_tokens ORDER BY id DESC LIMIT 1');
-    $row = $stmt->fetch();
-    return $row ?: null;
-}
-
-function csSaveGmailToken(array $tokenData): void
-{
-    $pdo = getDBConnection();
-    $json = json_encode($tokenData);
-    $existing = csGetGmailToken();
-    if ($existing) {
-        $pdo->prepare('UPDATE cs_gmail_tokens SET token_data = :t WHERE id = :id')
-            ->execute([':t' => $json, ':id' => $existing['id']]);
-        return;
-    }
-    $pdo->prepare('INSERT INTO cs_gmail_tokens (token_data) VALUES (:t)')
-        ->execute([':t' => $json]);
-}
-
-function csDeleteGmailToken(): void
-{
-    $pdo = getDBConnection();
-    $pdo->exec('DELETE FROM cs_gmail_tokens');
-}

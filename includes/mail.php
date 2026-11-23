@@ -133,7 +133,7 @@ HTML;
 }
 
 /**
- * Invitation email via Gmail API OAuth.
+ * Invitation email via GoHighLevel Conversations API.
  *
  * @return true|array{success:false,error_message:string,error_info:string}
  */
@@ -157,44 +157,20 @@ function sendInviteEmail($to, $subject, $body)
         ];
     }
 
-    $fromEmail = defined('SMTP_FROM_EMAIL') ? trim((string) SMTP_FROM_EMAIL) : '';
-    if ($fromEmail === '' || !filter_var($fromEmail, FILTER_VALIDATE_EMAIL)) {
-        proLog('sendInviteEmail_fail', [
-            'to' => $to,
-            'subject' => $subject,
-            'error_message' => 'Invalid SMTP_FROM_EMAIL',
-        ]);
-
-        return [
-            'success' => false,
-            'error_message' => 'Invalid From email in configuration',
-            'error_info' => 'Set SMTP_FROM_EMAIL to the Gmail OAuth mailbox address.',
-        ];
-    }
-
-    try {
-        if (!class_exists('GmailService', false)) {
-            require_once __DIR__ . '/GmailService.php';
-        }
-        proLog('sendInviteEmail_start', ['to' => $to, 'subject' => $subject]);
-        $gmail = new GmailService();
-        $gmail->sendEmail($to, $subject, $body, $fromEmail);
+    proLog('sendInviteEmail_start', ['to' => $to, 'subject' => $subject]);
+    $result = csSendGhlEmail($to, $subject, $body);
+    if ($result === true) {
         proLog('sendInviteEmail_ok', ['to' => $to, 'subject' => $subject]);
-        return true;
-    } catch (Throwable $e) {
-        error_log('Gmail invite send failed: ' . $e->getMessage());
+    } else {
         proLog('sendInviteEmail_fail', [
             'to' => $to,
             'subject' => $subject,
-            'error_message' => $e->getMessage(),
+            'error_message' => is_array($result) ? ($result['error_message'] ?? 'GHL send failed') : 'GHL send failed',
+            'error_info' => is_array($result) ? ($result['error_info'] ?? '') : '',
         ]);
-
-        return [
-            'success' => false,
-            'error_message' => 'Gmail send failed',
-            'error_info' => $e->getMessage(),
-        ];
     }
+
+    return $result;
 }
 
 /**
@@ -226,7 +202,7 @@ function sendReminderEmail($to, $subject, $body)
 }
 
 /**
- * @deprecated Use sendInviteEmail or sendReminderEmail. Kept for any legacy callers; routes to invite (Gmail).
+ * @deprecated Use sendInviteEmail or sendReminderEmail. Kept for any legacy callers; routes via GHL.
  * @return true|array{success:false,error_message:string,error_info:string}
  */
 function sendEmail($to, $subject, $body)
