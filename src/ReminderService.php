@@ -29,6 +29,7 @@ class ReminderService
     private const DIGEST_NON_MONTHLY = 'non_monthly_charges';
     private const DIGEST_CANCEL_PROGRESS = 'cancel_progress';
     private const DIGEST_CHAT_MENTIONS = 'chat_mentions';
+    private const DIGEST_NEW_QBO_VENDORS = 'new_qbo_vendors';
 
     private const LIST_CAP = 10;
     private const CHAT_MENTION_SNIPPET_CAP = 10;
@@ -678,9 +679,214 @@ class ReminderService
     }
 
     /**
+     * Tuesday digest of new QBO vendors (dry-run sync vs project vendors; no DB writes).
+     * Only projects with weekly import consent + persisted selected accounts.
+     *
+     * @param callable(string,string,string):mixed $sendEmail
+     * @return array{sent:int, errors:array<int, string>, debug:array<int, array<string, mixed>>, period_key:string, skipped_weekday_gate?:bool}
+     */
+    public static function runNewQboVendorsDigest(
+        PDO $pdo,
+        callable $sendEmail,
+        bool $forceIgnoreWeekdayGate = false
+    ): array {
+        $sent = 0;
+        $errors = [];
+        $debug = [];
+        $today = new DateTimeImmutable('today');
+        $periodKey = $today->format('o-\WW');
+        $weekLabel = $today->format('M j, Y');
+        $startDate = $today->modify('-7 days')->format('Y-m-d');
+        $endDate = $today->format('Y-m-d');
+
+        if (!$forceIgnoreWeekdayGate && (int) $today->format('N') !== 2) {
+            return [
+                'sent' => 0,
+                'errors' => [],
+                'debug' => [],
+                'period_key' => $periodKey,
+                'skipped_weekday_gate' => true,
+            ];
+        }
+
+        /** @var array<int, array{project_id:int, org_id:int, project_name:string, vendors:array<int, array{vendor_name:string, account:string, amount:float}>}> $projectSectionsById */
+        $projectSectionsById = [];
+        /** @var array<int, list<int>> $orgProjectIds */
+        $orgProjectIds = [];
+
+        try {
+            $consentRows = $pdo->query(
+                'SELECT c.org_id, c.project_id, COALESCE(NULLIF(TRIM(p.name), \'\'), c.project_name, \'Project\') AS project_name
+                 FROM project_qbo_weekly_import_consents c
+                 INNER JOIN projects p ON p.id = c.project_id AND p.org_id = c.org_id
+                 ORDER BY c.org_id ASC, c.project_id ASC'
+            )->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            return [
+                'sent' => 0,
+                'errors' => [$e->getMessage()],
+                'debug' => [],
+                'period_key' => $periodKey,
+            ];
+        }
+
+        /** @var array<int, true> $seenProjects */
+        $seenProjects = [];
+        $qbo = new QboService($pdo);
+
+        foreach ($consentRows as $consent) {
+            $orgId = (int) ($consent['org_id'] ?? 0);
+            $projectId = (int) ($consent['project_id'] ?? 0);
+            if ($orgId <= 0 || $projectId <= 0 || isset($seenProjects[$projectId])) {
+                continue;
+            }
+            $seenProjects[$projectId] = true;
+
+            $accounts = ProjectService::getQboSelectedAccounts($pdo, $orgId, $projectId);
+            if ($accounts === []) {
+                $debug[] = [
+                    'action' => 'skip_no_accounts',
+                    'org_id' => $orgId,
+                    'project_id' => $projectId,
+                ];
+                continue;
+            }
+            if (!$qbo->isConnected($orgId)) {
+                $debug[] = [
+                    'action' => 'skip_qbo_disconnected',
+                    'org_id' => $orgId,
+                    'project_id' => $projectId,
+                ];
+                continue;
+            }
+
+            try {
+                $rows = $qbo->fetchTransactionRows($orgId, $startDate, $endDate);
+            } catch (\Throwable $e) {
+                $errors[] = 'org ' . $orgId . ' project ' . $projectId . ': ' . $e->getMessage();
+                $debug[] = [
+                    'action' => 'qbo_fetch_failed',
+                    'org_id' => $orgId,
+                    'project_id' => $projectId,
+                    'error' => $e->getMessage(),
+                ];
+                continue;
+            }
+
+            $filtered = QboService::filterRowsByAccounts($rows, $accounts);
+            $newVendors = self::detectNewQboVendorsFromRows($pdo, $orgId, $projectId, $filtered);
+            if ($newVendors === []) {
+                $debug[] = [
+                    'action' => 'skip_no_new_vendors',
+                    'org_id' => $orgId,
+                    'project_id' => $projectId,
+                ];
+                continue;
+            }
+
+            $projectSectionsById[$projectId] = [
+                'project_id' => $projectId,
+                'org_id' => $orgId,
+                'project_name' => (string) ($consent['project_name'] ?? 'Project'),
+                'vendors' => $newVendors,
+            ];
+            if (!isset($orgProjectIds[$orgId])) {
+                $orgProjectIds[$orgId] = [];
+            }
+            $orgProjectIds[$orgId][] = $projectId;
+        }
+
+        if ($projectSectionsById === []) {
+            return ['sent' => 0, 'errors' => $errors, 'debug' => $debug, 'period_key' => $periodKey];
+        }
+
+        $admins = self::orgAdminFinanceUsersForOrgs($pdo, array_keys($orgProjectIds));
+        /** @var array<int, array{user_id:int, email:string, first_name:string, project_ids:array<int, true>}> $buckets */
+        $buckets = [];
+        foreach ($admins as $admin) {
+            $uid = (int) $admin['id'];
+            $email = trim((string) $admin['email']);
+            $orgId = (int) $admin['org_id'];
+            if ($uid <= 0 || $email === '' || !isset($orgProjectIds[$orgId])) {
+                continue;
+            }
+            if (!isset($buckets[$uid])) {
+                $buckets[$uid] = [
+                    'user_id' => $uid,
+                    'email' => $email,
+                    'first_name' => trim((string) ($admin['first_name'] ?? '')),
+                    'project_ids' => [],
+                ];
+            }
+            foreach ($orgProjectIds[$orgId] as $pid) {
+                $buckets[$uid]['project_ids'][$pid] = true;
+            }
+        }
+
+        foreach ($buckets as $bucket) {
+            $uid = $bucket['user_id'];
+            $email = $bucket['email'];
+            $sections = [];
+            foreach (array_keys($bucket['project_ids']) as $pid) {
+                if (isset($projectSectionsById[$pid])) {
+                    $sections[] = $projectSectionsById[$pid];
+                }
+            }
+            $entry = [
+                'user_id' => $uid,
+                'email' => $email,
+                'period_key' => $periodKey,
+                'action' => null,
+                'projects' => count($sections),
+                'vendors' => 0,
+                'send_result' => null,
+            ];
+            if ($sections === []) {
+                $entry['action'] = 'skip_no_items';
+                $debug[] = $entry;
+                continue;
+            }
+            $vendorCount = 0;
+            foreach ($sections as $section) {
+                $vendorCount += count($section['vendors']);
+            }
+            $entry['vendors'] = $vendorCount;
+
+            if (self::digestAlreadySent($pdo, $uid, self::DIGEST_NEW_QBO_VENDORS, $periodKey)) {
+                $entry['action'] = 'skip_already_sent';
+                $debug[] = $entry;
+                continue;
+            }
+
+            $html = self::buildNewQboVendorsHtml(
+                $bucket['first_name'],
+                $sections,
+                $weekLabel,
+                $startDate,
+                $endDate,
+                $vendorCount
+            );
+            $subj = 'New QuickBooks vendors — week of ' . $weekLabel;
+            $r = $sendEmail($email, $subj, $html);
+            $entry['send_result'] = self::summarizeSendResult($r);
+            if ($r === true) {
+                self::markDigestSent($pdo, $uid, self::DIGEST_NEW_QBO_VENDORS, $periodKey);
+                ++$sent;
+                $entry['action'] = 'sent_ok';
+            } else {
+                $entry['action'] = 'send_failed';
+                $errors[] = $email . ': ' . self::sendFailureMessage($r);
+            }
+            $debug[] = $entry;
+        }
+
+        return ['sent' => $sent, 'errors' => $errors, 'debug' => $debug, 'period_key' => $periodKey];
+    }
+
+    /**
      * Clear dedup rows so --force-resend can re-deliver.
      *
-     * @return array{renewal_reminder_sent:int, non_monthly_charges:int, cancel_progress:int, chat_mentions:int}
+     * @return array{renewal_reminder_sent:int, non_monthly_charges:int, cancel_progress:int, chat_mentions:int, new_qbo_vendors:int}
      */
     public static function clearForceResendDedup(PDO $pdo): array
     {
@@ -706,12 +912,195 @@ class ReminderService
         );
         $delChat->execute([self::DIGEST_CHAT_MENTIONS, $weekKey]);
 
+        $delNewQbo = $pdo->prepare(
+            'DELETE FROM email_digest_sent WHERE digest_type = ? AND period_key = ?'
+        );
+        $delNewQbo->execute([self::DIGEST_NEW_QBO_VENDORS, $weekKey]);
+
         return [
             'renewal_reminder_sent' => $delRenewal->rowCount(),
             'non_monthly_charges' => $delCharges->rowCount(),
             'cancel_progress' => $delCancel->rowCount(),
             'chat_mentions' => $delChat->rowCount(),
+            'new_qbo_vendors' => $delNewQbo->rowCount(),
         ];
+    }
+
+    /**
+     * @param array<int, array{vendor_name:string,transaction_date:string,amount:float,transaction_type:string,account:string,memo:string}> $rows
+     * @return array<int, array{vendor_name:string, account:string, amount:float}>
+     */
+    private static function detectNewQboVendorsFromRows(
+        PDO $pdo,
+        int $orgId,
+        int $projectId,
+        array $rows
+    ): array {
+        if ($rows === []) {
+            return [];
+        }
+        $existing = VendorService::existingNormalizedVendorNames($pdo, $orgId, $projectId);
+        /** @var array<string, array{vendor_name:string, accounts:array<string, true>, amount:float}> $grouped */
+        $grouped = [];
+        foreach ($rows as $row) {
+            $name = trim((string) ($row['vendor_name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $norm = VendorService::normalizeVendorName($name);
+            if ($norm === '' || isset($existing[$norm])) {
+                continue;
+            }
+            $acct = trim((string) ($row['account'] ?? ''));
+            if ($acct === '') {
+                $acct = '(No account)';
+            }
+            if (!isset($grouped[$norm])) {
+                $grouped[$norm] = [
+                    'vendor_name' => $name,
+                    'accounts' => [],
+                    'amount' => 0.0,
+                ];
+            }
+            $grouped[$norm]['accounts'][$acct] = true;
+            $grouped[$norm]['amount'] += (float) ($row['amount'] ?? 0);
+        }
+
+        $out = [];
+        foreach ($grouped as $g) {
+            $accountList = array_keys($g['accounts']);
+            sort($accountList, SORT_STRING);
+            $out[] = [
+                'vendor_name' => $g['vendor_name'],
+                'account' => implode(', ', $accountList),
+                'amount' => round((float) $g['amount'], 2),
+            ];
+        }
+        usort($out, static function (array $a, array $b): int {
+            return strcasecmp($a['vendor_name'], $b['vendor_name']);
+        });
+
+        return $out;
+    }
+
+    /**
+     * @param array<int, int> $orgIds
+     * @return array<int, array{id:int, email:string, first_name:string, org_id:int}>
+     */
+    private static function orgAdminFinanceUsersForOrgs(PDO $pdo, array $orgIds): array
+    {
+        $clean = array_values(array_unique(array_filter(array_map('intval', $orgIds), static function ($v) {
+            return $v > 0;
+        })));
+        if ($clean === []) {
+            return [];
+        }
+        $in = implode(',', array_fill(0, count($clean), '?'));
+        $st = $pdo->prepare(
+            'SELECT u.id, u.email, u.first_name, uo.org_id
+             FROM user_organizations uo
+             INNER JOIN users u ON u.id = uo.user_id
+             WHERE uo.org_id IN (' . $in . ')
+               AND uo.is_disabled = 0
+               AND uo.role IN (?, ?)
+               AND u.email IS NOT NULL AND TRIM(u.email) <> \'\''
+        );
+        $params = array_merge($clean, [OrgRole::ROLE_ORG_ADMIN, OrgRole::ROLE_FINANCE_ADMIN]);
+        $st->execute($params);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @param array<int, array{project_name:string, vendors:array<int, array{vendor_name:string, account:string, amount:float}>}> $projectSections
+     */
+    private static function buildNewQboVendorsHtml(
+        string $firstName,
+        array $projectSections,
+        string $weekLabel,
+        string $startDate,
+        string $endDate,
+        int $totalVendors
+    ): string {
+        $greeting = self::emailGreeting($firstName);
+        $rangeLabel = self::formatDigestDateRange($startDate, $endDate);
+        $body = $greeting;
+        $body .= '<p>New vendors appeared in QuickBooks Online for the last week'
+            . ' (<strong>' . htmlspecialchars($rangeLabel, ENT_QUOTES, 'UTF-8') . '</strong>)'
+            . ' that are not yet in your Savvy Saver project'
+            . ($totalVendors > 0
+                ? ' (<strong>' . (int) $totalVendors . '</strong> vendor'
+                    . ($totalVendors === 1 ? '' : 's') . ').'
+                : '.')
+            . '</p>';
+        $body .= '<p style="margin:0 0 12px 0;font-size:14px;color:#6b7280;">'
+            . 'This is a notification only — nothing was added to your projects.'
+            . '</p>';
+
+        foreach ($projectSections as $section) {
+            $vendors = $section['vendors'];
+            $body .= '<h3 style="margin:16px 0 8px 0;font-size:16px;">'
+                . htmlspecialchars((string) $section['project_name'], ENT_QUOTES, 'UTF-8')
+                . '</h3>';
+            $body .= '<p style="margin:0 0 8px 0;">'
+                . count($vendors) . ' new vendor' . (count($vendors) === 1 ? '' : 's')
+                . '</p>';
+            $body .= self::buildNewQboVendorList($vendors);
+        }
+
+        $body .= '<p>Open Savvy Saver and sync QuickBooks if you want to add any of these vendors.</p>';
+
+        return \csEmailHtmlWrap(
+            'New QuickBooks vendors — week of ' . $weekLabel,
+            $body,
+            'Log In to Savvy Saver',
+            \csEmailLoginUrl(),
+            'Savvy Saver | New QBO vendors digest',
+            'New QuickBooks vendors found this week'
+        );
+    }
+
+    /**
+     * @param array<int, array{vendor_name:string, account:string, amount:float}> $items
+     */
+    private static function buildNewQboVendorList(array $items): string
+    {
+        if ($items === []) {
+            return '<p style="color:#6b7280;">None</p>';
+        }
+        $html = '<ul>';
+        $shown = array_slice($items, 0, self::LIST_CAP);
+        foreach ($shown as $item) {
+            $account = trim((string) ($item['account'] ?? ''));
+            if ($account === '') {
+                $account = '(No account)';
+            }
+            $html .= '<li>'
+                . htmlspecialchars((string) $item['vendor_name'], ENT_QUOTES, 'UTF-8')
+                . ' — ' . htmlspecialchars($account, ENT_QUOTES, 'UTF-8')
+                . ' — $' . number_format((float) $item['amount'], 2)
+                . '</li>';
+        }
+        $more = count($items) - count($shown);
+        if ($more > 0) {
+            $html .= '<li>+' . $more . ' more</li>';
+        }
+        $html .= '</ul>';
+
+        return $html;
+    }
+
+    private static function formatDigestDateRange(string $startDate, string $endDate): string
+    {
+        try {
+            $start = new DateTimeImmutable($startDate);
+            $end = new DateTimeImmutable($endDate);
+
+            return $start->format('M j, Y') . ' – ' . $end->format('M j, Y');
+        } catch (\Exception $e) {
+            return $startDate . ' – ' . $endDate;
+        }
     }
 
     /**

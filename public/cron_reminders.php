@@ -9,6 +9,7 @@
  *   - Non-monthly charges digest (previous calendar month; sends on days 1–3)
  *   - Cancellation progress digest (weekly on Monday)
  *   - Chat @mention digest (weekly on Friday; last 7 days)
+ *   - New QBO vendors digest (weekly on Tuesday; dry-run last 7 days; no project writes)
  *
  * CLI flags:
  *   --debug         Verbose per-user / GHL response output
@@ -46,7 +47,8 @@ if ($forceResend) {
         echo 'force-resend: cleared renewal_reminder_sent today=' . $cleared['renewal_reminder_sent']
             . ', non_monthly_charges=' . $cleared['non_monthly_charges']
             . ', cancel_progress=' . $cleared['cancel_progress']
-            . ', chat_mentions=' . ($cleared['chat_mentions'] ?? 0) . "\n";
+            . ', chat_mentions=' . ($cleared['chat_mentions'] ?? 0)
+            . ', new_qbo_vendors=' . ($cleared['new_qbo_vendors'] ?? 0) . "\n";
     }
 }
 
@@ -101,6 +103,7 @@ $r2 = \CostSavings\ReminderService::runApproachingRenewalReminders($pdo, $send);
 $r3 = \CostSavings\ReminderService::runNonMonthlyChargesDigest($pdo, $send, $forceResend);
 $r4 = \CostSavings\ReminderService::runCancelProgressDigest($pdo, $send, $forceResend);
 $r5 = \CostSavings\ReminderService::runChatMentionsDigest($pdo, $send, $forceResend);
+$r6 = \CostSavings\ReminderService::runNewQboVendorsDigest($pdo, $send, $forceResend);
 
 if (php_sapi_name() === 'cli') {
     echo 'Deadline reminders sent: ' . $r1['sent'] . "\n";
@@ -196,6 +199,40 @@ if (php_sapi_name() === 'cli') {
             echo "  [{$action}] {$email} mentions={$mentions}";
             if (!empty($row['send_result'])) {
                 echo ' send=' . json_encode($row['send_result']);
+            }
+            echo "\n";
+        }
+    }
+
+    $qboGate = !empty($r6['skipped_weekday_gate']) ? ' (skipped: weekday gate)' : '';
+    echo 'New QBO vendor emails sent: ' . $r6['sent']
+        . ' period=' . ($r6['period_key'] ?? '') . $qboGate . "\n";
+    if (!empty($r6['errors'])) {
+        echo "New QBO vendor errors:\n";
+        foreach ($r6['errors'] as $err) {
+            echo "  - {$err}\n";
+        }
+    }
+    if ($debug && !empty($r6['debug'])) {
+        echo "New QBO vendor debug:\n";
+        foreach ($r6['debug'] as $row) {
+            $action = $row['action'] ?? '';
+            $email = $row['email'] ?? '';
+            $projects = $row['projects'] ?? 0;
+            $vendors = $row['vendors'] ?? 0;
+            $orgId = $row['org_id'] ?? '';
+            $projectId = $row['project_id'] ?? '';
+            echo "  [{$action}]";
+            if ($email !== '') {
+                echo " {$email} projects={$projects} vendors={$vendors}";
+            } elseif ($orgId !== '' || $projectId !== '') {
+                echo " org={$orgId} project={$projectId}";
+            }
+            if (!empty($row['send_result'])) {
+                echo ' send=' . json_encode($row['send_result']);
+            }
+            if (!empty($row['error'])) {
+                echo ' error=' . $row['error'];
             }
             echo "\n";
         }

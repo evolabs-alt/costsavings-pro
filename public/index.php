@@ -2387,14 +2387,17 @@ foreach ($team_members_rows as $tmRow) {
         }
 
         #qboConnectConsentSubmit:disabled,
-        #qboConnectConsentSubmit:disabled:hover {
+        #qboConnectConsentSubmit:disabled:hover,
+        #qboSyncPullBtn:disabled,
+        #qboSyncPullBtn:disabled:hover {
             opacity: 0.5;
             cursor: not-allowed;
             transform: none;
             box-shadow: none;
         }
 
-        #qboConnectConsentSubmit:disabled::before {
+        #qboConnectConsentSubmit:disabled::before,
+        #qboSyncPullBtn:disabled::before {
             display: none;
         }
         
@@ -6250,6 +6253,27 @@ foreach ($team_members_rows as $tmRow) {
                 modal.style.maxHeight = '';
             }
             var appModalZCounter = 10000;
+            function localTodayYmd() {
+                var d = new Date();
+                var y = d.getFullYear();
+                var m = String(d.getMonth() + 1).padStart(2, '0');
+                var day = String(d.getDate()).padStart(2, '0');
+                return y + '-' + m + '-' + day;
+            }
+            function syncProjectWizardDates() {
+                var today = localTodayYmd();
+                var startDateInput = document.getElementById('projectWizardStartDate');
+                if (startDateInput) {
+                    startDateInput.value = today;
+                }
+                var endDateInput = document.getElementById('projectWizardEndDate');
+                if (endDateInput) {
+                    endDateInput.min = today;
+                    if (endDateInput.value && endDateInput.value < today) {
+                        endDateInput.value = '';
+                    }
+                }
+            }
             function openAppModal(overlay) {
                 if (!overlay) return;
                 if (typeof overlay === 'string') {
@@ -6265,6 +6289,9 @@ foreach ($team_members_rows as $tmRow) {
                 document.body.style.overflow = 'hidden';
                 if (overlay.id === 'appModalBulkActions') {
                     updateBulkActionsModalSelectedCount();
+                }
+                if (overlay.id === 'appModalProjectWizard') {
+                    syncProjectWizardDates();
                 }
                 var focusable = overlay.querySelector('button, [href], input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])');
                 if (focusable) focusable.focus();
@@ -7087,6 +7114,20 @@ foreach ($team_members_rows as $tmRow) {
                 return fetch(window.location.href, { method: 'POST', body: fd })
                     .then(function(r) { return r.json(); });
             }
+            function syncQboExpenseVisibilityConsent() {
+                var visibilityCb = document.getElementById('qboExpenseVisibilityConsent');
+                var pullBtn = document.getElementById('qboSyncPullBtn');
+                if (pullBtn) {
+                    pullBtn.disabled = !(visibilityCb && visibilityCb.checked);
+                }
+            }
+            function resetQboExpenseVisibilityConsent() {
+                var visibilityCb = document.getElementById('qboExpenseVisibilityConsent');
+                if (visibilityCb) {
+                    visibilityCb.checked = false;
+                }
+                syncQboExpenseVisibilityConsent();
+            }
             function prepareQboWeeklyImportConsent() {
                 var cb = document.getElementById('qboWeeklyImportConsent');
                 qboWeeklyConsentCheckedOnOpen = false;
@@ -7094,6 +7135,7 @@ foreach ($team_members_rows as $tmRow) {
                 if (cb) {
                     cb.checked = false;
                 }
+                resetQboExpenseVisibilityConsent();
                 var fd = new FormData();
                 fd.append('action', 'qbo_weekly_import_consent_status');
                 return fetch(window.location.href, { method: 'POST', body: fd })
@@ -7244,6 +7286,13 @@ foreach ($team_members_rows as $tmRow) {
                         qboWeeklyConsentDirtyAgree = !!consentCb.checked;
                     });
                 }
+                var visibilityCb = document.getElementById('qboExpenseVisibilityConsent');
+                if (visibilityCb && !visibilityCb.dataset.qboBound) {
+                    visibilityCb.dataset.qboBound = '1';
+                    visibilityCb.addEventListener('change', function() {
+                        syncQboExpenseVisibilityConsent();
+                    });
+                }
                 var syncBtn = document.getElementById('appSyncQboBtn');
                 if (syncBtn && !syncBtn.dataset.qboBound) {
                     syncBtn.dataset.qboBound = '1';
@@ -7290,6 +7339,12 @@ foreach ($team_members_rows as $tmRow) {
                 if (pullBtn && !pullBtn.dataset.qboBound) {
                     pullBtn.dataset.qboBound = '1';
                     pullBtn.addEventListener('click', function() {
+                        var visibilityCb = document.getElementById('qboExpenseVisibilityConsent');
+                        if (!visibilityCb || !visibilityCb.checked) {
+                            showSnackbar('Confirm that expenses will be visible to users before importing', 'error');
+                            syncQboExpenseVisibilityConsent();
+                            return;
+                        }
                         var startEl = document.getElementById('qboSyncStartDate');
                         var endEl = document.getElementById('qboSyncEndDate');
                         var startDate = startEl ? String(startEl.value || '').trim() : '';
@@ -7344,6 +7399,7 @@ foreach ($team_members_rows as $tmRow) {
                             })
                             .finally(function() {
                                 setButtonLoading(pullBtn, false);
+                                syncQboExpenseVisibilityConsent();
                             });
                     });
                 }
@@ -10876,12 +10932,10 @@ foreach ($team_members_rows as $tmRow) {
                 });
                 const projectWizardForm = document.getElementById('projectWizardForm');
                 if (projectWizardForm) {
-                    const startDateInput = document.getElementById('projectWizardStartDate');
-                    if (startDateInput && !startDateInput.value) {
-                        startDateInput.value = new Date().toISOString().slice(0, 10);
-                    }
+                    syncProjectWizardDates();
                     projectWizardForm.addEventListener('submit', function(e) {
                         e.preventDefault();
+                        syncProjectWizardDates();
                         submitProjectWizardForm();
                     });
                 }
@@ -12283,10 +12337,9 @@ foreach ($team_members_rows as $tmRow) {
                     <label>Project name
                         <input type="text" id="projectWizardName" required maxlength="255" placeholder="Example: FY2026 Savings">
                     </label>
-                    <label>Start date
-                        <input type="date" id="projectWizardStartDate" required>
-                    </label>
-                    <label>End date
+                    <p style="margin:0;font-size:14px;line-height:1.4;color:#4B5563;">You're just starting your project today. What date is the deadline for the project?</p>
+                    <input type="hidden" id="projectWizardStartDate" value="">
+                    <label>Completion date
                         <input type="date" id="projectWizardEndDate">
                     </label>
                     <div style="display:flex;gap:8px;justify-content:flex-end;">
@@ -12796,7 +12849,10 @@ foreach ($team_members_rows as $tmRow) {
             </div>
             <div class="app-modal-body">
                 <p style="margin:0 0 12px;font-size:14px;color:#4b5563;line-height:1.5;">Select the date range of transactions to import from QuickBooks Online (max 24 months).</p>
-                <?php echo $expense_visibility_notice_html; ?>
+                <label class="checkbox-label" style="margin:0 0 12px;">
+                    <input type="checkbox" id="qboExpenseVisibilityConsent" required>
+                    <span><?php echo htmlspecialchars($expense_visibility_notice); ?></span>
+                </label>
                 <label class="checkbox-label" style="margin:12px 0 16px;">
                     <input type="checkbox" id="qboWeeklyImportConsent">
                     <span>I agree for Savvy Saver to make automated weekly transactions imports for purposes of notifying me of important updates. This will not affect the project content and setup.</span>
@@ -12813,7 +12869,7 @@ foreach ($team_members_rows as $tmRow) {
                 </div>
                 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
                     <button type="button" class="btn-secondary app-modal-close">Cancel</button>
-                    <button type="button" id="qboSyncPullBtn">Import transactions</button>
+                    <button type="button" id="qboSyncPullBtn" disabled>Retrieve accounts</button>
                 </div>
             </div>
         </div>

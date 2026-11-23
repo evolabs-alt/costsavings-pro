@@ -658,6 +658,19 @@ function migrateProjectSchema(PDO $pdo): void
             CONSTRAINT `fk_qbo_weekly_consent_project` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE CASCADE,
             CONSTRAINT `fk_qbo_weekly_consent_user` FOREIGN KEY (`agreed_by_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `project_qbo_selected_accounts` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `org_id` INT UNSIGNED NOT NULL,
+            `project_id` INT UNSIGNED NOT NULL,
+            `account_name` VARCHAR(512) NOT NULL,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_qbo_selected_acct_project_name` (`project_id`, `account_name`(191)),
+            KEY `idx_qbo_selected_acct_org` (`org_id`),
+            KEY `idx_qbo_selected_acct_project` (`project_id`),
+            CONSTRAINT `fk_qbo_selected_acct_org` FOREIGN KEY (`org_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_qbo_selected_acct_project` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     } catch (PDOException $e) {
         error_log('migrateProjectSchema: ' . $e->getMessage());
     }

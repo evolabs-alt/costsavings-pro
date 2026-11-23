@@ -39,19 +39,19 @@
             var WIZARD_COACH_STEPS = [
                 {
                     selector: 'th.visibility-col',
-                    text: 'All vendors are imported as confidential. Any invited user will not be able to see confidential data.'
+                    text: 'Vendors import as confidential. Invited users can’t see confidential data—set visibility to Public to show the vendor row.'
                 },
                 {
                     selector: 'th.frequency',
-                    text: 'Saver has determined the frequency of vendor payments for you, however we urge you to review to ensure they are correct.'
+                    text: 'Saver estimated each vendor’s payment frequency. Review and adjust as needed.'
                 },
                 {
                     selector: 'th.cost-per-period',
-                    text: 'Please review costs that have been updated by Savvy Saver.'
+                    text: 'Enter the $ amount for the selected frequency. Approximate ranges come from imported historical transactions.'
                 },
                 {
                     selector: '#costCalculatorGrid tbody tr:not([hidden]) .vendor-raw-btn',
-                    text: 'Where the costs are $0, review the transactions for the vendor by clicking here and enter the cost to be used for the vendor.'
+                    text: 'These are this vendor’s QuickBooks transactions. Use them to update the cost and frequency columns.'
                 }
             ];
 
@@ -743,9 +743,8 @@
                 if (form) form.reset();
                 var uploadRadio = document.getElementById('projectWizardDataModeUpload');
                 if (uploadRadio) uploadRadio.checked = true;
-                var startDateInput = document.getElementById('projectWizardStartDate');
-                if (startDateInput && !startDateInput.value) {
-                    startDateInput.value = new Date().toISOString().slice(0, 10);
+                if (typeof syncProjectWizardDates === 'function') {
+                    syncProjectWizardDates();
                 }
             }
 

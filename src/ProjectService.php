@@ -469,6 +469,90 @@ class ProjectService
     }
 
     /**
+     * @return array<int, string>
+     */
+    public static function getQboSelectedAccounts(PDO $pdo, int $orgId, int $projectId): array
+    {
+        if ($orgId <= 0 || $projectId <= 0) {
+            return [];
+        }
+        $st = $pdo->prepare(
+            'SELECT account_name
+             FROM project_qbo_selected_accounts
+             WHERE org_id = ? AND project_id = ?
+             ORDER BY account_name ASC'
+        );
+        $st->execute([$orgId, $projectId]);
+        $out = [];
+        while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+            $name = trim((string) ($row['account_name'] ?? ''));
+            if ($name !== '') {
+                $out[] = $name;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Replace the project's persisted QBO GL account filter (used by weekly new-vendor digest).
+     *
+     * @param array<int, string> $accountNames
+     * @return array{success:bool,error?:string}
+     */
+    public static function replaceQboSelectedAccounts(
+        PDO $pdo,
+        int $orgId,
+        int $projectId,
+        array $accountNames
+    ): array {
+        if ($orgId <= 0 || $projectId <= 0) {
+            return ['success' => false, 'error' => 'Invalid project parameters.'];
+        }
+        $st = $pdo->prepare('SELECT 1 FROM projects WHERE id = ? AND org_id = ? LIMIT 1');
+        $st->execute([$projectId, $orgId]);
+        if (!$st->fetchColumn()) {
+            return ['success' => false, 'error' => 'Project not found.'];
+        }
+
+        $clean = [];
+        foreach ($accountNames as $name) {
+            $trimmed = trim((string) $name);
+            if ($trimmed !== '') {
+                $clean[$trimmed] = true;
+            }
+        }
+        $names = array_keys($clean);
+
+        try {
+            $pdo->beginTransaction();
+            $del = $pdo->prepare(
+                'DELETE FROM project_qbo_selected_accounts WHERE org_id = ? AND project_id = ?'
+            );
+            $del->execute([$orgId, $projectId]);
+            if ($names !== []) {
+                $ins = $pdo->prepare(
+                    'INSERT INTO project_qbo_selected_accounts (org_id, project_id, account_name)
+                     VALUES (?, ?, ?)'
+                );
+                foreach ($names as $accountName) {
+                    $ins->execute([$orgId, $projectId, $accountName]);
+                }
+            }
+            $pdo->commit();
+
+            return ['success' => true];
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('ProjectService::replaceQboSelectedAccounts: ' . $e->getMessage());
+
+            return ['success' => false, 'error' => 'Could not save selected accounts.'];
+        }
+    }
+
+    /**
      * @param array<int,int> $memberIds
      * @return array<int,int>
      */

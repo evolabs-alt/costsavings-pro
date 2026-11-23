@@ -1883,31 +1883,40 @@ function handleImportQboSync(): void
             echo json_encode(['success' => false, 'error' => 'No valid vendor rows to import']);
             exit;
         }
+        $pdo = getDBConnection();
+        $activeProjectId = requireActiveProjectId($pdo);
         $result = importParsedVendorCsvData($summaryRows, $rawRows);
         if (!empty($result['success'])) {
             QboService::deleteSyncCache($cacheKey);
             unset($_SESSION['pending_qbo_sync_key']);
+            if ($activeProjectId !== null) {
+                $acctSave = ProjectService::replaceQboSelectedAccounts(
+                    $pdo,
+                    (int) $_SESSION['org_id'],
+                    $activeProjectId,
+                    $selectedAccounts
+                );
+                if (empty($acctSave['success'])) {
+                    error_log('handleImportQboSync selected accounts: ' . ($acctSave['error'] ?? 'unknown'));
+                }
+            }
             $insertedIds = is_array($result['inserted_ids'] ?? null) ? $result['inserted_ids'] : [];
-            if (count($insertedIds) > 0) {
-                $pdo = getDBConnection();
-                $activeProjectId = requireActiveProjectId($pdo);
-                if ($activeProjectId !== null) {
-                    $snap = ImportSnapshotService::createFromItemIds(
-                        $pdo,
-                        (int) $_SESSION['org_id'],
-                        $activeProjectId,
-                        (int) $_SESSION['user_id'],
-                        $insertedIds,
-                        isset($result['upload_batch_id']) ? (string) $result['upload_batch_id'] : null,
-                        isset($cached['start_date']) ? (string) $cached['start_date'] : null,
-                        isset($cached['end_date']) ? (string) $cached['end_date'] : null
-                    );
-                    if (!empty($snap['success'])) {
-                        $result['snapshot_id'] = (int) ($snap['snapshot_id'] ?? 0);
-                        $result['snapshot_item_count'] = (int) ($snap['item_count'] ?? 0);
-                    } else {
-                        error_log('handleImportQboSync snapshot: ' . ($snap['error'] ?? 'unknown'));
-                    }
+            if (count($insertedIds) > 0 && $activeProjectId !== null) {
+                $snap = ImportSnapshotService::createFromItemIds(
+                    $pdo,
+                    (int) $_SESSION['org_id'],
+                    $activeProjectId,
+                    (int) $_SESSION['user_id'],
+                    $insertedIds,
+                    isset($result['upload_batch_id']) ? (string) $result['upload_batch_id'] : null,
+                    isset($cached['start_date']) ? (string) $cached['start_date'] : null,
+                    isset($cached['end_date']) ? (string) $cached['end_date'] : null
+                );
+                if (!empty($snap['success'])) {
+                    $result['snapshot_id'] = (int) ($snap['snapshot_id'] ?? 0);
+                    $result['snapshot_item_count'] = (int) ($snap['item_count'] ?? 0);
+                } else {
+                    error_log('handleImportQboSync snapshot: ' . ($snap['error'] ?? 'unknown'));
                 }
             }
         }
@@ -2702,10 +2711,7 @@ function handleProjectCreate() {
         exit;
     }
     $projectName = trim((string) ($_POST['project_name'] ?? ''));
-    $startDate = trim((string) ($_POST['start_date'] ?? ''));
-    if ($startDate === '') {
-        $startDate = date('Y-m-d');
-    }
+    $startDate = date('Y-m-d');
     $endDate = trim((string) ($_POST['end_date'] ?? ''));
     $memberIds = parseMemberIds($_POST['member_ids'] ?? []);
     $memberRoles = parseMemberRoles($_POST['member_roles'] ?? []);

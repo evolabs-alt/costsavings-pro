@@ -78,6 +78,39 @@ class VendorRedundancyService
     }
 
     /**
+     * Annual spend for redundancy math. When annual_cost is $0 (typical for
+     * irregular amount ranges), estimate from the midpoint of amount_min/max.
+     *
+     * @param array<string, mixed> $item
+     */
+    private static function effectiveAnnualCost(array $item): float
+    {
+        $annual = (float) ($item['annual_cost'] ?? 0);
+        if ($annual > 0) {
+            return $annual;
+        }
+
+        $min = isset($item['amount_min']) && $item['amount_min'] !== null && $item['amount_min'] !== ''
+            ? (float) $item['amount_min']
+            : null;
+        $max = isset($item['amount_max']) && $item['amount_max'] !== null && $item['amount_max'] !== ''
+            ? (float) $item['amount_max']
+            : null;
+        if ($min === null || $max === null) {
+            return 0.0;
+        }
+
+        $avg = ($min + $max) / 2.0;
+        $frequency = VendorService::normalizeFrequencyValue($item['frequency'] ?? '');
+        $multiplier = FrequencyPatternService::annualMultiplier($frequency);
+        if ($multiplier > 0) {
+            return $avg * $multiplier;
+        }
+
+        return $avg;
+    }
+
+    /**
      * @param array<int, array<string, mixed>> $items
      * @return array<int, array<string, mixed>>
      */
@@ -99,10 +132,13 @@ class VendorRedundancyService
             if (!isset($groups[$norm])) {
                 $groups[$norm] = [];
             }
+            $annual = (float) ($item['annual_cost'] ?? 0);
+            $effective = self::effectiveAnnualCost($item);
             $groups[$norm][] = [
                 'id' => (int) ($item['id'] ?? 0),
                 'vendor_name' => $name,
-                'annual_cost' => (float) ($item['annual_cost'] ?? 0),
+                'annual_cost' => $annual,
+                'effective_annual_cost' => round($effective, 2),
                 'purpose' => VendorPurposeService::stripAiPurposeUiPrefix(
                     (string) ($item['purpose_of_subscription'] ?? $item['notes'] ?? '')
                 ),
@@ -115,13 +151,13 @@ class VendorRedundancyService
                 continue;
             }
             usort($rows, static function ($a, $b) {
-                return ($b['annual_cost'] <=> $a['annual_cost']);
+                return ($b['effective_annual_cost'] <=> $a['effective_annual_cost']);
             });
             $keep = $rows[0];
             $extra = 0.0;
             $extras = [];
             for ($i = 1, $n = count($rows); $i < $n; $i++) {
-                $extra += (float) $rows[$i]['annual_cost'];
+                $extra += (float) $rows[$i]['effective_annual_cost'];
                 $extras[] = $rows[$i];
             }
             $out[] = [
@@ -132,7 +168,10 @@ class VendorRedundancyService
                 'row_ids' => array_map(static fn ($r) => (int) $r['id'], $rows),
                 'row_count' => count($rows),
                 'extra_annual_cost' => round($extra, 2),
-                'total_annual_cost' => round(array_sum(array_map(static fn ($r) => (float) $r['annual_cost'], $rows)), 2),
+                'total_annual_cost' => round(
+                    array_sum(array_map(static fn ($r) => (float) $r['effective_annual_cost'], $rows)),
+                    2
+                ),
                 'rows' => $rows,
                 'extras' => $extras,
             ];
@@ -163,7 +202,7 @@ class VendorRedundancyService
             $context[] = [
                 'id' => (int) ($item['id'] ?? 0),
                 'vendor_name' => $name,
-                'annual_cost' => round((float) ($item['annual_cost'] ?? 0), 2),
+                'annual_cost' => round(self::effectiveAnnualCost($item), 2),
                 'purpose' => substr(
                     VendorPurposeService::stripAiPurposeUiPrefix(
                         (string) ($item['purpose_of_subscription'] ?? $item['notes'] ?? '')
