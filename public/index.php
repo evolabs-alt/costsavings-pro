@@ -9057,10 +9057,17 @@ foreach ($team_members_rows as $tmRow) {
                 let totalSavings = 0;
 
                 rows.forEach(row => {
+                    const status = getRowStatus(row);
+                    if (status === 'renegotiated') {
+                        const savingsIn = row.querySelector('.renegotiated-savings-input');
+                        const savings = savingsIn ? parseMoneyInput(savingsIn.value) : 0;
+                        if (savings > 0) {
+                            totalSavings += savings;
+                        }
+                    }
                     if (!rowContributesToSavings(row)) {
                         return;
                     }
-                    const status = getRowStatus(row);
                     const annualCostText = row.querySelector('.annual-cost-display').textContent;
                     const annualCost = parseFloat(annualCostText.replace(/[^0-9.-]/g, '')) || 0;
 

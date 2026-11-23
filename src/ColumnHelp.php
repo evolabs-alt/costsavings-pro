@@ -72,7 +72,7 @@ final class ColumnHelp
             ],
             'status' => [
                 'title' => 'Status',
-                'html' => '<p class="column-help-intro">Tracks review, cancellation, and renegotiation decisions for each vendor. Savings summaries count rows marked for cancellation or cancelled toward potential and confirmed savings. Renegotiated rows add the annual savings you enter to confirmed savings.</p>'
+                'html' => '<p class="column-help-intro">Tracks review, cancellation, and renegotiation decisions for each vendor. Potential + Confirmed Annual Savings is mark-for-cancellation plus confirmed (cancelled annual cost and renegotiated annual savings). Confirmed Annual Savings is cancelled plus renegotiated only.</p>'
                     . '<dl class="column-help-dl">' . $statusDl . '</dl>',
             ],
             'purpose' => [
