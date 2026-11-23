@@ -60,33 +60,52 @@ class VendorRedundancyService
             ];
         }
 
-        $overlaps = $overlapResult['overlaps'] ?? [];
+        $costByNorm = self::effectiveCostByNormalizedName($items);
+        $rawOverlaps = $overlapResult['overlaps'] ?? [];
+        $overlaps = [];
         $overlapSavings = 0.0;
         $claimed = [];
-        foreach ($overlaps as &$pair) {
+        foreach ($rawOverlaps as $pair) {
+            if (!is_array($pair)) {
+                continue;
+            }
             $a = (string) ($pair['vendor_a'] ?? '');
             $b = (string) ($pair['vendor_b'] ?? '');
             $keyA = VendorService::normalizeVendorName($a);
             $keyB = VendorService::normalizeVendorName($b);
-            $savings = max(0.0, (float) ($pair['suggested_annual_savings'] ?? 0));
             if ($keyA !== '' && isset($claimed[$keyA])) {
-                $savings = 0.0;
+                continue;
             }
             if ($keyB !== '' && isset($claimed[$keyB])) {
-                $savings = 0.0;
+                continue;
             }
-            if ($savings > 0) {
-                if ($keyA !== '') {
-                    $claimed[$keyA] = true;
-                }
-                if ($keyB !== '') {
-                    $claimed[$keyB] = true;
-                }
+
+            $costA = $keyA !== '' ? (float) ($costByNorm[$keyA] ?? 0) : 0.0;
+            $costB = $keyB !== '' ? (float) ($costByNorm[$keyB] ?? 0) : 0.0;
+            // Conservative consolidate estimate: cancel the cheaper vendor (range avg included).
+            $conservative = ($costA > 0 && $costB > 0) ? min($costA, $costB) : 0.0;
+
+            $savings = max(0.0, (float) ($pair['suggested_annual_savings'] ?? 0));
+            if ($savings <= 0 && $conservative > 0) {
+                $savings = $conservative;
+            } elseif ($savings > 0 && $conservative > 0 && $savings > $conservative) {
+                // Cap AI estimate at the smaller effective spend (range averages included).
+                $savings = $conservative;
+            }
+            if ($savings <= 0) {
+                continue;
+            }
+
+            if ($keyA !== '') {
+                $claimed[$keyA] = true;
+            }
+            if ($keyB !== '') {
+                $claimed[$keyB] = true;
             }
             $pair['suggested_annual_savings'] = round($savings, 2);
+            $overlaps[] = $pair;
             $overlapSavings += $savings;
         }
-        unset($pair);
 
         return [
             'success' => true,
@@ -99,7 +118,7 @@ class VendorRedundancyService
 
     /**
      * Annual spend for redundancy math. When annual_cost is $0 (typical for
-     * irregular amount ranges), estimate from the midpoint of amount_min/max.
+     * irregular amount ranges), estimate from the average of amount_min/max.
      *
      * @param array<string, mixed> $item
      */
@@ -116,18 +135,58 @@ class VendorRedundancyService
         $max = isset($item['amount_max']) && $item['amount_max'] !== null && $item['amount_max'] !== ''
             ? (float) $item['amount_max']
             : null;
-        if ($min === null || $max === null) {
+        if ($min === null && $max === null) {
+            return 0.0;
+        }
+        if ($min === null) {
+            $avg = (float) $max;
+        } elseif ($max === null) {
+            $avg = (float) $min;
+        } else {
+            $avg = ($min + $max) / 2.0;
+        }
+        if ($avg <= 0) {
             return 0.0;
         }
 
-        $avg = ($min + $max) / 2.0;
         $frequency = VendorService::normalizeFrequencyValue($item['frequency'] ?? '');
         $multiplier = FrequencyPatternService::annualMultiplier($frequency);
-        if ($multiplier > 0) {
-            return $avg * $multiplier;
+        if ($multiplier <= 0) {
+            // Irregular / unknown cadence: treat as quarterly for savings estimates.
+            $multiplier = FrequencyPatternService::annualMultiplier('quarterly');
         }
 
-        return $avg;
+        return $avg * $multiplier;
+    }
+
+    /**
+     * Highest effective annual cost per normalized vendor name (range averages included).
+     *
+     * @param array<int, array<string, mixed>> $items
+     * @return array<string, float>
+     */
+    private static function effectiveCostByNormalizedName(array $items): array
+    {
+        $out = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $name = trim((string) ($item['vendor_name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $norm = VendorService::normalizeVendorName($name);
+            if ($norm === '') {
+                continue;
+            }
+            $cost = self::effectiveAnnualCost($item);
+            if (!isset($out[$norm]) || $cost > $out[$norm]) {
+                $out[$norm] = $cost;
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -179,6 +238,10 @@ class VendorRedundancyService
             for ($i = 1, $n = count($rows); $i < $n; $i++) {
                 $extra += (float) $rows[$i]['effective_annual_cost'];
                 $extras[] = $rows[$i];
+            }
+            // Only report duplicates that imply real savings (>$0).
+            if ($extra <= 0) {
+                continue;
             }
             $out[] = [
                 'kind' => 'duplicate',

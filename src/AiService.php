@@ -445,8 +445,9 @@ class AiService
             . "Respond with STRICT JSON only. No markdown, no prose.\n"
             . "Schema: {\"overlaps\":[{\"vendor_a\":\"\",\"vendor_b\":\"\",\"reason\":\"\",\"suggested_annual_savings\":0}]}\n"
             . "Rules: compare different vendors only; reason <= 160 chars; suggested_annual_savings is a number "
-            . "(conservative estimate of annual spend that could be cut by consolidating); max 25 pairs; "
-            . "prefer highest-impact pairs.\n\nVendors:\n" . implode("\n", $lines);
+            . "(conservative estimate of annual spend that could be cut by consolidating — use the smaller "
+            . "vendor annual cost when unsure); set suggested_annual_savings > 0 for every pair you include; "
+            . "max 25 pairs; prefer highest-impact pairs.\n\nVendors:\n" . implode("\n", $lines);
 
         $maxTokens = defined('AI_MAX_TOKENS') ? max(1200, (int) AI_MAX_TOKENS) : 1800;
         $messages = [

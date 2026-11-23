@@ -500,6 +500,7 @@
 
                 if (showDups) {
                     (data.duplicates || []).forEach(function(d) {
+                        if ((Number(d.extra_annual_cost) || 0) <= 0) return;
                         (d.row_ids || []).forEach(function(id) {
                             var n = parseInt(id, 10) || 0;
                             if (n > 0) idSet[String(n)] = true;
@@ -508,6 +509,7 @@
                 }
                 if (showOverlaps) {
                     (data.overlaps || []).forEach(function(o) {
+                        if ((Number(o.suggested_annual_savings) || 0) <= 0) return;
                         var a = normalizeVendorNameClient(o.vendor_a);
                         var b = normalizeVendorNameClient(o.vendor_b);
                         if (a) nameSet[a] = true;
@@ -588,20 +590,24 @@
                 var html = '';
                 if (showDups) {
                     (data.duplicates || []).forEach(function(d) {
+                        var extra = Number(d.extra_annual_cost) || 0;
+                        if (extra <= 0) return;
                         html += '<div class="wizard-review-row wizard-review-row--dup">'
                             + '<div class="wizard-review-row__title">Duplicate: ' + escapeHtml(d.vendor_name || '') + '</div>'
                             + '<div class="wizard-review-row__meta">' + (d.row_count || 0)
-                            + ' rows · extra annual ' + formatMoney(d.extra_annual_cost || 0) + '</div>'
+                            + ' rows · extra annual ' + formatMoney(extra) + '</div>'
                             + '</div>';
                     });
                 }
                 if (showOverlaps) {
                     (data.overlaps || []).forEach(function(o) {
+                        var save = Number(o.suggested_annual_savings) || 0;
+                        if (save <= 0) return;
                         html += '<div class="wizard-review-row wizard-review-row--overlap">'
                             + '<div class="wizard-review-row__title">' + escapeHtml(o.vendor_a || '')
                             + ' ↔ ' + escapeHtml(o.vendor_b || '') + '</div>'
                             + '<div class="wizard-review-row__meta">' + escapeHtml(o.reason || 'Potential overlap')
-                            + ' · potential save ' + formatMoney(o.suggested_annual_savings || 0) + '</div>'
+                            + ' · potential save ' + formatMoney(save) + '</div>'
                             + '</div>';
                     });
                 }
