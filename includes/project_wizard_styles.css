@@ -273,6 +273,16 @@ body.wizard-active .snackbar {
     color: #6b7280;
     font-size: 14px;
 }
+.wizard-review-disclaimer {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    color: #6b7280;
+    font-size: 12px;
+    line-height: 1.45;
+}
 
 #appModalVendorRedundancy .app-modal {
     max-width: 720px;

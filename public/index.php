@@ -12510,6 +12510,9 @@ foreach ($team_members_rows as $tmRow) {
                 <p id="wizardReviewMessage" style="margin:0 0 12px;font-size:14px;color:#374151;line-height:1.5;"></p>
                 <div id="wizardReviewSummary" class="wizard-review-summary"></div>
                 <div id="wizardReviewList" class="wizard-review-list"></div>
+                <p id="wizardReviewDisclaimer" class="wizard-review-disclaimer">
+                    Savings estimates only include amounts greater than $0. When a vendor amount is a range, the midpoint is used. Vendors with an irregular payment frequency are treated as quarterly for these estimates.
+                </p>
                 <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px;">
                     <button type="button" id="wizardReviewContinueBtn">Continue</button>
                 </div>
