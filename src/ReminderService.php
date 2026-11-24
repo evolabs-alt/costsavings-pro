@@ -58,7 +58,11 @@ class ReminderService
             $sql = "SELECT cci.*, u.email AS mgr_email, u.first_name AS mgr_first_name,
                            u.deadline_reminders_enabled AS u_rem
                     FROM cost_calculator_items cci
-                    LEFT JOIN users u ON u.id = cci.manager_user_id
+                    INNER JOIN user_organizations uo
+                      ON uo.user_id = cci.manager_user_id
+                     AND uo.org_id = cci.org_id
+                     AND uo.is_disabled = 0
+                    INNER JOIN users u ON u.id = cci.manager_user_id
                     WHERE cci.org_id = ?
                       AND (
                         cci.status = 'mark_for_cancellation'
@@ -589,6 +593,7 @@ class ReminderService
                         m.username_snapshot,
                         m.project_id,
                         m.vendor_item_id,
+                        COALESCE(cci.org_id, p.org_id) AS org_id,
                         COALESCE(
                             NULLIF(TRIM(author.display_name), \'\'),
                             NULLIF(TRIM(author.username), \'\'),
@@ -602,9 +607,14 @@ class ReminderService
                  LEFT JOIN cost_calculator_items cci ON cci.id = m.vendor_item_id
                  LEFT JOIN projects p ON p.id = m.project_id
                  LEFT JOIN users author ON author.id = m.user_id
+                 INNER JOIN user_organizations uo
+                   ON uo.user_id = t.mentioned_user_id
+                  AND uo.org_id = COALESCE(cci.org_id, p.org_id)
+                  AND uo.is_disabled = 0
                  WHERE m.created_at >= ?
                    AND m.is_action_log = 0
                    AND m.user_id <> t.mentioned_user_id
+                   AND COALESCE(cci.org_id, p.org_id) IS NOT NULL
                  ORDER BY m.created_at ASC, m.id ASC'
             );
             $st->execute([$since]);
